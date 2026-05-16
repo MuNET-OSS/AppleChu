@@ -15,7 +15,7 @@ use crate::util::api::{Api, ChuModAPI, ChuModInfo, API};
 
 const NAME: &[u8] = b"AppleChu\0";
 const VERSION: &[u8] = b"1.0.0\0";
-const MIN_LOADER_VERSION: &[u8] = b"3.0.0\0";
+const MIN_LOADER_VERSION: &[u8] = b"1.0.0\0";
 
 #[no_mangle]
 pub extern "C" fn chumod_name() -> *const c_char {
