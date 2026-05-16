@@ -168,11 +168,11 @@ label = { zh = "绕过 AppUser 检测", en = "Bypass AppUser check" }
 
 [[config.sections]]
 id = "ExitConfirm"
-default_enabled = true
+always_enabled = true
 label = { zh = "退出确认对话框", en = "Exit confirmation dialog" }
 
 [[config.sections]]
 id = "DeviceLostFix"
-default_enabled = true
+always_enabled = true
 label = { zh = "切换窗口闪退修复", en = "Device lost fix" }
-description = { zh = "Alt+Tab 后防止游戏崩溃（后续版本实现）", en = "Prevent crash after Alt+Tab (planned)" }
+description = { zh = "Alt+Tab 后防止游戏崩溃", en = "Prevent crash after Alt+Tab" }
