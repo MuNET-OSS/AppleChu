@@ -1,49 +1,52 @@
 # AppleChu
 
-CHUNITHM mod powered by [ChuModLoader](https://github.com/MuNET-OSS/ChuModLoader).
+[English](README.en.md) | 简体中文
 
-## Installation
+基于 [ChuModLoader](https://github.com/MuNET-OSS/ChuModLoader) 的 CHUNITHM Mod。
 
-1. Install ChuModLoader (place `version.dll` next to `chusanApp.exe`)
-2. Copy `AppleChu.dll` to `mods/`
-3. Launch the game — `AppleChu.toml` will be generated automatically
-4. Edit `AppleChu.toml` to configure features
+## 安装
 
-## Features
+1. 安装 ChuModLoader（将 `version.dll` 放到 `chusanApp.exe` 旁边）
+2. 将 `AppleChu.dll` 复制到 `mods/` 目录
+3. 启动游戏，`AppleChu.toml` 会自动生成
+4. 编辑 `AppleChu.toml` 配置功能
 
-- Skip startup screen
-- Free play
-- Disable song selection timer
-- Skip map animation
-- Unlock track limit (custom max tracks)
-- Custom scene timers
-- All timers 999
-- Unlock 120fps
-- Bypass 1080p/120Hz/AppUser checks
-- Force shared audio / 2ch output
-- Disable network encryption / TLS
-- Custom version text
-- Custom FREE PLAY text
-- Autoplay with smart score blocking
-- Exit confirmation dialog
-- DPI awareness
+## 功能
 
-## Configuration
+- 跳过启动画面
+- 免费游玩
+- 禁用选歌计时器
+- 跳过地图动画
+- 解锁游玩曲数上限（自定义最大曲数）
+- 自定义各场景计时器
+- 所有计时器 999
+- 解锁 120fps
+- 绕过 1080P/120Hz/AppUser 检测
+- 强制共享音频 / 双声道输出
+- 关闭网络加密 / TLS
+- 自定义版本号文本
+- 自定义 FREE PLAY 文本
+- 自动游玩（智能屏蔽成绩）
+- 退出确认对话框
+- DPI 感知
+- 切换窗口闪退修复 (D3D9)
 
-Edit `AppleChu.toml` in the game directory. Uncomment a `[Section]` to enable it.
+## 配置
 
-Use [ChuChartManager](https://github.com/MuNET-OSS/ChuChartManager) for graphical configuration.
+编辑游戏目录下的 `AppleChu.toml`，取消注释 `[Section]` 即可启用功能。
 
-## Build
+使用 [ChuChartManager](https://github.com/MuNET-OSS/ChuChartManager) 可图形化编辑配置。
 
-Requires Rust nightly with `i686-pc-windows-msvc` target:
+## 构建
+
+需要 Rust nightly + i686-pc-windows-msvc：
 
 ```bash
 cargo build --release
 ```
 
-Output: `target/i686-pc-windows-msvc/release/AppleChu.dll`
+输出: `target/i686-pc-windows-msvc/release/AppleChu.dll`
 
-## License
+## 许可证
 
 Apache-2.0
