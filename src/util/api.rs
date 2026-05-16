@@ -109,6 +109,7 @@ impl Api {
             .is_some_and(|func| unsafe { func(addr, buf.as_mut_ptr().cast(), size) == 0 })
     }
 
+    #[allow(dead_code)]
     pub fn mem_fill(&self, addr: usize, value: u8, size: u32) -> bool {
         self.raw()
             .and_then(|api| api.mem_fill)

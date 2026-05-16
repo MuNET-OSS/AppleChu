@@ -1,3 +1,5 @@
+#![allow(non_snake_case, clippy::manual_c_str_literals)]
+
 mod config;
 mod d3d9;
 mod hooks;

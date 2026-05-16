@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crate::config::Config;
 use crate::util::api::Api;
 
-type WndProc = unsafe extern "system" fn(usize, u32, usize, isize) -> isize;
 type TaskDialogIndirectFn = unsafe extern "system" fn(*const TaskDialogConfig, *mut i32, *mut i32, *mut i32) -> i32;
 
 static ORIGINAL_WNDPROC: AtomicUsize = AtomicUsize::new(0);
@@ -21,7 +20,6 @@ const MB_OKCANCEL: u32 = 0x0000_0001;
 const MB_DEFBUTTON2: u32 = 0x0000_0100;
 const IDOK: i32 = 1;
 const TDF_ALLOW_DIALOG_CANCELLATION: u32 = 0x0008;
-const TDCBF_CANCEL_BUTTON: u32 = 0x0008;
 const TASKDIALOG_BUTTON_EXIT: i32 = 1001;
 const GWL_WNDPROC: i32 = -4;
 
@@ -35,7 +33,6 @@ extern "system" {
         flags: u32,
         id: *mut u32,
     ) -> usize;
-    fn GetModuleHandleA(module_name: *const u8) -> usize;
     fn GetProcAddress(module: usize, proc_name: *const u8) -> *const c_void;
     fn Sleep(ms: u32);
     fn CreateActCtxA(ctx: *const ActCtxA) -> usize;
@@ -58,12 +55,10 @@ struct ActCtxA {
     h_module: usize,
 }
 
-const ACTCTX_FLAG_ASSEMBLY_DIRECTORY_VALID: u32 = 0x004;
 const INVALID_HANDLE_VALUE: usize = usize::MAX;
 
 #[link(name = "user32")]
 extern "system" {
-    fn FindWindowA(class_name: *const u8, window_name: *const u8) -> usize;
     fn CallWindowProcA(prev_wnd_func: usize, hwnd: usize, msg: u32, wp: usize, lp: isize) -> isize;
     fn MessageBoxW(hwnd: usize, text: *const u16, caption: *const u16, flags: u32) -> i32;
     fn PostMessageA(hwnd: usize, msg: u32, wp: usize, lp: isize) -> i32;
@@ -151,7 +146,7 @@ unsafe extern "system" fn wndproc_hook_thread(_param: *mut c_void) -> u32 {
         return 0;
     }
 
-    let old = SetWindowLongA(hwnd, GWL_WNDPROC, confirming_wndproc as i32);
+    let old = SetWindowLongA(hwnd, GWL_WNDPROC, confirming_wndproc as *const () as i32);
     if old != 0 {
         ORIGINAL_WNDPROC.store(old as usize, Ordering::SeqCst);
     }

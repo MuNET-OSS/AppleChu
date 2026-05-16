@@ -14,7 +14,6 @@ static mut STATE_PTR: usize = 0;
 static mut DEMO_OFF: u32 = 0;
 static mut PRESET_OFF: u32 = 0;
 static mut OSD_HWND: usize = 0;
-static mut OSD_HIDE_TICK: u32 = 0;
 static mut JUDGE_ADDR: usize = 0;
 static mut ORIG_JUDGE: usize = 0;
 
@@ -29,7 +28,6 @@ extern "system" {
         id: *mut u32,
     ) -> usize;
     fn Sleep(ms: u32);
-    fn GetTickCount() -> u32;
     fn GetModuleHandleA(module_name: *const u8) -> usize;
 }
 
@@ -70,7 +68,6 @@ extern "system" {
 #[link(name = "gdi32")]
 extern "system" {
     fn SetBkMode(hdc: usize, mode: i32) -> i32;
-    fn SetBkColor(hdc: usize, color: u32) -> u32;
     fn SetTextColor(hdc: usize, color: u32) -> u32;
     fn CreateFontA(
         h: i32,

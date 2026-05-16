@@ -115,6 +115,7 @@ pub fn patch_bytes(api: &Api, addr: usize, expected: &[u8], patch: &[u8]) -> Pat
     }
 }
 
+#[allow(dead_code)]
 pub fn nop_bytes(api: &Api, addr: usize, expected: &[u8], count: usize) -> PatchResult {
     patch_bytes(api, addr, expected, &vec![0x90; count])
 }
