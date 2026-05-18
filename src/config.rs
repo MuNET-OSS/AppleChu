@@ -56,9 +56,7 @@ Version = "1"
 
 ## 自动游玩
 ## 只屏蔽成绩数据，角色/设置/地图进度正常保存
-#[Autoplay]
-#block_playlog = true
-#block_music_detail = true
+[Autoplay]
 
 ## 解锁 120fps
 [Unlock120fps]
@@ -117,7 +115,12 @@ impl Config {
         self.sections
             .get(section)
             .and_then(toml::Value::as_table)
-            .is_some_and(|table| !table.get("Disabled").and_then(toml::Value::as_bool).unwrap_or(false))
+            .is_some_and(|table| {
+                !table
+                    .get("Disabled")
+                    .and_then(toml::Value::as_bool)
+                    .unwrap_or(false)
+            })
     }
 
     pub fn get_int(&self, section: &str, key: &str, default: i64) -> i64 {

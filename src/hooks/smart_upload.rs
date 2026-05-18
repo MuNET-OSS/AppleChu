@@ -1,25 +1,15 @@
 use std::ffi::c_void;
 
-use crate::config::Config;
 use crate::hooks::autoplay;
 use crate::util::api::Api;
 
 static mut API_HANDLE: Option<Api> = None;
 static mut UPSERT_ADDR: usize = 0;
 static mut ORIG_UPSERT: usize = 0;
-static mut BLOCK_WHEN_AUTOPLAY: bool = false;
 
-pub fn init(api: &Api, config: &Config) {
-    let block_playlog = config.get_bool("Autoplay", "block_playlog", true);
-    let block_music_detail = config.get_bool("Autoplay", "block_music_detail", true);
-    if !block_playlog && !block_music_detail {
-        api.log_info("智能成绩屏蔽未启用: block_playlog/block_music_detail 均为 false");
-        return;
-    }
-
+pub fn init(api: &Api) {
     unsafe {
         API_HANDLE = Some(*api);
-        BLOCK_WHEN_AUTOPLAY = true;
     }
 
     let upsert = find_upsert_function(api, api.text_base(), api.text_size(), api.game_base(), api.game_size());
@@ -60,7 +50,7 @@ pub fn shutdown() {
 }
 
 unsafe extern "C" fn hooked_upsert(a: *mut c_void, b: *mut c_void, c: *mut c_void) {
-    if BLOCK_WHEN_AUTOPLAY && (autoplay::is_enabled() || autoplay::was_used()) {
+    if autoplay::is_enabled() || autoplay::was_used() {
         if let Some(api) = API_HANDLE {
             api.log_info("成绩屏蔽: 本次游玩使用过 autoplay，已阻止上传");
         }

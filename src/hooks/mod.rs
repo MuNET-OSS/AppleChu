@@ -7,7 +7,7 @@ use crate::util::api::Api;
 pub fn init_all(api: &Api, config: &Config) {
     if config.is_enabled("Autoplay") {
         autoplay::init(api, config);
-        smart_upload::init(api, config);
+        smart_upload::init(api);
     }
 }
 

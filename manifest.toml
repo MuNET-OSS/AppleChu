@@ -100,19 +100,9 @@ label = { zh = "所有计时器 999", en = "All timers 999" }
 
 [[config.sections]]
 id = "Autoplay"
-default_enabled = false
+default_enabled = true
 label = { zh = "自动游玩", en = "Autoplay" }
 description = { zh = "只屏蔽成绩数据，角色/设置/地图进度正常保存", en = "Only blocks score data, settings/progress saved normally" }
-    [[config.sections.entries]]
-    key = "block_playlog"
-    type = "bool"
-    default = true
-    label = { zh = "屏蔽游玩记录", en = "Block playlog" }
-    [[config.sections.entries]]
-    key = "block_music_detail"
-    type = "bool"
-    default = true
-    label = { zh = "屏蔽成绩详情", en = "Block music detail" }
 
 [[config.sections]]
 id = "Unlock120fps"
