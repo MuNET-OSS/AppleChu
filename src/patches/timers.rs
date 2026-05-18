@@ -10,7 +10,7 @@ pub fn apply(api: &Api, config: &Config) {
         &PatchDef {
             name: "禁用选歌计时器",
             section: "DisableTimer",
-            pattern: Some("32 C0"),
+            pattern: Some("32 C0 C3"),
             pattern_offset: 0,
             known_offsets: &[0x3D4110],
             expected: &[0x32, 0xC0],

@@ -22,8 +22,8 @@ pub fn apply(api: &Api, config: &Config) {
         &PatchDef {
             name: "强制双声道输出",
             section: "Force2chAudio",
-            pattern: Some("75 3F"),
-            pattern_offset: 0,
+            pattern: Some("83 C4 04 85 C0 75 3F 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? B8 02 00 00 00"),
+            pattern_offset: 5,
             known_offsets: &[0xE2944B],
             expected: &[0x75, 0x3F],
             patch: &[0x90, 0x90],

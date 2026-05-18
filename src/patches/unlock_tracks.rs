@@ -10,8 +10,8 @@ pub fn apply(api: &Api, config: &Config) {
         &PatchDef {
             name: "解锁曲数上限",
             section: "UnlockTracks",
-            pattern: None,
-            pattern_offset: 0,
+            pattern: Some("B8 09 00 00 00 3B F0 5F 0F 47"),
+            pattern_offset: 10,
             known_offsets: &[0x6F8B82],
             expected: &[0xF0],
             patch: &[0xC0],

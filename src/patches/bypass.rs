@@ -21,8 +21,8 @@ pub fn apply(api: &Api, config: &Config) {
         &PatchDef {
             name: "绕过 AppUser 检测",
             section: "BypassAppUser",
-            pattern: None,
-            pattern_offset: 0,
+            pattern: Some("83 7C 24 04 00 75"),
+            pattern_offset: 5,
             known_offsets: &[0x89075],
             expected: &[0x75],
             patch: &[0xEB],

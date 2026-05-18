@@ -9,8 +9,8 @@ pub fn apply(api: &Api, config: &Config) {
         &PatchDef {
             name: "免费游玩",
             section: "FreePlay",
-            pattern: Some("3C 01"),
-            pattern_offset: 0,
+            pattern: Some("E8 ?? ?? ?? ?? 3C 01 75 ?? 6A 09"),
+            pattern_offset: 5,
             known_offsets: &[0x3DF4E4],
             expected: &[0x3C, 0x01],
             patch: &[0x38, 0xC0],

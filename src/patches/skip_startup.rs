@@ -9,8 +9,8 @@ pub fn apply(api: &Api, config: &Config) {
         &PatchDef {
             name: "跳过启动画面",
             section: "SkipStartup",
-            pattern: None,
-            pattern_offset: 0,
+            pattern: Some("6A 07 8B CF E8 ?? ?? ?? ?? 6A 01 E8 ?? ?? ?? ?? 8B 35"),
+            pattern_offset: 9,
             known_offsets: &[0x99B21A],
             expected: &[0x6A, 0x01],
             patch: &[0x6A, 0x04],
