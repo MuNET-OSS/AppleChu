@@ -7,24 +7,20 @@ pub fn apply(api: &Api, config: &Config) {
         return;
     }
 
-    let patch_name = if config.get_bool("Unlock120fps", "force", false) {
-        "强制解锁 120fps"
-    } else {
-        "解锁 120fps"
-    };
-
-    // v2.45 的 120fps 解锁与 120Hz 检测绕过共用同一处分支补丁。
+    // B9 78 00 00 00 B8 3C 00 00 00 0F 45 C1
+    // = MOV ECX,120 / MOV EAX,60 / CMOVNZ EAX,ECX
+    // 改 MOV EAX,60 → MOV EAX,120 强制 120fps
     apply_patch(
         api,
         config,
         &PatchDef {
-            name: patch_name,
+            name: "解锁 120fps",
             section: "Unlock120fps",
-            pattern: Some("85 C0 74 3F ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 81 BC 24 34 02 00 00 80 07 00 00"),
-            pattern_offset: 0,
+            pattern: Some("B9 78 00 00 00 B8 3C 00 00 00 0F 45 C1"),
+            pattern_offset: 5,
             known_offsets: &[],
-            expected: &[0x85, 0xC0, 0x74, 0x3F],
-            patch: &[0xEB, 0x30, 0xEB, 0x2E],
+            expected: &[0xB8, 0x3C, 0x00, 0x00, 0x00],
+            patch: &[0xB8, 0x78, 0x00, 0x00, 0x00],
         },
     );
 }

@@ -130,13 +130,6 @@ impl Config {
             .unwrap_or(default)
     }
 
-    pub fn get_bool(&self, section: &str, key: &str, default: bool) -> bool {
-        self.section(section)
-            .and_then(|table| table.get(key))
-            .and_then(toml::Value::as_bool)
-            .unwrap_or(default)
-    }
-
     pub fn get_string(&self, section: &str, key: &str, default: &str) -> String {
         self.section(section)
             .and_then(|table| table.get(key))
