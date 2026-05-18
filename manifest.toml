@@ -13,7 +13,7 @@ game_versions = ["2.45"]
 groups = [
     { id = "common", label = { zh = "常用", en = "Common" }, sections = ["General", "SkipStartup", "FreePlay", "DisableTimer", "SkipMapAnimation"] },
     { id = "gameplay", label = { zh = "游戏", en = "Gameplay" }, sections = ["UnlockTracks", "CustomTimers", "AllTimers999", "Autoplay"] },
-    { id = "display", label = { zh = "显示", en = "Display" }, sections = ["Unlock120fps", "Bypass1080p", "Bypass120hz", "DpiAware"] },
+    { id = "display", label = { zh = "显示", en = "Display" }, sections = ["Unlock120fps", "Bypass1080p", "Bypass120hz", "DpiAware", "FpsDisplay", "FrameLock"] },
     { id = "audio", label = { zh = "音频", en = "Audio" }, sections = ["ForceSharedAudio", "Force2chAudio"] },
     { id = "network", label = { zh = "网络", en = "Network" }, sections = ["DisableEncryption", "DisableTLS"] },
     { id = "compatibility", label = { zh = "兼容", en = "Compatibility" }, sections = ["BypassAppUser"] },
@@ -166,3 +166,22 @@ id = "DeviceLostFix"
 always_enabled = true
 label = { zh = "切换窗口闪退修复", en = "Device lost fix" }
 description = { zh = "Alt+Tab 后防止游戏崩溃", en = "Prevent crash after Alt+Tab" }
+
+[[config.sections]]
+id = "FpsDisplay"
+default_enabled = false
+label = { zh = "FPS 显示", en = "FPS display" }
+description = { zh = "需要 d3d9 proxy", en = "Requires d3d9.dll proxy" }
+
+[[config.sections]]
+id = "FrameLock"
+default_enabled = false
+label = { zh = "帧率锁定", en = "Frame lock" }
+description = { zh = "需要 d3d9 proxy", en = "Requires d3d9.dll proxy" }
+    [[config.sections.entries]]
+    key = "fps"
+    type = "int"
+    default = 60
+    min = 1
+    max = 240
+    label = { zh = "目标帧率", en = "Target FPS" }

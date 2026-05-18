@@ -93,6 +93,13 @@ Version = "1"
 
 ## 切换窗口闪退修复
 [DeviceLostFix]
+
+## FPS 显示（需要 d3d9 proxy）
+#[FpsDisplay]
+
+## 帧率锁定（需要 d3d9 proxy）
+#[FrameLock]
+#fps = 60
 "##;
 
 impl Config {
