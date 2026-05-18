@@ -11,7 +11,7 @@ pub fn apply(api: &Api, config: &Config) {
             section: "FreePlay",
             pattern: Some("E8 ?? ?? ?? ?? 3C 01 75 ?? 6A 09"),
             pattern_offset: 5,
-            known_offsets: &[0x3DF4E4],
+            known_offsets: &[],
             expected: &[0x3C, 0x01],
             patch: &[0x38, 0xC0],
         },

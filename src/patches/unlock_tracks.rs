@@ -1,7 +1,8 @@
 use crate::config::Config;
 use crate::patch_engine::{apply_patch, PatchDef};
 use crate::util::api::Api;
-use crate::util::memory::{file_offset_to_va, write_value};
+use crate::util::memory::write_value;
+use crate::util::pattern;
 
 pub fn apply(api: &Api, config: &Config) {
     apply_patch(
@@ -12,7 +13,7 @@ pub fn apply(api: &Api, config: &Config) {
             section: "UnlockTracks",
             pattern: Some("B8 09 00 00 00 3B F0 5F 0F 47"),
             pattern_offset: 10,
-            known_offsets: &[0x6F8B82],
+            known_offsets: &[],
             expected: &[0xF0],
             patch: &[0xC0],
         },
@@ -26,13 +27,14 @@ fn apply_max_tracks(api: &Api, config: &Config) {
     }
 
     let max_tracks = config.get_int("UnlockTracks", "max", 3) as i32;
-    let addr = file_offset_to_va(api, 0x3EE331);
+    // B8 03 00 00 00 C3 = MOV EAX, 3; RET
+    let addr = pattern::scan(api, "B8 03 00 00 00 C3");
     if addr == 0 {
-        api.log_warn("最大曲数地址转换失败");
+        api.log_warn("最大曲数: 未找到目标函数");
         return;
     }
 
-    if write_value(api, addr, max_tracks) {
+    if write_value(api, addr + 1, max_tracks) {
         api.log_info(&format!("补丁已应用: 最大曲数 = {}", max_tracks));
     } else {
         api.log_warn("补丁写入失败: 最大曲数");

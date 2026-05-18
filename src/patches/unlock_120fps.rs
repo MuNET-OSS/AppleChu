@@ -22,7 +22,7 @@ pub fn apply(api: &Api, config: &Config) {
             section: "Unlock120fps",
             pattern: Some("85 C0 74 3F ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 81 BC 24 34 02 00 00 80 07 00 00"),
             pattern_offset: 0,
-            known_offsets: &[0x15810E],
+            known_offsets: &[],
             expected: &[0x85, 0xC0, 0x74, 0x3F],
             patch: &[0xEB, 0x30, 0xEB, 0x2E],
         },

@@ -11,7 +11,7 @@ pub fn apply(api: &Api, config: &Config) {
             section: "SkipStartup",
             pattern: Some("6A 07 8B CF E8 ?? ?? ?? ?? 6A 01 E8 ?? ?? ?? ?? 8B 35"),
             pattern_offset: 9,
-            known_offsets: &[0x99B21A],
+            known_offsets: &[],
             expected: &[0x6A, 0x01],
             patch: &[0x6A, 0x04],
         },

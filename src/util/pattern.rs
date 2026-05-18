@@ -11,6 +11,11 @@ pub fn scan_range(api: &Api, start: usize, size: u32, pattern_str: &str) -> usiz
     api.aob_scan(start, size, &pattern, &mask)
 }
 
+pub fn scan_bytes(api: &Api, bytes: &[u8]) -> usize {
+    let mask = "x".repeat(bytes.len());
+    api.aob_scan(api.game_base(), api.game_size(), bytes, &mask)
+}
+
 fn parse_pattern(pattern_str: &str) -> Option<(Vec<u8>, String)> {
     let mut pattern = Vec::new();
     let mut mask = String::new();
