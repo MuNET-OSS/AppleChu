@@ -2,6 +2,13 @@ use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::hooks::autoplay::{
+    BeginPaint, CreateFontA, CreateSolidBrush, CreateWindowExA, DefWindowProcA, DeleteObject,
+    DrawTextW, EndPaint, FillRect, GetClientRect, GetModuleHandleA, InvalidateRect, RegisterClassA,
+    SelectObject, SetBkMode, SetLayeredWindowAttributes, SetTextColor, ShowWindow,
+};
+use crate::hooks::autoplay::{PaintStruct, Rect, WndClassA};
+
 const WS_POPUP: u32 = 0x80000000;
 const WS_EX_TOPMOST: u32 = 0x00000008;
 const WS_EX_LAYERED: u32 = 0x00080000;
@@ -20,39 +27,6 @@ const DT_SINGLELINE: u32 = 0x20;
 const OSD_WIDTH: i32 = 140;
 const OSD_HEIGHT: i32 = 30;
 const OSD_MARGIN: i32 = 12;
-
-#[repr(C)]
-struct WndClassA {
-    style: u32,
-    wnd_proc: unsafe extern "system" fn(usize, u32, usize, isize) -> isize,
-    cls_extra: i32,
-    wnd_extra: i32,
-    instance: usize,
-    icon: usize,
-    cursor: usize,
-    background: usize,
-    menu_name: *const u8,
-    class_name: *const u8,
-}
-
-#[repr(C)]
-struct PaintStruct {
-    hdc: *mut c_void,
-    erase: i32,
-    rc_paint: Rect,
-    restore: i32,
-    inc_update: i32,
-    reserved: [u8; 32],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct Rect {
-    left: i32,
-    top: i32,
-    right: i32,
-    bottom: i32,
-}
 
 static mut OSD_HWND: usize = 0;
 static mut INITIALIZED: bool = false;
@@ -126,7 +100,6 @@ unsafe extern "system" fn osd_wndproc(hwnd: usize, msg: u32, wp: usize, lp: isiz
         let mut rect: Rect = std::mem::zeroed();
         GetClientRect(hwnd, &mut rect);
 
-        // BGR: R=62 G=62 B=66 → 0x423E3E
         let bg_brush = CreateSolidBrush(0x00423E3E);
         FillRect(hdc, &rect, bg_brush);
         DeleteObject(bg_brush);
@@ -158,39 +131,4 @@ unsafe extern "system" fn osd_wndproc(hwnd: usize, msg: u32, wp: usize, lp: isiz
 extern "system" {
     fn QueryPerformanceCounter(count: *mut i64) -> i32;
     fn QueryPerformanceFrequency(freq: *mut i64) -> i32;
-    fn GetModuleHandleA(name: *const u8) -> usize;
-}
-
-#[link(name = "user32")]
-extern "system" {
-    fn RegisterClassA(wc: *const WndClassA) -> u16;
-    fn CreateWindowExA(
-        ex_style: u32, class: *const u8, name: *const u8, style: u32,
-        x: i32, y: i32, w: i32, h: i32,
-        parent: usize, menu: usize, instance: usize, param: *const u8,
-    ) -> usize;
-    fn ShowWindow(hwnd: usize, cmd: i32) -> i32;
-    fn SetLayeredWindowAttributes(hwnd: usize, key: u32, alpha: u8, flags: u32) -> i32;
-    fn DefWindowProcA(hwnd: usize, msg: u32, wp: usize, lp: isize) -> isize;
-    fn BeginPaint(hwnd: usize, ps: *mut PaintStruct) -> *mut c_void;
-    fn EndPaint(hwnd: usize, ps: *const PaintStruct) -> i32;
-    fn GetClientRect(hwnd: usize, rect: *mut Rect) -> i32;
-    fn InvalidateRect(hwnd: usize, rect: *const c_void, erase: i32) -> i32;
-}
-
-#[link(name = "gdi32")]
-extern "system" {
-    fn CreateSolidBrush(color: u32) -> *mut c_void;
-    fn CreateFontA(
-        h: i32, w: i32, esc: i32, orient: i32, weight: i32,
-        italic: u32, underline: u32, strikeout: u32, charset: u32,
-        out_prec: u32, clip_prec: u32, quality: u32, pitch: u32,
-        face: *const u8,
-    ) -> *mut c_void;
-    fn SelectObject(hdc: *mut c_void, obj: *mut c_void) -> *mut c_void;
-    fn DeleteObject(obj: *mut c_void) -> i32;
-    fn SetBkMode(hdc: *mut c_void, mode: i32) -> i32;
-    fn SetTextColor(hdc: *mut c_void, color: u32) -> u32;
-    fn FillRect(hdc: *mut c_void, rect: *const Rect, brush: *mut c_void) -> i32;
-    fn DrawTextW(hdc: *mut c_void, text: *const u16, count: i32, rect: *mut Rect, format: u32) -> i32;
 }

@@ -46,17 +46,21 @@ fn init_d3d9_proxy(api: &Api, config: &Config) {
 
 unsafe fn get_proxy_api() -> Option<*const D3D9ProxyAPI> {
     let d3d9 = GetModuleHandleA(b"d3d9.dll\0".as_ptr());
-    if d3d9.is_null() {
+    if d3d9 == 0 {
         return None;
     }
     let proc = GetProcAddress(d3d9, b"d3d9proxy_get_api\0".as_ptr());
-    let get_api: GetAPIFn = std::mem::transmute(proc?);
+    if proc.is_null() {
+        return None;
+    }
+    let proc = proc as *const ();
+    let get_api: GetAPIFn = std::mem::transmute(proc);
     let api = get_api();
     (!api.is_null()).then_some(api)
 }
 
 #[link(name = "kernel32")]
 extern "system" {
-    fn GetModuleHandleA(name: *const u8) -> *mut c_void;
-    fn GetProcAddress(module: *mut c_void, name: *const u8) -> Option<unsafe extern "system" fn() -> isize>;
+    fn GetModuleHandleA(name: *const u8) -> usize;
+    fn GetProcAddress(module: usize, name: *const u8) -> *const c_void;
 }

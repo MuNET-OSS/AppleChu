@@ -19,7 +19,7 @@ static mut ORIG_JUDGE: usize = 0;
 
 #[link(name = "kernel32")]
 extern "system" {
-    fn CreateThread(
+    pub fn CreateThread(
         attrs: *const c_void,
         stack_size: usize,
         start: Option<unsafe extern "system" fn(*mut c_void) -> u32>,
@@ -27,14 +27,14 @@ extern "system" {
         flags: u32,
         id: *mut u32,
     ) -> usize;
-    fn Sleep(ms: u32);
-    fn GetModuleHandleA(module_name: *const u8) -> usize;
+    pub fn Sleep(ms: u32);
+    pub fn GetModuleHandleA(module_name: *const u8) -> usize;
 }
 
 #[link(name = "user32")]
 extern "system" {
-    fn GetAsyncKeyState(vkey: i32) -> i16;
-    fn CreateWindowExA(
+    pub fn GetAsyncKeyState(vkey: i32) -> i16;
+    pub fn CreateWindowExA(
         ex_style: u32,
         class_name: *const u8,
         window_name: *const u8,
@@ -48,28 +48,28 @@ extern "system" {
         instance: usize,
         param: *const c_void,
     ) -> usize;
-    fn RegisterClassA(wc: *const WndClassA) -> u16;
-    fn DefWindowProcA(hwnd: usize, msg: u32, wp: usize, lp: isize) -> isize;
-    fn ShowWindow(hwnd: usize, cmd: i32) -> i32;
-    fn SetLayeredWindowAttributes(hwnd: usize, cr_key: u32, alpha: u8, flags: u32) -> i32;
-    fn BeginPaint(hwnd: usize, ps: *mut PaintStruct) -> usize;
-    fn EndPaint(hwnd: usize, ps: *const PaintStruct) -> i32;
-    fn GetClientRect(hwnd: usize, rect: *mut Rect) -> i32;
-    fn InvalidateRect(hwnd: usize, rect: *const Rect, erase: i32) -> i32;
-    fn FillRect(hdc: usize, rect: *const Rect, brush: usize) -> i32;
-    fn DrawTextW(hdc: usize, text: *const u16, count: i32, rect: *mut Rect, format: u32) -> i32;
-    fn GetSystemMetrics(index: i32) -> i32;
-    fn SetWindowPos(hwnd: usize, insert_after: usize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
-    fn PeekMessageA(msg: *mut Msg, hwnd: usize, min: u32, max: u32, remove: u32) -> i32;
-    fn TranslateMessage(msg: *const Msg) -> i32;
-    fn DispatchMessageA(msg: *const Msg) -> isize;
+    pub fn RegisterClassA(wc: *const WndClassA) -> u16;
+    pub fn DefWindowProcA(hwnd: usize, msg: u32, wp: usize, lp: isize) -> isize;
+    pub fn ShowWindow(hwnd: usize, cmd: i32) -> i32;
+    pub fn SetLayeredWindowAttributes(hwnd: usize, cr_key: u32, alpha: u8, flags: u32) -> i32;
+    pub fn BeginPaint(hwnd: usize, ps: *mut PaintStruct) -> usize;
+    pub fn EndPaint(hwnd: usize, ps: *const PaintStruct) -> i32;
+    pub fn GetClientRect(hwnd: usize, rect: *mut Rect) -> i32;
+    pub fn InvalidateRect(hwnd: usize, rect: *const Rect, erase: i32) -> i32;
+    pub fn FillRect(hdc: usize, rect: *const Rect, brush: usize) -> i32;
+    pub fn DrawTextW(hdc: usize, text: *const u16, count: i32, rect: *mut Rect, format: u32) -> i32;
+    pub fn GetSystemMetrics(index: i32) -> i32;
+    pub fn SetWindowPos(hwnd: usize, insert_after: usize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+    pub fn PeekMessageA(msg: *mut Msg, hwnd: usize, min: u32, max: u32, remove: u32) -> i32;
+    pub fn TranslateMessage(msg: *const Msg) -> i32;
+    pub fn DispatchMessageA(msg: *const Msg) -> isize;
 }
 
 #[link(name = "gdi32")]
 extern "system" {
-    fn SetBkMode(hdc: usize, mode: i32) -> i32;
-    fn SetTextColor(hdc: usize, color: u32) -> u32;
-    fn CreateFontA(
+    pub fn SetBkMode(hdc: usize, mode: i32) -> i32;
+    pub fn SetTextColor(hdc: usize, color: u32) -> u32;
+    pub fn CreateFontA(
         h: i32,
         w: i32,
         esc: i32,
@@ -85,9 +85,9 @@ extern "system" {
         pitch: u32,
         face: *const u8,
     ) -> usize;
-    fn SelectObject(hdc: usize, obj: usize) -> usize;
-    fn DeleteObject(obj: usize) -> i32;
-    fn CreateSolidBrush(color: u32) -> usize;
+    pub fn SelectObject(hdc: usize, obj: usize) -> usize;
+    pub fn DeleteObject(obj: usize) -> i32;
+    pub fn CreateSolidBrush(color: u32) -> usize;
 }
 
 const DT_CENTER: u32 = 0x01;
@@ -95,47 +95,47 @@ const DT_VCENTER: u32 = 0x04;
 const DT_SINGLELINE: u32 = 0x20;
 
 #[repr(C)]
-struct WndClassA {
-    style: u32,
-    wnd_proc: unsafe extern "system" fn(usize, u32, usize, isize) -> isize,
-    cls_extra: i32,
-    wnd_extra: i32,
-    instance: usize,
-    icon: usize,
-    cursor: usize,
-    background: usize,
-    menu_name: *const u8,
-    class_name: *const u8,
+pub struct WndClassA {
+    pub style: u32,
+    pub wnd_proc: unsafe extern "system" fn(usize, u32, usize, isize) -> isize,
+    pub cls_extra: i32,
+    pub wnd_extra: i32,
+    pub instance: usize,
+    pub icon: usize,
+    pub cursor: usize,
+    pub background: usize,
+    pub menu_name: *const u8,
+    pub class_name: *const u8,
 }
 
 #[repr(C)]
-struct PaintStruct {
-    hdc: usize,
-    erase: i32,
-    rc_paint: Rect,
-    restore: i32,
-    inc_update: i32,
-    rgb_reserved: [u8; 32],
+pub struct PaintStruct {
+    pub hdc: usize,
+    pub erase: i32,
+    pub rc_paint: Rect,
+    pub restore: i32,
+    pub inc_update: i32,
+    pub rgb_reserved: [u8; 32],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct Rect {
-    left: i32,
-    top: i32,
-    right: i32,
-    bottom: i32,
+pub struct Rect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
 }
 
 #[repr(C)]
-struct Msg {
-    hwnd: usize,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    pt_x: i32,
-    pt_y: i32,
+pub struct Msg {
+    pub hwnd: usize,
+    pub message: u32,
+    pub wparam: usize,
+    pub lparam: isize,
+    pub time: u32,
+    pub pt_x: i32,
+    pub pt_y: i32,
 }
 
 const WM_PAINT: u32 = 0x000F;
