@@ -217,7 +217,7 @@ pub fn init(api: &Api, _config: &Config) {
         CreateThread(ptr::null(), 0, Some(demo_write_thread), ptr::null(), 0, ptr::null_mut());
         CreateThread(ptr::null(), 0, Some(hotkey_thread), ptr::null(), 0, ptr::null_mut());
     }
-    api.log_info("Autoplay 已启用: Home 键切换，开启时写入 demo/preset flag");
+    api.log_info("Autoplay enabled: toggle with Home key, writes demo/preset flag when on");
 }
 
 pub fn shutdown() {
@@ -230,7 +230,7 @@ pub fn shutdown() {
                 api.hook_remove(JUDGE_ADDR);
                 JUDGE_ADDR = 0;
             }
-            api.log_info("Autoplay 已清理");
+            api.log_info("Autoplay cleaned up");
         }
     }
 }
@@ -361,7 +361,7 @@ unsafe extern "system" fn demo_write_thread(_: *mut c_void) -> u32 {
         if enabled {
             write_demo_flags();
             if !was_enabled {
-                log_info("Autoplay ON: demo/preset flag 写入中");
+                log_info("Autoplay ON: writing demo/preset flag");
             }
         } else if was_enabled {
             clear_demo_flag();

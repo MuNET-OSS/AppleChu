@@ -8,7 +8,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "强制双声道输出",
+            name: "force 2ch audio",
             section: "Force2chAudio",
             pattern: Some("83 C4 04 85 C0 75 3F 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? B8 02 00 00 00"),
             pattern_offset: 5,
@@ -35,10 +35,10 @@ fn apply_shared_audio(api: &Api, config: &Config) {
     if site != 0 {
         let zero = [0u8; 1];
         if api.mem_write(site + 6, &zero) {
-            api.log_info("补丁已应用: 强制共享音频");
+            api.log_info("patch applied: force shared audio");
             return;
         }
     }
 
-    api.log_warn("强制共享音频: 未找到目标指令");
+    api.log_warn("force shared audio: target instruction not found");
 }

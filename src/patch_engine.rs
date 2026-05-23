@@ -49,9 +49,9 @@ fn find_by_pattern(api: &Api, def: &PatchDef) -> Option<usize> {
 
 fn log_result(api: &Api, def: &PatchDef, result: PatchResult) -> PatchResult {
     match result {
-        PatchResult::Applied => api.log_info(&format!("补丁已应用: {}", def.name)),
-        PatchResult::AlreadyPatched => api.log_info(&format!("补丁已存在: {}", def.name)),
-        PatchResult::Mismatch => api.log_warn(&format!("补丁原始字节不匹配: {}", def.name)),
+        PatchResult::Applied => api.log_info(&format!("patch applied: {}", def.name)),
+        PatchResult::AlreadyPatched => api.log_info(&format!("patch already applied: {}", def.name)),
+        PatchResult::Mismatch => api.log_warn(&format!("patch bytes mismatch: {}", def.name)),
     }
     result
 }

@@ -22,7 +22,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "关闭网络加密 1",
+            name: "disable encryption 1",
             section: "DisableEncryption",
             pattern: None,
             pattern_offset: 0,
@@ -35,7 +35,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "关闭网络加密 2",
+            name: "disable encryption 2",
             section: "DisableEncryption",
             pattern: None,
             pattern_offset: 0,
@@ -63,9 +63,9 @@ fn apply_disable_tls(api: &Api, config: &Config) {
 
     if let Some(orig) = original {
         ORIG_OPEN_REQUEST.store(orig as usize, Ordering::SeqCst);
-        api.log_info("补丁已应用: 关闭 TLS (WinHttpOpenRequest IAT hook)");
+        api.log_info("patch applied: disable TLS (WinHttpOpenRequest IAT hook)");
     } else {
-        api.log_warn("关闭 TLS: 未找到 WinHttpOpenRequest 导入");
+        api.log_warn("disable TLS: WinHttpOpenRequest import not found");
     }
 }
 

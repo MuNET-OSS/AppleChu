@@ -45,13 +45,13 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
         return -1;
     };
 
-    api.log_info("AppleChu 初始化中");
+    api.log_info("AppleChu initializing");
     let config = Config::load(&base_dir(info));
     patches::apply_all(api, &config);
     hooks::init_all(api, &config);
     ux::init_all(api, &config);
     d3d9::init_all(api, &config);
-    api.log_info("AppleChu 初始化完成");
+    api.log_info("AppleChu initialized");
     0
 }
 
@@ -79,6 +79,6 @@ fn base_dir(info: *const ChuModInfo) -> String {
 pub extern "C" fn chumod_shutdown() {
     if let Some(api) = API.get() {
         hooks::shutdown_all();
-        api.log_info("AppleChu 已卸载");
+        api.log_info("AppleChu unloaded");
     }
 }

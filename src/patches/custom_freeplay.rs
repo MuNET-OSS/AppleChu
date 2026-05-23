@@ -18,26 +18,26 @@ pub fn apply(api: &Api, config: &Config) {
 
     let text_bytes = custom_text.as_bytes();
     if text_bytes.len() > MAX_CUSTOM_TEXT_LEN {
-        api.log_warn("自定义 FREE PLAY 文本过长，已跳过");
+        api.log_warn("custom FREE PLAY text too long, skipped");
         return;
     }
 
     let text_addr = pattern::scan_bytes(api, b"FREE PLAY\0");
     if text_addr == 0 {
-        api.log_warn("自定义 FREE PLAY 文本: 未找到字符串");
+        api.log_warn("custom FREE PLAY text: string not found");
         return;
     }
 
     let length_addr = find_length_addr(api, text_addr);
     if length_addr == 0 || !write_value(api, length_addr, text_bytes.len() as u8) {
-        api.log_warn("补丁写入失败: 自定义 FREE PLAY 文本长度");
+        api.log_warn("patch write failed: custom FREE PLAY text length");
         return;
     }
 
     match patch_free_play_text(api, text_addr, text_bytes) {
-        PatchResult::Applied => api.log_info("补丁已应用: 自定义 FREE PLAY 文本"),
-        PatchResult::AlreadyPatched => api.log_info("补丁已存在: 自定义 FREE PLAY 文本"),
-        PatchResult::Mismatch => api.log_warn("补丁原始字节不匹配: 自定义 FREE PLAY 文本"),
+        PatchResult::Applied => api.log_info("patch applied: custom FREE PLAY text"),
+        PatchResult::AlreadyPatched => api.log_info("patch already applied: custom FREE PLAY text"),
+        PatchResult::Mismatch => api.log_warn("patch bytes mismatch: custom FREE PLAY text"),
     }
 }
 

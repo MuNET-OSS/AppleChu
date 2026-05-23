@@ -14,7 +14,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "解锁 120fps",
+            name: "unlock 120fps",
             section: "Unlock120fps",
             pattern: Some("B9 78 00 00 00 B8 3C 00 00 00 0F 45 C1"),
             pattern_offset: 5,

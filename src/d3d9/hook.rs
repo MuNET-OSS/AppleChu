@@ -41,12 +41,12 @@ pub fn init(api: &Api) {
 
     let Some(original) = original else {
         HOOKED.store(false, Ordering::SeqCst);
-        api.log_warn("DeviceLostFix 初始化跳过: 未找到 Direct3DCreate9 导入");
+        api.log_warn("DeviceLostFix skipped: Direct3DCreate9 import not found");
         return;
     };
 
     ORIGINAL_DIRECT3D_CREATE9.store(original as usize, Ordering::SeqCst);
-    api.log_info("DeviceLostFix 已安装: Direct3DCreate9 IAT hook");
+    api.log_info("DeviceLostFix installed: Direct3DCreate9 IAT hook");
 }
 
 unsafe extern "system" fn hooked_direct3d_create9(sdk_version: u32) -> *mut c_void {
@@ -109,9 +109,9 @@ fn hook_create_device(d3d: *mut c_void) {
     if unsafe { patch_slot(slot, detour) } {
         ORIGINAL_CREATE_DEVICE.store(current, Ordering::SeqCst);
         CREATE_DEVICE_SLOT.store(slot as usize, Ordering::SeqCst);
-        log_info("DeviceLostFix 已安装: IDirect3D9::CreateDevice vtable hook");
+        log_info("DeviceLostFix installed: IDirect3D9::CreateDevice vtable hook");
     } else {
-        log_warn("DeviceLostFix 初始化失败: CreateDevice vtable 写入失败");
+        log_warn("DeviceLostFix failed: CreateDevice vtable write failed");
     }
 }
 

@@ -97,7 +97,7 @@ unsafe fn recover_device(device: *mut c_void) {
         return;
     }
 
-    log_info("DeviceLostFix 检测到 D3DERR_DEVICELOST，开始等待 Reset");
+    log_info("DeviceLostFix detected D3DERR_DEVICELOST, waiting for Reset");
 
     for _ in 0..MAX_RECOVERY_ATTEMPTS {
         let state = test_cooperative_level()
@@ -110,9 +110,9 @@ unsafe fn recover_device(device: *mut c_void) {
                 if let Some(reset) = reset() {
                     let reset_result = reset(device, params);
                     if reset_result == D3D_OK {
-                        log_info("DeviceLostFix 已通过 Reset 恢复 D3D9 device");
+                        log_info("DeviceLostFix recovered D3D9 device via Reset");
                     } else {
-                        log_warn("DeviceLostFix 调用 Reset 后仍未恢复");
+                        log_warn("DeviceLostFix Reset called but device not recovered");
                     }
                 }
             }
@@ -161,9 +161,9 @@ unsafe fn hook_device_slot(
     if patch_slot(slot, detour) {
         original.store(current, Ordering::SeqCst);
         stored_slot.store(slot as usize, Ordering::SeqCst);
-        log_info(&format!("DeviceLostFix 已安装: IDirect3DDevice9::{name} vtable hook"));
+        log_info(&format!("DeviceLostFix installed: IDirect3DDevice9::{name} vtable hook"));
     } else {
-        log_warn(&format!("DeviceLostFix 初始化失败: {name} vtable 写入失败"));
+        log_warn(&format!("DeviceLostFix failed: {name} vtable write failed"));
     }
 }
 

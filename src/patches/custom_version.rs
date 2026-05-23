@@ -13,27 +13,27 @@ pub fn apply(api: &Api, config: &Config) {
 
     let bytes = version_text.as_bytes();
     if bytes.len() >= MAX_VERSION_TEXT_LEN {
-        api.log_warn("自定义版本号文本过长，已跳过");
+        api.log_warn("custom version text too long, skipped");
         return;
     }
 
     let pattern_addr = pattern::scan_range(api, api.game_base(), api.game_size(), X_VERSE_PATTERN);
     if pattern_addr == 0 {
-        api.log_warn("未找到版本号文本特征: X-VERSE");
+        api.log_warn("version text pattern not found: X-VERSE");
         return;
     }
 
     let Some(start_addr) = find_string_start(api, pattern_addr) else {
-        api.log_warn("未找到版本号文本起始位置");
+        api.log_warn("version text start position not found");
         return;
     };
 
     let mut buffer = [0_u8; MAX_VERSION_TEXT_LEN];
     buffer[..bytes.len()].copy_from_slice(bytes);
     if api.mem_write(start_addr, &buffer) {
-        api.log_info("补丁已应用: 自定义版本号文本");
+        api.log_info("patch applied: custom version text");
     } else {
-        api.log_warn("补丁写入失败: 自定义版本号文本");
+        api.log_warn("patch write failed: custom version text");
     }
 }
 

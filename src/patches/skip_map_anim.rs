@@ -7,7 +7,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "跳过地图动画",
+            name: "skip map animation",
             section: "SkipMapAnimation",
             pattern: None,
             pattern_offset: 0,

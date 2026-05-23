@@ -9,7 +9,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "解锁曲数上限",
+            name: "unlock track limit",
             section: "UnlockTracks",
             pattern: Some("B8 09 00 00 00 3B F0 5F 0F 47"),
             pattern_offset: 10,
@@ -30,13 +30,13 @@ fn apply_max_tracks(api: &Api, config: &Config) {
     // B8 03 00 00 00 C3 = MOV EAX, 3; RET
     let addr = pattern::scan(api, "B8 03 00 00 00 C3");
     if addr == 0 {
-        api.log_warn("最大曲数: 未找到目标函数");
+        api.log_warn("max tracks: target function not found");
         return;
     }
 
     if write_value(api, addr + 1, max_tracks) {
-        api.log_info(&format!("补丁已应用: 最大曲数 = {}", max_tracks));
+        api.log_info(&format!("patch applied: max tracks = {}", max_tracks));
     } else {
-        api.log_warn("补丁写入失败: 最大曲数");
+        api.log_warn("patch write failed: max tracks");
     }
 }

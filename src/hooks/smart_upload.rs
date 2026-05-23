@@ -14,16 +14,16 @@ pub fn init(api: &Api) {
 
     let upsert = find_upsert_function(api, api.text_base(), api.text_size(), api.game_base(), api.game_size());
     if upsert == 0 {
-        api.log_warn("智能成绩屏蔽初始化失败: UpsertUserAll 未找到，autoplay 时成绩可能上传");
+        api.log_warn("score blocking init failed: UpsertUserAll not found, scores may upload during autoplay");
         return;
     }
 
     let Some(trampoline) = api.hook_create(upsert, hooked_upsert as *const () as usize) else {
-        api.log_warn("智能成绩屏蔽初始化失败: UpsertUserAll hook 创建失败");
+        api.log_warn("score blocking init failed: UpsertUserAll hook creation failed");
         return;
     };
     if !api.hook_enable(upsert) {
-        api.log_warn("智能成绩屏蔽初始化失败: UpsertUserAll hook 启用失败");
+        api.log_warn("score blocking init failed: UpsertUserAll hook enable failed");
         return;
     }
 
@@ -32,7 +32,7 @@ pub fn init(api: &Api) {
         ORIG_UPSERT = trampoline;
     }
     api.log_info(&format!(
-        "智能成绩屏蔽已启用: UpsertUserAll @ 0x{upsert:08X}，autoplay 开启时成绩不上传"
+        "score blocking enabled: UpsertUserAll @ 0x{upsert:08X}, scores blocked during autoplay"
     ));
 }
 
@@ -44,7 +44,7 @@ pub fn shutdown() {
                 api.hook_remove(UPSERT_ADDR);
                 UPSERT_ADDR = 0;
             }
-            api.log_info("智能成绩屏蔽已清理");
+            api.log_info("score blocking cleaned up");
         }
     }
 }
@@ -52,7 +52,7 @@ pub fn shutdown() {
 unsafe extern "C" fn hooked_upsert(a: *mut c_void, b: *mut c_void, c: *mut c_void) {
     if autoplay::is_enabled() || autoplay::was_used() {
         if let Some(api) = API_HANDLE {
-            api.log_info("成绩屏蔽: 本次游玩使用过 autoplay，已阻止上传");
+            api.log_info("score blocking: autoplay was used, upload blocked");
         }
         autoplay::reset_was_used();
         return;

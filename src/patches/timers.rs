@@ -9,7 +9,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "禁用选歌计时器",
+            name: "disable song timer",
             section: "DisableTimer",
             pattern: Some("32 C0 C3"),
             pattern_offset: 0,
@@ -23,7 +23,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "所有计时器 999",
+            name: "all timers 999",
             section: "AllTimers999",
             pattern: Some("69 44 24 04 E8 03 00 00"),
             pattern_offset: 0,
@@ -48,36 +48,36 @@ fn apply_custom_timers(api: &Api, config: &Config) {
     let size = api.text_size();
     let map_addr = pattern::scan_range(api, base, size, "68 84 03 00 00 6A 0A 6A");
     if map_addr != 0 {
-        write_timer_at(api, "地图选择计时器", map_addr + 7, map_val);
+        write_timer_at(api, "map select timer", map_addr + 7, map_val);
 
         let ticket_addr = pattern::scan_range(api, map_addr + 8, size - ((map_addr + 8 - base) as u32), "68 84 03 00 00 6A 0A 6A");
         if ticket_addr != 0 {
-            write_timer_at(api, "票券选择计时器", ticket_addr + 7, ticket_val);
+            write_timer_at(api, "ticket select timer", ticket_addr + 7, ticket_val);
         } else {
-            api.log_warn("票券选择计时器: 未找到");
+            api.log_warn("ticket select timer: not found");
         }
     } else {
-        api.log_warn("地图选择计时器: 未找到");
+        api.log_warn("map select timer: not found");
     }
 
     // course: E8 ?? ?? ?? ?? 6A xx E8 ?? ?? ?? ?? 83 C4 04 8D 4E 08 05 84 03 00 00
     let course_addr = pattern::scan_range(api, base, size, "E8 ?? ?? ?? ?? 6A ?? E8 ?? ?? ?? ?? 83 C4 04 8D 4E 08 05 84 03 00 00");
     if course_addr != 0 {
-        write_timer_at(api, "组曲选择计时器", course_addr + 6, course_val);
+        write_timer_at(api, "course select timer", course_addr + 6, course_val);
     } else {
-        api.log_warn("组曲选择计时器: 未找到");
+        api.log_warn("course select timer: not found");
     }
 }
 
 fn write_timer_at(api: &Api, name: &str, addr: usize, value: i64) {
     let Ok(value) = i8::try_from(value) else {
-        api.log_warn(&format!("{} 数值超出 i8 范围，已跳过", name));
+        api.log_warn(&format!("{} value out of i8 range, skipped", name));
         return;
     };
 
     if write_value(api, addr, value) {
-        api.log_info(&format!("补丁已应用: {} = {}", name, value));
+        api.log_info(&format!("patch applied: {} = {}", name, value));
     } else {
-        api.log_warn(&format!("补丁写入失败: {}", name));
+        api.log_warn(&format!("patch write failed: {}", name));
     }
 }

@@ -7,7 +7,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "跳过启动画面",
+            name: "skip startup",
             section: "SkipStartup",
             pattern: Some("6A 07 8B CF E8 ?? ?? ?? ?? 6A 01 E8 ?? ?? ?? ?? 8B 35"),
             pattern_offset: 9,

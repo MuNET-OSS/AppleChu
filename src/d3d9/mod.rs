@@ -32,14 +32,14 @@ fn init_d3d9_proxy(api: &Api, config: &Config) {
 
     if config.is_enabled("FpsDisplay") {
         unsafe { ((*proxy).register_present_callback)(fps_osd::on_end_scene) };
-        api.log_info("FPS 显示已注册 (d3d9 proxy callback)");
+        api.log_info("FPS display registered (d3d9 proxy callback)");
     }
 
     if config.is_enabled("FrameLock") {
         let fps = config.get_int("FrameLock", "fps", 0) as u32;
         if fps > 0 {
             unsafe { ((*proxy).set_frame_lock)(fps) };
-            api.log_info(&format!("帧率锁定: {}fps (d3d9 proxy)", fps));
+            api.log_info(&format!("frame lock: {}fps (d3d9 proxy)", fps));
         }
     }
 }

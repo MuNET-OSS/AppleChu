@@ -19,7 +19,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "绕过 AppUser 检测",
+            name: "bypass AppUser check",
             section: "BypassAppUser",
             pattern: Some("83 7C 24 04 00 75"),
             pattern_offset: 5,
@@ -35,7 +35,7 @@ pub fn apply_bypass_120hz(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "绕过 120Hz 检测",
+            name: "bypass 120Hz check",
             section: "Bypass120hz",
             pattern: Some("85 C0 74 3F ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 81 BC 24 34 02 00 00 80 07 00 00"),
             pattern_offset: 0,
@@ -51,7 +51,7 @@ fn apply_bypass_1080p(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "绕过 1080P 检测",
+            name: "bypass 1080p check",
             section: "Bypass1080p",
             pattern: Some(
                 "81 BC 24 34 02 00 00 80 07 00 00 75 1F 81 BC 24 38 02 00 00 38 04 00 00 75 12",

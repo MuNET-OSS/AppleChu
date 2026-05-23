@@ -7,7 +7,7 @@ pub fn apply(api: &Api, config: &Config) {
         api,
         config,
         &PatchDef {
-            name: "免费游玩",
+            name: "free play",
             section: "FreePlay",
             pattern: Some("E8 ?? ?? ?? ?? 3C 01 75 ?? 6A 09"),
             pattern_offset: 5,

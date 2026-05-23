@@ -124,7 +124,7 @@ pub fn init(api: &Api, config: &Config) {
             ptr::null_mut(),
         );
     }
-    api.log_info("退出确认已启用: 等待游戏窗口创建后替换 WndProc");
+    api.log_info("exit confirm enabled: waiting for game window to replace WndProc");
 }
 
 unsafe extern "system" fn wndproc_hook_thread(_param: *mut c_void) -> u32 {
