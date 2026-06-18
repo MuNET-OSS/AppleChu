@@ -1,4 +1,4 @@
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 
 const IMAGE_DOS_SIGNATURE: u16 = 0x5A4D;
@@ -9,7 +9,33 @@ const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 
 #[link(name = "kernel32")]
 extern "system" {
-    fn VirtualProtect(address: *mut c_void, size: usize, new_protect: u32, old_protect: *mut u32) -> i32;
+    fn VirtualProtect(
+        address: *mut c_void,
+        size: usize,
+        new_protect: u32,
+        old_protect: *mut u32,
+    ) -> i32;
+    fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> *mut c_void;
+    fn Module32First(snapshot: *mut c_void, entry: *mut ModuleEntry32) -> i32;
+    fn Module32Next(snapshot: *mut c_void, entry: *mut ModuleEntry32) -> i32;
+    fn CloseHandle(handle: *mut c_void) -> i32;
+    fn GetModuleHandleW(name: *const u16) -> usize;
+}
+
+const TH32CS_SNAPMODULE: u32 = 0x00000008;
+
+#[repr(C)]
+struct ModuleEntry32 {
+    dw_size: u32,
+    th32_module_id: u32,
+    th32_process_id: u32,
+    glbl_cnt_usage: u32,
+    proc_cnt_usage: u32,
+    mod_base_addr: *mut u8,
+    mod_base_size: u32,
+    h_module: usize,
+    sz_module: [u8; 256],
+    sz_exe_path: [u8; 260],
 }
 
 #[repr(C)]
@@ -143,14 +169,15 @@ pub unsafe fn hook_iat(
         return None;
     }
 
-    let mut desc = (module_base + import_dir.virtual_address as usize) as *const ImageImportDescriptor;
+    let mut desc =
+        (module_base + import_dir.virtual_address as usize) as *const ImageImportDescriptor;
     while let Some(import) = desc.as_ref() {
         if import.name == 0 {
             break;
         }
 
-        let imported_dll = CStr::from_ptr((module_base + import.name as usize) as *const c_char)
-            .to_string_lossy();
+        let imported_dll =
+            CStr::from_ptr((module_base + import.name as usize) as *const c_char).to_string_lossy();
         if imported_dll.eq_ignore_ascii_case(dll_name) {
             if let Some(original) = hook_import(module_base, import, func_name, new_func) {
                 return Some(original);
@@ -161,6 +188,55 @@ pub unsafe fn hook_iat(
     }
 
     None
+}
+
+/// 返回 COM 对象指定 vtable 槽位的可写指针。
+///
+/// # Safety
+/// `instance` 必须指向有效的 COM 对象，`index` 必须落在该对象 vtable 范围内。
+pub unsafe fn vtable_slot(instance: *mut c_void, index: usize) -> *mut usize {
+    if instance.is_null() {
+        return ptr::null_mut();
+    }
+
+    let vtable = *(instance as *const *mut usize);
+    if vtable.is_null() {
+        return ptr::null_mut();
+    }
+
+    vtable.add(index)
+}
+
+/// 替换 vtable 槽位内容。
+///
+/// # Safety
+/// `slot` 必须指向可写的函数指针槽，`value` 必须是签名兼容的函数地址。
+pub unsafe fn patch_slot(slot: *mut usize, value: usize) -> bool {
+    if slot.is_null() || value == 0 {
+        return false;
+    }
+
+    let mut old_protect = 0;
+    if VirtualProtect(
+        slot.cast(),
+        std::mem::size_of::<usize>(),
+        PAGE_EXECUTE_READWRITE,
+        &mut old_protect,
+    ) == 0
+    {
+        return false;
+    }
+
+    *slot = value;
+
+    let mut ignored = 0;
+    let _ = VirtualProtect(
+        slot.cast(),
+        std::mem::size_of::<usize>(),
+        old_protect,
+        &mut ignored,
+    );
+    true
 }
 
 unsafe fn hook_import(
@@ -188,7 +264,8 @@ unsafe fn hook_import(
         // 按序号导入没有函数名，不能用于本工具的名称匹配。
         if lookup_value & IMAGE_ORDINAL_FLAG32 == 0 {
             let import_by_name = (module_base + lookup_value) as *const ImageImportByName;
-            let name = CStr::from_ptr(ptr::addr_of!((*import_by_name).name) as *const c_char).to_string_lossy();
+            let name = CStr::from_ptr(ptr::addr_of!((*import_by_name).name) as *const c_char)
+                .to_string_lossy();
             if name == func_name {
                 return patch_iat_entry(iat, new_func);
             }
@@ -217,6 +294,71 @@ unsafe fn patch_iat_entry(iat: *mut usize, new_func: *const ()) -> Option<*const
     *iat = new_func as usize;
 
     let mut ignored = 0;
-    let _ = VirtualProtect(iat.cast(), std::mem::size_of::<usize>(), old_protect, &mut ignored);
+    let _ = VirtualProtect(
+        iat.cast(),
+        std::mem::size_of::<usize>(),
+        old_protect,
+        &mut ignored,
+    );
     Some(original)
+}
+
+/// 遍历进程中所有已加载模块的 IAT，替换目标函数。
+/// 对全进程所有已加载模块应用 IAT hook（target=NULL 等价全模块遍历）。
+pub unsafe fn hook_iat_all_modules(
+    dll_name: &str,
+    func_name: &str,
+    new_func: *const (),
+) -> Option<*const ()> {
+    if new_func.is_null() {
+        return None;
+    }
+
+    let kernel32 = GetModuleHandleW(
+        [
+            b'k' as u16,
+            b'e' as u16,
+            b'r' as u16,
+            b'n' as u16,
+            b'e' as u16,
+            b'l' as u16,
+            b'3' as u16,
+            b'2' as u16,
+            b'.' as u16,
+            b'd' as u16,
+            b'l' as u16,
+            b'l' as u16,
+            0,
+        ]
+        .as_ptr(),
+    );
+
+    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+    if snap.is_null() || snap == usize::MAX as *mut c_void {
+        return None;
+    }
+
+    let mut entry: ModuleEntry32 = std::mem::zeroed();
+    entry.dw_size = std::mem::size_of::<ModuleEntry32>() as u32;
+
+    let mut first_original: Option<*const ()> = None;
+
+    if Module32First(snap, &mut entry) != 0 {
+        loop {
+            let module_base = entry.h_module;
+            if module_base != 0 && module_base != kernel32 {
+                if let Some(orig) = hook_iat(module_base, dll_name, func_name, new_func) {
+                    if first_original.is_none() {
+                        first_original = Some(orig);
+                    }
+                }
+            }
+            if Module32Next(snap, &mut entry) == 0 {
+                break;
+            }
+        }
+    }
+
+    CloseHandle(snap);
+    first_original
 }

@@ -2,7 +2,9 @@ pub mod audio;
 pub mod bypass;
 pub mod custom_freeplay;
 pub mod custom_version;
+pub mod fast_restart;
 pub mod free_play;
+pub mod net_log;
 pub mod network;
 pub mod skip_map_anim;
 pub mod skip_startup;
@@ -21,8 +23,10 @@ pub fn apply_all(api: &Api, config: &Config) {
     skip_map_anim::apply(api, config);
     unlock_tracks::apply(api, config);
     unlock_120fps::apply(api, config);
+    fast_restart::apply(api, config);
     network::apply(api, config);
     bypass::apply(api, config);
     audio::apply(api, config);
     custom_freeplay::apply(api, config);
+    net_log::apply(api, config);
 }

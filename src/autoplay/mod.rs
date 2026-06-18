@@ -1,5 +1,6 @@
-pub mod autoplay;
-pub mod smart_upload;
+mod autoplay;
+
+pub use autoplay::{is_enabled, was_used};
 
 use crate::config::Config;
 use crate::util::api::Api;
@@ -7,11 +8,11 @@ use crate::util::api::Api;
 pub fn init_all(api: &Api, config: &Config) {
     if config.is_enabled("Autoplay") {
         autoplay::init(api, config);
-        smart_upload::init(api);
+        autoplay::init_upload_guard(api);
     }
 }
 
 pub fn shutdown_all() {
-    smart_upload::shutdown();
+    autoplay::shutdown_upload_guard();
     autoplay::shutdown();
 }

@@ -1,0 +1,51 @@
+use std::ffi::c_char;
+
+use once_cell::sync::OnceCell;
+
+use crate::config::Config;
+use crate::platform::winapi::{self, GetComputerNameAFn};
+use crate::util::api::Api;
+
+static mut ORIG_GET_COMPUTER_NAME_A: Option<GetComputerNameAFn> = None;
+static SERIAL_NO: OnceCell<String> = OnceCell::new();
+
+pub fn init(api: &Api, config: &Config) {
+    if config.get_bool("PCBID", "enable", true) == false {
+        return;
+    }
+
+    let serial = config.get_string("PCBID", "serialNo", "A69E01A8888");
+    unsafe {
+        let _ = SERIAL_NO.set(serial);
+        ORIG_GET_COMPUTER_NAME_A = winapi::hook_import(
+            api,
+            "kernel32.dll",
+            "GetComputerNameA",
+            hooked_get_computer_name_a as *const (),
+        );
+    }
+
+    api.log_info("PCBID hook initialized");
+}
+
+pub fn shutdown() {}
+
+unsafe extern "system" fn hooked_get_computer_name_a(buffer: *mut c_char, size: *mut u32) -> i32 {
+    let Some(serial) = SERIAL_NO.get() else {
+        return ORIG_GET_COMPUTER_NAME_A.map_or(0, |orig| orig(buffer, size));
+    };
+
+    let required = serial.len() as u32;
+    if size.is_null() {
+        return 0;
+    }
+    if buffer.is_null() || *size <= required {
+        *size = required + 1;
+        return 0;
+    }
+
+    std::ptr::copy_nonoverlapping(serial.as_ptr().cast::<c_char>(), buffer, serial.len());
+    *buffer.add(serial.len()) = 0;
+    *size = required;
+    1
+}

@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::patch_engine::{apply_patch, PatchDef};
+use crate::patch_engine::{PatchVariant, VersionedPatch, apply_patch};
 use crate::util::api::Api;
 use crate::util::memory::write_value;
 use crate::util::pattern;
@@ -8,14 +8,16 @@ pub fn apply(api: &Api, config: &Config) {
     apply_patch(
         api,
         config,
-        &PatchDef {
+        &VersionedPatch {
             name: "unlock track limit",
             section: "UnlockTracks",
-            pattern: Some("B8 09 00 00 00 3B F0 5F 0F 47"),
-            pattern_offset: 10,
-            known_offsets: &[],
-            expected: &[0xF0],
-            patch: &[0xC0],
+            variants: &[PatchVariant {
+                pattern: Some("B8 09 00 00 00 3B F0 5F 0F 47"),
+                pattern_offset: 10,
+                known_offsets: &[],
+                expected: &[0xF0],
+                patch: &[0xC0],
+            }],
         },
     );
     apply_max_tracks(api, config);

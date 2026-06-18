@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::patch_engine::{apply_patch, PatchDef};
+use crate::patch_engine::{PatchVariant, VersionedPatch, apply_patch};
 use crate::util::api::Api;
 
 const BYPASS_1080P_EXPECTED: &[u8] = &[
@@ -18,14 +18,16 @@ pub fn apply(api: &Api, config: &Config) {
     apply_patch(
         api,
         config,
-        &PatchDef {
+        &VersionedPatch {
             name: "bypass AppUser check",
             section: "BypassAppUser",
-            pattern: Some("83 7C 24 04 00 75"),
-            pattern_offset: 5,
-            known_offsets: &[],
-            expected: &[0x75],
-            patch: &[0xEB],
+            variants: &[PatchVariant {
+                pattern: Some("83 7C 24 04 00 75"),
+                pattern_offset: 5,
+                known_offsets: &[],
+                expected: &[0x75],
+                patch: &[0xEB],
+            }],
         },
     );
 }
@@ -34,14 +36,18 @@ pub fn apply_bypass_120hz(api: &Api, config: &Config) {
     apply_patch(
         api,
         config,
-        &PatchDef {
+        &VersionedPatch {
             name: "bypass 120Hz check",
             section: "Bypass120hz",
-            pattern: Some("85 C0 74 3F ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 81 BC 24 34 02 00 00 80 07 00 00"),
-            pattern_offset: 0,
-            known_offsets: &[],
-            expected: &[0x85, 0xC0, 0x74, 0x3F],
-            patch: &[0xEB, 0x30, 0xEB, 0x2E],
+            variants: &[PatchVariant {
+                pattern: Some(
+                    "85 C0 74 3F ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 81 BC 24 34 02 00 00 80 07 00 00",
+                ),
+                pattern_offset: 0,
+                known_offsets: &[],
+                expected: &[0x85, 0xC0, 0x74, 0x3F],
+                patch: &[0xEB, 0x30, 0xEB, 0x2E],
+            }],
         },
     );
 }
@@ -50,16 +56,18 @@ fn apply_bypass_1080p(api: &Api, config: &Config) {
     apply_patch(
         api,
         config,
-        &PatchDef {
+        &VersionedPatch {
             name: "bypass 1080p check",
             section: "Bypass1080p",
-            pattern: Some(
-                "81 BC 24 34 02 00 00 80 07 00 00 75 1F 81 BC 24 38 02 00 00 38 04 00 00 75 12",
-            ),
-            pattern_offset: 0,
-            known_offsets: &[],
-            expected: BYPASS_1080P_EXPECTED,
-            patch: BYPASS_1080P_PATCH,
+            variants: &[PatchVariant {
+                pattern: Some(
+                    "81 BC 24 34 02 00 00 80 07 00 00 75 1F 81 BC 24 38 02 00 00 38 04 00 00 75 12",
+                ),
+                pattern_offset: 0,
+                known_offsets: &[],
+                expected: BYPASS_1080P_EXPECTED,
+                patch: BYPASS_1080P_PATCH,
+            }],
         },
     );
 }

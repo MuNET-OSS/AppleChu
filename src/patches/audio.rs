@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::patch_engine::{apply_patch, PatchDef};
+use crate::patch_engine::{PatchVariant, VersionedPatch, apply_patch};
 use crate::util::api::Api;
 
 pub fn apply(api: &Api, config: &Config) {
@@ -7,14 +7,16 @@ pub fn apply(api: &Api, config: &Config) {
     apply_patch(
         api,
         config,
-        &PatchDef {
+        &VersionedPatch {
             name: "force 2ch audio",
             section: "Force2chAudio",
-            pattern: Some("83 C4 04 85 C0 75 3F 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? B8 02 00 00 00"),
-            pattern_offset: 5,
-            known_offsets: &[],
-            expected: &[0x75, 0x3F],
-            patch: &[0x90, 0x90],
+            variants: &[PatchVariant {
+                pattern: Some("83 C4 04 85 C0 75 3F 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? B8 02 00 00 00"),
+                pattern_offset: 5,
+                known_offsets: &[],
+                expected: &[0x75, 0x3F],
+                patch: &[0x90, 0x90],
+            }],
         },
     );
 }

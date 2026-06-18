@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::patch_engine::{apply_patch, PatchDef};
+use crate::patch_engine::{PatchVariant, VersionedPatch, apply_patch};
 use crate::util::api::Api;
 
 pub fn apply(api: &Api, config: &Config) {
@@ -13,14 +13,16 @@ pub fn apply(api: &Api, config: &Config) {
     apply_patch(
         api,
         config,
-        &PatchDef {
+        &VersionedPatch {
             name: "unlock 120fps",
             section: "Unlock120fps",
-            pattern: Some("B9 78 00 00 00 B8 3C 00 00 00 0F 45 C1"),
-            pattern_offset: 5,
-            known_offsets: &[],
-            expected: &[0xB8, 0x3C, 0x00, 0x00, 0x00],
-            patch: &[0xB8, 0x78, 0x00, 0x00, 0x00],
+            variants: &[PatchVariant {
+                pattern: Some("B9 78 00 00 00 B8 3C 00 00 00 0F 45 C1"),
+                pattern_offset: 5,
+                known_offsets: &[],
+                expected: &[0xB8, 0x3C, 0x00, 0x00, 0x00],
+                patch: &[0xB8, 0x78, 0x00, 0x00, 0x00],
+            }],
         },
     );
 }

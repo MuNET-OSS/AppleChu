@@ -69,7 +69,9 @@ pub fn file_offset_to_va(api: &Api, file_offset: u32) -> usize {
         return 0;
     };
 
-    let section_addr = file_header_addr + size_of::<ImageFileHeader>() + file_header.size_of_optional_header as usize;
+    let section_addr = file_header_addr
+        + size_of::<ImageFileHeader>()
+        + file_header.size_of_optional_header as usize;
     for index in 0..file_header.number_of_sections as usize {
         let Some(section) = read_struct::<ImageSectionHeader>(
             api,
@@ -115,18 +117,16 @@ pub fn patch_bytes(api: &Api, addr: usize, expected: &[u8], patch: &[u8]) -> Pat
     }
 }
 
-#[allow(dead_code)]
-pub fn nop_bytes(api: &Api, addr: usize, expected: &[u8], count: usize) -> PatchResult {
-    patch_bytes(api, addr, expected, &vec![0x90; count])
-}
-
 pub fn write_value<T>(api: &Api, addr: usize, value: T) -> bool {
-    let bytes = unsafe { std::slice::from_raw_parts((&value as *const T).cast::<u8>(), size_of::<T>()) };
+    let bytes =
+        unsafe { std::slice::from_raw_parts((&value as *const T).cast::<u8>(), size_of::<T>()) };
     api.mem_write(addr, bytes)
 }
 
 fn read_struct<T: Copy>(api: &Api, addr: usize) -> Option<T> {
     let mut value = std::mem::MaybeUninit::<T>::uninit();
-    let bytes = unsafe { std::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<T>()) };
-    api.mem_read(addr, bytes).then(|| unsafe { value.assume_init() })
+    let bytes =
+        unsafe { std::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<T>()) };
+    api.mem_read(addr, bytes)
+        .then(|| unsafe { value.assume_init() })
 }

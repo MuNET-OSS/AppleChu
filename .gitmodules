@@ -1,0 +1,3 @@
+[submodule "ChuModLoader"]
+	path = ChuModLoader
+	url = https://github.com/MuNET-OSS/ChuModLoader

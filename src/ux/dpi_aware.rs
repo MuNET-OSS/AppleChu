@@ -31,7 +31,8 @@ pub fn init(api: &Api, config: &Config) {
             return;
         }
 
-        let set_process_dpi_awareness_context: SetProcessDpiAwarenessContextFn = std::mem::transmute(proc);
+        let set_process_dpi_awareness_context: SetProcessDpiAwarenessContextFn =
+            std::mem::transmute(proc);
         if set_process_dpi_awareness_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != 0 {
             api.log_info("DPI awareness enabled: Per-Monitor V2");
         } else {

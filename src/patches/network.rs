@@ -1,18 +1,23 @@
-use crate::config::Config;
-use crate::patch_engine::{apply_patch, PatchDef};
-use crate::util::api::Api;
-use crate::util::iat_hook::hook_iat;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::config::Config;
+use crate::patch_engine::{PatchVariant, VersionedPatch, apply_patch};
+use crate::util::api::Api;
+use crate::util::iat_hook::hook_iat;
+
 const WINHTTP_DLL: &str = "winhttp.dll";
 const WINHTTP_OPEN_REQUEST: &str = "WinHttpOpenRequest";
-// WINHTTP_FLAG_SECURE = 0x00800000
 const WINHTTP_FLAG_SECURE: u32 = 0x0080_0000;
 
 type WinHttpOpenRequestFn = unsafe extern "system" fn(
-    *mut c_void, *const u16, *const u16, *const u16,
-    *const u16, *const *const u16, u32,
+    *mut c_void,
+    *const u16,
+    *const u16,
+    *const u16,
+    *const u16,
+    *const *const u16,
+    u32,
 ) -> *mut c_void;
 
 static ORIG_OPEN_REQUEST: AtomicUsize = AtomicUsize::new(0);
@@ -21,27 +26,31 @@ pub fn apply(api: &Api, config: &Config) {
     apply_patch(
         api,
         config,
-        &PatchDef {
+        &VersionedPatch {
             name: "disable encryption 1",
             section: "DisableEncryption",
-            pattern: None,
-            pattern_offset: 0,
-            known_offsets: &[0x17D200C],
-            expected: &[0xF5],
-            patch: &[0x00],
+            variants: &[PatchVariant {
+                pattern: None,
+                pattern_offset: 0,
+                known_offsets: &[0x17D200C],
+                expected: &[0xF5],
+                patch: &[0x00],
+            }],
         },
     );
     apply_patch(
         api,
         config,
-        &PatchDef {
+        &VersionedPatch {
             name: "disable encryption 2",
             section: "DisableEncryption",
-            pattern: None,
-            pattern_offset: 0,
-            known_offsets: &[0x17D2010],
-            expected: &[0xF5],
-            patch: &[0x00],
+            variants: &[PatchVariant {
+                pattern: None,
+                pattern_offset: 0,
+                known_offsets: &[0x17D2010],
+                expected: &[0xF5],
+                patch: &[0x00],
+            }],
         },
     );
     apply_disable_tls(api, config);
@@ -84,5 +93,13 @@ unsafe extern "system" fn hooked_open_request(
     }
 
     let orig: WinHttpOpenRequestFn = std::mem::transmute(orig_addr);
-    orig(h_connect, verb, object_name, version, referrer, accept_types, flags & !WINHTTP_FLAG_SECURE)
+    orig(
+        h_connect,
+        verb,
+        object_name,
+        version,
+        referrer,
+        accept_types,
+        flags & !WINHTTP_FLAG_SECURE,
+    )
 }

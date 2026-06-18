@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::util::api::Api;
-use crate::util::memory::{patch_bytes, write_value, PatchResult};
+use crate::util::memory::{PatchResult, patch_bytes, write_value};
 use crate::util::pattern;
 
 const FREE_PLAY_TEXT_EXPECTED: &[u8] = b"FREE PLAY";

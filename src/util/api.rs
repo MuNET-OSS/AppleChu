@@ -1,58 +1,8 @@
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{CString, c_char, c_void};
 
 use once_cell::sync::OnceCell;
 
-#[repr(C)]
-pub struct ChuModInfo {
-    pub api_version: u32,
-    pub loader_version: *const c_char,
-    pub game_module: *const c_char,
-    pub game_base: usize,
-    pub game_size: u32,
-    pub text_base: usize,
-    pub text_size: u32,
-    pub rdata_base: usize,
-    pub rdata_size: u32,
-    pub game_version: *const c_char,
-}
-
-#[repr(C)]
-pub struct ChuModAPI {
-    pub struct_size: u32,
-    pub log: Option<unsafe extern "C" fn(*const c_char, ...)>,
-    pub aob_scan: Option<unsafe extern "C" fn(usize, u32, *const u8, *const c_char) -> usize>,
-    pub mem_read: Option<unsafe extern "C" fn(usize, *mut c_void, u32) -> i32>,
-    pub mem_write: Option<unsafe extern "C" fn(usize, *const c_void, u32) -> i32>,
-    pub mem_fill: Option<unsafe extern "C" fn(usize, u8, u32) -> i32>,
-    pub hook_create: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, *mut *mut c_void) -> i32>,
-    pub hook_enable: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    pub hook_disable: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    pub hook_remove: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    pub register_service: Option<unsafe extern "C" fn(*const c_char, *mut c_void) -> i32>,
-    pub get_service: Option<unsafe extern "C" fn(*const c_char) -> *mut c_void>,
-    pub publish: Option<unsafe extern "C" fn(*const c_char, *mut c_void, u32) -> i32>,
-    pub subscribe: Option<unsafe extern "C" fn(*const c_char, Option<unsafe extern "C" fn(*const c_char, *mut c_void, u32)>) -> i32>,
-    pub rtti_find_vtable: Option<unsafe extern "C" fn(*const c_char) -> usize>,
-    pub config_get_int: Option<unsafe extern "C" fn(*const c_char, i32) -> i32>,
-    pub config_get_float: Option<unsafe extern "C" fn(*const c_char, f32) -> f32>,
-    pub config_get_bool: Option<unsafe extern "C" fn(*const c_char, i32) -> i32>,
-    pub config_get_string: Option<unsafe extern "C" fn(*const c_char, *mut c_char, u32, *const c_char) -> i32>,
-    pub config_set_int: Option<unsafe extern "C" fn(*const c_char, i32) -> i32>,
-    pub config_set_float: Option<unsafe extern "C" fn(*const c_char, f32) -> i32>,
-    pub config_set_bool: Option<unsafe extern "C" fn(*const c_char, i32) -> i32>,
-    pub config_set_string: Option<unsafe extern "C" fn(*const c_char, *const c_char) -> i32>,
-    pub log_info: Option<unsafe extern "C" fn(*const c_char)>,
-    pub log_warn: Option<unsafe extern "C" fn(*const c_char)>,
-    pub log_error: Option<unsafe extern "C" fn(*const c_char)>,
-    pub log_path: *const c_char,
-    pub toml_section_exists: Option<unsafe extern "C" fn(*const c_char) -> i32>,
-    pub toml_get_bool: Option<unsafe extern "C" fn(*const c_char, *const c_char, i32) -> i32>,
-    pub toml_get_int: Option<unsafe extern "C" fn(*const c_char, *const c_char, i32) -> i32>,
-    pub toml_get_float: Option<unsafe extern "C" fn(*const c_char, *const c_char, f32) -> f32>,
-    pub toml_get_string: Option<unsafe extern "C" fn(*const c_char, *const c_char, *mut c_char, u32, *const c_char) -> i32>,
-    pub get_manifest_path: Option<unsafe extern "C" fn() -> *const c_char>,
-    pub reload_mod: Option<unsafe extern "C" fn(*const c_char) -> i32>,
-}
+pub use chu_abi::{ChuModAPI, ChuModInfo};
 
 #[derive(Clone, Copy)]
 pub struct Api {
@@ -88,7 +38,9 @@ impl Api {
         };
         self.raw()
             .and_then(|api| api.aob_scan)
-            .map_or(0, |func| unsafe { func(start, size, pattern.as_ptr(), mask.as_ptr()) })
+            .map_or(0, |func| unsafe {
+                func(start, size, pattern.as_ptr(), mask.as_ptr())
+            })
     }
 
     pub fn mem_write(&self, addr: usize, data: &[u8]) -> bool {
@@ -149,6 +101,25 @@ impl Api {
             .is_some_and(|func| unsafe { func(target as *mut c_void) == 0 })
     }
 
+    pub fn register_present_callback(&self, cb: chu_abi::ChuModPresentCallback) -> bool {
+        self.raw()
+            .and_then(|api| api.register_present_callback)
+            .is_some_and(|func| unsafe { func(Some(cb)) == 0 })
+    }
+
+    #[allow(dead_code)]
+    pub fn register_reset_callback(&self, cb: chu_abi::ChuModResetCallback) -> bool {
+        self.raw()
+            .and_then(|api| api.register_reset_callback)
+            .is_some_and(|func| unsafe { func(Some(cb)) == 0 })
+    }
+
+    pub fn set_frame_lock(&self, fps: u32) -> bool {
+        self.raw()
+            .and_then(|api| api.set_frame_lock)
+            .is_some_and(|func| unsafe { func(fps) == 0 })
+    }
+
     pub fn game_base(&self) -> usize {
         self.info().map_or(0, |info| info.game_base)
     }
@@ -173,7 +144,11 @@ impl Api {
         unsafe { self.info.as_ref() }
     }
 
-    fn log(&self, msg: &str, select: impl FnOnce(&ChuModAPI) -> Option<unsafe extern "C" fn(*const c_char)>) {
+    fn log(
+        &self,
+        msg: &str,
+        select: impl FnOnce(&ChuModAPI) -> Option<unsafe extern "C" fn(*const c_char)>,
+    ) {
         let Some(api) = self.raw() else {
             return;
         };
@@ -184,13 +159,4 @@ impl Api {
             unsafe { func(msg.as_ptr()) };
         }
     }
-}
-
-#[macro_export]
-macro_rules! log {
-    ($($arg:tt)*) => {{
-        if let Some(api) = $crate::util::api::API.get() {
-            api.log_info(&format!($($arg)*));
-        }
-    }};
 }
