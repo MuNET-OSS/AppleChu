@@ -39,6 +39,36 @@ pub struct ExternalChuniIo {
 unsafe impl Send for ExternalChuniIo {}
 unsafe impl Sync for ExternalChuniIo {}
 
+/// Raw JVS function pointers extracted from an external IO DLL, used by the
+/// chu2to3 shared-memory producer thread so it can poll the DLL directly
+/// without contending for the global EXTERNAL mutex.
+#[derive(Clone, Copy)]
+pub struct JvsRawFns {
+    pub api_version: u16,
+    jvs_init: JvsInitFn,
+    jvs_poll: JvsPollFn,
+    jvs_read_coin: JvsReadCoinFn,
+}
+
+unsafe impl Send for JvsRawFns {}
+unsafe impl Sync for JvsRawFns {}
+
+impl JvsRawFns {
+    pub unsafe fn jvs_init(&self) -> i32 {
+        (self.jvs_init)()
+    }
+
+    pub unsafe fn jvs_poll(&self, opbtn: &mut u8, beams: &mut u8) {
+        (self.jvs_poll)(opbtn, beams);
+    }
+
+    pub unsafe fn jvs_read_coin(&self) -> u16 {
+        let mut total = 0u16;
+        (self.jvs_read_coin)(&mut total);
+        total
+    }
+}
+
 unsafe fn resolve(module: HMODULE, name: &[u8]) -> Option<*const c_void> {
     GetProcAddress(module, name.as_ptr()).map(|proc| proc as *const c_void)
 }
@@ -178,6 +208,18 @@ impl ExternalChuniIo {
     pub unsafe fn jvs_poll(&self, opbtn: &mut u8, beams: &mut u8) {
         self.ensure_jvs_init();
         (self.jvs_poll)(opbtn, beams);
+    }
+
+    /// Snapshot the raw JVS function pointers for use by the chu2to3 producer
+    /// thread. The thread polls the DLL directly, matching segatools' x86
+    /// jvs_poll_thread_proc behaviour.
+    pub fn jvs_raw_fns(&self) -> JvsRawFns {
+        JvsRawFns {
+            api_version: self.api_version,
+            jvs_init: self.jvs_init,
+            jvs_poll: self.jvs_poll,
+            jvs_read_coin: self.jvs_read_coin,
+        }
     }
 
     pub unsafe fn jvs_read_coin(&self) -> u16 {

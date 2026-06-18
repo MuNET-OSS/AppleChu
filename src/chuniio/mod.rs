@@ -1,3 +1,4 @@
+pub mod chu2to3;
 pub mod config;
 pub mod external;
 mod led_output;
@@ -38,11 +39,20 @@ static BACKEND: Lazy<Mutex<Option<ChuniIoBackend>>> = Lazy::new(|| Mutex::new(No
 
 pub fn init(api: &Api, config: &Config) {
     led_output::init(LedOutputConfig::load(config));
-    let path = chuniio_path(config);
+    let (path, single_dll) = chuniio_path(config);
     if !path.is_empty() {
         match unsafe { ExternalChuniIo::load(&path) } {
             Ok(external) => {
                 let version = external.api_version;
+                // Single-DLL `path` mode mirrors segatools' chu2to3 engine: the
+                // 32-bit chusanApp side must publish JVS state into the
+                // `Local\\Chu2to3Shmem` shared memory so the chusanhook_x64
+                // injected into amdaemon can read it. Without this, amdaemon's
+                // OpenFileMapping fails and no JVS input reaches the game.
+                if single_dll {
+                    let fns = external.jvs_raw_fns();
+                    chu2to3::start(api, fns);
+                }
                 if let Ok(mut guard) = EXTERNAL.lock() {
                     *guard = Some(external);
                 }
@@ -250,16 +260,24 @@ pub fn led_set_colors(board: u8, rgb: &mut [u8]) {
     }
 }
 
-fn chuniio_path(config: &Config) -> String {
+/// Resolve the external chuniio DLL path.
+///
+/// Returns `(path, single_dll)`. `single_dll` is true when the single-DLL
+/// `path` setting is used, which triggers the chu2to3 shared-memory bridge so
+/// the amdaemon-side chusanhook_x64 can consume JVS state. The split
+/// `path32`/`path64` form is the dual-DLL mode (each process loads its own
+/// matching DLL) and does not use chu2to3.
+fn chuniio_path(config: &Config) -> (String, bool) {
     let path = config.get_string_alias(&[("ChuniIo", "path"), ("chuniio", "path")], "");
     if !path.is_empty() {
-        return path;
+        return (path, true);
     }
-    if cfg!(target_pointer_width = "64") {
+    let split = if cfg!(target_pointer_width = "64") {
         config.get_string_alias(&[("ChuniIo", "path64"), ("chuniio", "path64")], "")
     } else {
         config.get_string_alias(&[("ChuniIo", "path32"), ("chuniio", "path32")], "")
-    }
+    };
+    (split, false)
 }
 
 #[cfg(windows)]
