@@ -19,7 +19,7 @@ struct MiscConfig {
 }
 
 pub fn init(api: &Api, config: &Config) {
-    if config.get_bool("Misc", "enable", true) == false {
+    if !config.get_bool("Misc", "enable", true) {
         return;
     }
 

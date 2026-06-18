@@ -1,4 +1,11 @@
-#![allow(non_snake_case, clippy::manual_c_str_literals)]
+#![allow(
+    non_snake_case,
+    dead_code,
+    clashing_extern_declarations,
+    clippy::manual_c_str_literals,
+    clippy::module_inception,
+    clippy::too_many_arguments
+)]
 
 mod aime;
 mod autoplay;

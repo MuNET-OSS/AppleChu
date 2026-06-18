@@ -6,7 +6,7 @@ use crate::platform::winapi;
 use crate::util::api::Api;
 
 pub fn init(api: &Api, config: &Config) {
-    if config.get_bool("AMVideo", "enable", true) == false {
+    if !config.get_bool("AMVideo", "enable", true) {
         return;
     }
 

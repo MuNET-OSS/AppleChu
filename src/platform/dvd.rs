@@ -3,7 +3,7 @@ use crate::platform::vfs;
 use crate::util::api::Api;
 
 pub fn init(api: &Api, config: &Config) {
-    if config.get_bool("DVD", "enable", true) == false {
+    if !config.get_bool("DVD", "enable", true) {
         return;
     }
 

@@ -33,7 +33,7 @@ enum TimezoneMode {
 }
 
 pub fn init(api: &Api, config: &Config) {
-    if config.get_bool("Clock", "enable", true) == false {
+    if !config.get_bool("Clock", "enable", true) {
         return;
     }
 

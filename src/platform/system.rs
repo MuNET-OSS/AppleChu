@@ -6,7 +6,7 @@ use crate::util::api::Api;
 const SYSFILE_NAME: &str = "sysfile.dat";
 
 pub fn init(api: &Api, config: &Config) {
-    if config.get_bool("System", "enable", true) == false {
+    if !config.get_bool("System", "enable", true) {
         return;
     }
 

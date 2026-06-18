@@ -502,7 +502,7 @@ unsafe fn write_value(
 }
 
 fn resolve_key_id(parent: usize, subkey: *const u16) -> Option<usize> {
-    let subkey = unsafe { winapi::wide_to_string(subkey) }.unwrap_or_default();
+    let subkey = winapi::wide_to_string(subkey).unwrap_or_default();
     let (root, path) = resolve_candidate(parent, &subkey)?;
     KEYS.lock()
         .ok()?

@@ -256,10 +256,11 @@ fn aime_port() -> u32 {
 
 pub fn load_config(config: &Config, base_dir: impl AsRef<Path>) -> AimeConfig {
     let path = config.get_string_alias(&[("Aime", "aime_path"), ("aime", "aimePath")], "aime.txt");
-    let aime_path = Path::new(&path)
-        .is_absolute()
-        .then(|| PathBuf::from(&path))
-        .unwrap_or_else(|| base_dir.as_ref().join(path));
+    let aime_path = if Path::new(&path).is_absolute() {
+        PathBuf::from(&path)
+    } else {
+        base_dir.as_ref().join(path)
+    };
     let authdata_path = resolve_path(
         base_dir.as_ref(),
         &config.get_string_alias(
@@ -275,10 +276,11 @@ pub fn load_config(config: &Config, base_dir: impl AsRef<Path>) -> AimeConfig {
         &[("Aime", "felica_path"), ("aime", "felicaPath")],
         "felica.txt",
     );
-    let felica_path = Path::new(&felica_path)
-        .is_absolute()
-        .then(|| PathBuf::from(&felica_path))
-        .unwrap_or_else(|| base_dir.as_ref().join(felica_path));
+    let felica_path = if Path::new(&felica_path).is_absolute() {
+        PathBuf::from(&felica_path)
+    } else {
+        base_dir.as_ref().join(felica_path)
+    };
 
     AimeConfig {
         enable: config.get_bool_alias(&[("Aime", "enable"), ("aime", "enable")], true),
@@ -318,10 +320,11 @@ fn dll_path(config: &Config, upper: &str, lower: &str) -> String {
 }
 
 fn resolve_path(base_dir: impl AsRef<Path>, path: &str) -> PathBuf {
-    Path::new(path)
-        .is_absolute()
-        .then(|| PathBuf::from(path))
-        .unwrap_or_else(|| base_dir.as_ref().join(path))
+    if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        base_dir.as_ref().join(path)
+    }
 }
 
 pub fn vfd_set_text(text: &[u8], state: &AimeIoVfdState) {

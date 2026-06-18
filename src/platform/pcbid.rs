@@ -10,7 +10,7 @@ static mut ORIG_GET_COMPUTER_NAME_A: Option<GetComputerNameAFn> = None;
 static SERIAL_NO: OnceCell<String> = OnceCell::new();
 
 pub fn init(api: &Api, config: &Config) {
-    if config.get_bool("PCBID", "enable", true) == false {
+    if !config.get_bool("PCBID", "enable", true) {
         return;
     }
 

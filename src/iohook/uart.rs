@@ -113,7 +113,7 @@ pub fn uart_init(port_no: u32) {
 }
 
 pub fn is_uart_handle(handle: usize) -> bool {
-    if handle >= FAKE_HANDLE_BASE && handle < FAKE_HANDLE_BASE + 0x10000 {
+    if (FAKE_HANDLE_BASE..FAKE_HANDLE_BASE + 0x10000).contains(&handle) {
         return true;
     }
     HANDLE_PORTS
@@ -336,7 +336,7 @@ fn fake_handle(port_no: u32) -> usize {
 }
 
 fn port_from_handle(handle: usize) -> Option<u32> {
-    if handle >= FAKE_HANDLE_BASE && handle < FAKE_HANDLE_BASE + 0x10000 {
+    if (FAKE_HANDLE_BASE..FAKE_HANDLE_BASE + 0x10000).contains(&handle) {
         return Some((handle & 0xFFFF) as u32);
     }
     HANDLE_PORTS.lock().ok()?.get(&handle).copied()

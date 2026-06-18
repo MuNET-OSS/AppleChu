@@ -66,7 +66,7 @@ pub struct SystemTime {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct TimeZoneInformation {
     pub bias: i32,
     pub standard_name: [u16; 32],
@@ -75,20 +75,6 @@ pub struct TimeZoneInformation {
     pub daylight_name: [u16; 32],
     pub daylight_date: SystemTime,
     pub daylight_bias: i32,
-}
-
-impl Default for TimeZoneInformation {
-    fn default() -> Self {
-        Self {
-            bias: 0,
-            standard_name: [0; 32],
-            standard_date: SystemTime::default(),
-            standard_bias: 0,
-            daylight_name: [0; 32],
-            daylight_date: SystemTime::default(),
-            daylight_bias: 0,
-        }
-    }
 }
 
 #[link(name = "kernel32")]
