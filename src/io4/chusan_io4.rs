@@ -2,6 +2,17 @@ use super::{Io4Ops, Io4State};
 use super::{BUTTON_SERVICE, BUTTON_TEST};
 use crate::chuniio;
 
+// API < 0x0101 的旧版映射，segatools 早期把 IR beam 顺序搞反过，
+// 报告该版本的 DLL 是按错误映射写的，必须保留兼容
+const IR_MASKS_V1: [(u16, u16); 6] = [
+    (0, 1 << 13),
+    (1 << 13, 0),
+    (0, 1 << 12),
+    (1 << 12, 0),
+    (0, 1 << 11),
+    (1 << 11, 0),
+];
+
 const IR_MASKS: [(u16, u16); 6] = [
     (1 << 13, 0),
     (0, 1 << 13),
@@ -30,7 +41,12 @@ impl Io4Ops for ChusanIo4Ops {
         }
         state.chutes[0] = coins << 8;
 
-        for (idx, (p1, p2)) in IR_MASKS.iter().copied().enumerate() {
+        let masks = if chuniio::effective_api_version() >= 0x0101 {
+            &IR_MASKS
+        } else {
+            &IR_MASKS_V1
+        };
+        for (idx, (p1, p2)) in masks.iter().copied().enumerate() {
             if beams & (1 << idx) == 0 {
                 state.buttons[0] |= p1;
                 state.buttons[1] |= p2;

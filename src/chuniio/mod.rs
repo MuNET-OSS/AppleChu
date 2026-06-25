@@ -23,6 +23,8 @@ pub const OPBTN_TEST: u8 = 0x01;
 pub const OPBTN_SERVICE: u8 = 0x02;
 pub const OPBTN_COIN: u8 = 0x04;
 
+pub const BUILTIN_API_VERSION: u16 = 0x0102;
+
 static EXTERNAL: Lazy<Mutex<Option<ExternalChuniIo>>> = Lazy::new(|| Mutex::new(None));
 static EXTERNAL_SLIDER_CB: Mutex<Option<SliderCallback>> = Mutex::new(None);
 
@@ -160,6 +162,15 @@ pub fn jvs_read_coin_counter() -> u16 {
     backend.coins
 }
 
+pub fn effective_api_version() -> u16 {
+    if let Ok(guard) = EXTERNAL.lock() {
+        if let Some(external) = guard.as_ref() {
+            return external.api_version;
+        }
+    }
+    BUILTIN_API_VERSION
+}
+
 pub fn slider_init() -> Result<(), i32> {
     Ok(())
 }
@@ -243,21 +254,23 @@ unsafe extern "C" fn external_slider_trampoline(state: *const u8) {
 }
 
 pub fn slider_set_leds(rgb: &[u8]) {
-    led_output::update(2, rgb);
     if let Ok(guard) = EXTERNAL.lock() {
         if let Some(external) = guard.as_ref() {
             unsafe { external.slider_set_leds(rgb.as_ptr()) };
+            return;
         }
     }
+    led_output::update(2, rgb);
 }
 
 pub fn led_set_colors(board: u8, rgb: &mut [u8]) {
-    led_output::update(board, rgb);
     if let Ok(guard) = EXTERNAL.lock() {
         if let Some(external) = guard.as_ref() {
             unsafe { external.led_set_colors(board, rgb.as_mut_ptr()) };
+            return;
         }
     }
+    led_output::update(board, rgb);
 }
 
 /// Resolve the external chuniio DLL path.
