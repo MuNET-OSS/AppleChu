@@ -16,6 +16,7 @@ mod gfx;
 mod io4;
 mod iohook;
 mod led;
+mod national_match;
 mod patch_engine;
 mod patches;
 mod platform;
@@ -139,6 +140,7 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
     }
 
     patches::apply_all(api, &config);
+    national_match::init(api, &config);
     autoplay::init_all(api, &config);
     ux::init_all(api, &config);
     d3d9::init_all(api, &config);

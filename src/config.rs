@@ -106,6 +106,9 @@ fast_restart = true
 ## 网络请求日志（诊断用：输出游戏的 WinHTTP 请求到日志）
 #[NetLog]
 
+## 全国对战（将对战 UDP 转为 TCP 经服务端中继，reflector 地址由服务端下发）
+#[NationalMatch]
+
 ## 自动游玩
 #[Autoplay]
 #hotkey = "Home"
