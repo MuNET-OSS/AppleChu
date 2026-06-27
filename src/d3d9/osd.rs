@@ -452,7 +452,7 @@ unsafe fn render_text_bitmap(text: &str, width: u32, height: u32) -> Option<Vec<
     let len = (width * height * 4) as usize;
     let mut out = vec![0u8; len];
     ptr::copy_nonoverlapping(bits.cast::<u8>(), out.as_mut_ptr(), len);
-    for pixel in out.chunks_exact_mut(4) {
+    for pixel in out.as_chunks_mut::<4>().0 {
         let alpha = pixel[0].max(pixel[1]).max(pixel[2]);
         if alpha == 0 {
             pixel[0] = 0;
