@@ -5,6 +5,8 @@ use std::sync::Mutex;
 use once_cell::sync::OnceCell;
 use windows_sys::Win32::Networking::WinSock::{SOCKADDR, SOCKADDR_IN, WSABUF};
 
+mod music;
+
 use crate::config::Config;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat;
@@ -81,6 +83,8 @@ pub fn init(api: &Api, config: &Config) {
     }
 
     api.log_info("national match: enabled (UDP<->TCP relay)");
+
+    music::init(api, config);
 }
 
 unsafe fn collect_payload(buffers: *const WSABUF, count: u32) -> Vec<u8> {
@@ -181,7 +185,8 @@ unsafe extern "system" fn hooked_sendto(
             was
         };
         if !already {
-            let music = build_frame(TYPE_MUSIC, &[0, 0]);
+            let payload = music::music_payload();
+            let music = build_frame(TYPE_MUSIC, &payload);
             send_to_reflector(&music);
         }
 
