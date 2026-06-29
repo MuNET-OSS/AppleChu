@@ -280,6 +280,7 @@ unsafe extern "system" fn hooked_recvfrom(
             deliver(buffers, buffer_count, bytes_recvd, &payload[6..]);
         }
         TYPE_MUSIC => {
+            music::apply_intersection(&payload);
             write_from(from, from_len, reflector_ip, reflector_port);
             deliver(buffers, buffer_count, bytes_recvd, ISFINISH_FALSE);
         }

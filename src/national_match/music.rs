@@ -9,6 +9,7 @@
 //! - 输出 count(2B LE) + 每曲[id(2B LE) + mask(1B)]
 
 use std::mem::transmute;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use once_cell::sync::OnceCell;
@@ -43,6 +44,7 @@ type LoadFn = unsafe extern "stdcall" fn(usize, usize, usize, usize, *const usiz
 static API: OnceCell<Api> = OnceCell::new();
 static TRAMPOLINE: OnceCell<usize> = OnceCell::new();
 static MUSIC_PAYLOAD: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+static MUSIC_CONTAINER: AtomicUsize = AtomicUsize::new(0);
 
 pub fn init(api: &Api, config: &Config) {
     if !config.is_enabled(SECTION) {
@@ -99,6 +101,87 @@ pub fn music_payload() -> Vec<u8> {
         .unwrap_or_else(|| vec![0, 0])
 }
 
+/// 收到服务端交集帧后改写游戏曲库：按 music id 匹配，逐难度把 enable 覆盖为交集掩码对应 bit。
+/// 不在交集内的曲目保持原状（对齐 duolinguo）。
+pub fn apply_intersection(payload: &[u8]) {
+    let Some(api) = API.get() else {
+        return;
+    };
+    let container = MUSIC_CONTAINER.load(Ordering::Acquire);
+    if container == 0 {
+        return;
+    }
+
+    let intersection = parse_intersection(payload);
+    let count = intersection.len();
+    match rewrite_enables(api, container, &intersection) {
+        Some(applied) => api.log_info(&format!(
+            "national match music: intersection {count} musics, rewrote {applied}"
+        )),
+        None => api.log_warn("national match music: intersection rewrite failed"),
+    }
+}
+
+fn parse_intersection(payload: &[u8]) -> Vec<(u16, u8)> {
+    if payload.len() < 2 {
+        return Vec::new();
+    }
+    let count = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let off = 2 + i * 3;
+        if off + 3 > payload.len() {
+            break;
+        }
+        let id = u16::from_le_bytes([payload[off], payload[off + 1]]);
+        out.push((id, payload[off + 2]));
+    }
+    out
+}
+
+fn rewrite_enables(api: &Api, container: usize, intersection: &[(u16, u8)]) -> Option<usize> {
+    let head = read_usize(api, container)?;
+    let mut node = read_usize(api, head + NODE_LEFT)?;
+
+    let mut applied = 0usize;
+    let mut guard = 0usize;
+    while guard < MAX_NODES {
+        guard += 1;
+        if read_u8(api, node + NODE_ISNIL)? != 0 {
+            break;
+        }
+
+        let id = read_u16(api, node + MUSIC_ID)?;
+        if let Some(&(_, mask)) = intersection.iter().find(|&&(mid, _)| mid == id) {
+            if rewrite_node_difficulties(api, node, mask).is_some() {
+                applied += 1;
+            }
+        }
+
+        node = inorder_successor(api, node, head)?;
+        if node == head {
+            break;
+        }
+    }
+    Some(applied)
+}
+
+/// 对单曲的每个难度项写入 enable = (mask >> difficulty_id) & 1。
+fn rewrite_node_difficulties(api: &Api, node: usize, mask: u8) -> Option<()> {
+    let mut first = read_usize(api, node + DIFF_VEC_FIRST)?;
+    let last = read_usize(api, node + DIFF_VEC_LAST)?;
+
+    let mut guard = 0usize;
+    while first != last && guard < 64 {
+        guard += 1;
+        let type_id = read_u8(api, first + DIFF_TYPE_ID)?;
+        let enable = mask.wrapping_shr(u32::from(type_id) & 0x1f) & 1;
+        api.mem_write(first + DIFF_ENABLE, &[enable]);
+        first = first.wrapping_add(DIFF_STRIDE);
+    }
+    Some(())
+}
+
 unsafe extern "stdcall" fn music_load_detour(
     p1: usize,
     p2: usize,
@@ -114,6 +197,8 @@ unsafe extern "stdcall" fn music_load_detour(
     let Some(api) = API.get() else {
         return;
     };
+
+    MUSIC_CONTAINER.store(container as usize, Ordering::Release);
 
     match dump_music(api, container) {
         Some(list) => {
