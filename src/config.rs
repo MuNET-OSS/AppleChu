@@ -34,9 +34,15 @@ Version = "1"
 ## true  = 从机（局域网中有 2-4 台主机时，非标准机的那些设为 true）
 LanSlave = false
 
-## 显示器刷新率（60 或 120）
-## 仅当显示器刷新率 ≥120Hz 时填 120，否则保持 60
-RefreshRate = 60
+## 机台模式
+## SP  = 使用 SP 模式默认端口（LED: COM20/21, Aime: COM3, 启用 VFD）
+## CVT = 使用 CVT 模式默认端口（LED: COM2/3, Aime: COM2, 禁用 VFD）
+Mode = "SP"
+
+## 显示器刷新率
+## 1 = 60Hz（默认）
+## 2 = 120Hz（仅当显示器刷新率 ≥120Hz 时选择，否则可能黑屏）
+RefreshRate = 1
 
 ## =============================================================================
 ## 显示设置
@@ -220,10 +226,11 @@ impl Config {
 
     fn derive_dipsw(&mut self) {
         let lan_slave = self.get_bool("System", "LanSlave", false);
-        let refresh_rate = self.get_int("System", "RefreshRate", 60);
+        let refresh_rate_raw = self.get_int("System", "RefreshRate", 1);
+        let refresh_120hz = refresh_rate_raw == 2;
 
         let dipsw1 = if lan_slave { 0 } else { 1 };
-        let (dipsw2, dipsw3) = if refresh_rate == 120 { (0, 0) } else { (1, 1) };
+        let (dipsw2, dipsw3) = if refresh_120hz { (0, 0) } else { (1, 1) };
 
         let table = match self.sections.entry("System") {
             toml::map::Entry::Occupied(entry) => entry.into_mut(),
@@ -234,6 +241,11 @@ impl Config {
             table.insert("dipsw2".into(), toml::Value::Integer(dipsw2));
             table.insert("dipsw3".into(), toml::Value::Integer(dipsw3));
         }
+    }
+
+    pub fn is_sp_mode(&self) -> bool {
+        self.get_string("System", "Mode", "")
+            .eq_ignore_ascii_case("sp")
     }
 
     pub fn is_enabled(&self, section: &str) -> bool {

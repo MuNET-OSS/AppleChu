@@ -88,7 +88,7 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
     }
 
     if enable_devices {
-        let is_sp = !config.get_bool("System", "dipsw3", false);
+        let is_sp = config.is_sp_mode();
 
         chuniio::init(api, &config);
         io4::init(api, &config);
