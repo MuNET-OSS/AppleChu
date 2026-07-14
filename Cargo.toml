@@ -9,7 +9,7 @@ name = "winhttp"
 crate-type = ["cdylib"]
 
 [dependencies]
-chu-abi = { path = "ChuModLoader/chu-abi" }
+chu-abi = { path = "chu-abi" }
 toml = "0.8"
 once_cell = "1"
 retour = "0.4.0-alpha.4"

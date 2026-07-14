@@ -88,7 +88,6 @@ AppleChu 内置一套与 segatools 配置和 API 完全兼容的游戏侧 IO 仿
 需要 Rust nightly 工具链与 `i686-pc-windows-msvc` 目标：
 
 ```bash
-git submodule update --init --recursive
 rustup target add i686-pc-windows-msvc
 cargo build --release
 ```
