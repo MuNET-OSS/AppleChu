@@ -6,6 +6,7 @@
     clippy::module_inception,
     clippy::too_many_arguments
 )]
+#![feature(c_variadic)]
 
 mod aime;
 mod autoplay;
@@ -20,6 +21,7 @@ mod national_match;
 mod patch_engine;
 mod patches;
 mod platform;
+mod proxy;
 mod slider;
 mod util;
 mod ux;
@@ -28,7 +30,7 @@ mod vfd;
 use std::ffi::c_char;
 
 use crate::config::Config;
-use crate::util::api::{API, Api, ChuModAPI, ChuModInfo};
+use crate::util::api::{Api, ChuModAPI, ChuModInfo, API};
 
 const NAME: &[u8] = b"AppleChu\0";
 const VERSION: &[u8] = b"1.0.0\0";
@@ -55,7 +57,9 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
         return -1;
     }
 
-    let api_handle = Api::new(api, info);
+    let Some(api_handle) = Api::new(api, info) else {
+        return -1;
+    };
     let _ = API.set(api_handle);
 
     let Some(api) = API.get() else {

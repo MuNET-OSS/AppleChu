@@ -1,6 +1,6 @@
 ﻿# AppleChu
 
-基于 [ChuModLoader](https://github.com/MuNET-OSS/ChuModLoader) 的 CHUNITHM Mod
+集成 Mod 加载器的 CHUNITHM 启动代理与功能补丁
 
 <p align="center">
   <a href="#许可证"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"></a>
@@ -21,13 +21,14 @@
 
 ## 安装
 
-1. 安装 ChuModLoader，将 `winhttp.dll` 放到 `chusanApp.exe` 旁边
-2. 将 `AppleChu.dll` 复制到游戏的 `mods/` 目录
-3. 启动游戏，`AppleChu.toml` 会在游戏目录自动生成
-4. 按需编辑 `AppleChu.toml` 启用功能
+1. 将 `winhttp.dll` 放到 `chusanApp.exe` 旁边
+2. 启动游戏，`AppleChu.toml` 会在游戏目录自动生成
+3. 按需编辑 `AppleChu.toml` 启用功能
+
+其他兼容 ChuMod API 的 DLL 仍可放入 `mods/` 目录自动加载。
 
 > [!TIP]
-> 预编译的 `AppleChu.dll` 可在 [Releases](https://github.com/MuNET-OSS/AppleChu/releases) 页面下载
+> 预编译的 `winhttp.dll` 可在 [Releases](https://github.com/MuNET-OSS/AppleChu/releases) 页面下载
 
 ## 配置
 
@@ -95,7 +96,7 @@ cargo build --release
 产物位于：
 
 ```text
-target/i686-pc-windows-msvc/release/AppleChu.dll
+target/i686-pc-windows-msvc/release/winhttp.dll
 ```
 
 ## 许可证
