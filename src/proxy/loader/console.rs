@@ -6,7 +6,7 @@ use windows_sys_loader::Win32::System::Console::{
 };
 
 use super::log::{write_banner_line, ANSI_CYAN};
-use super::state::LoaderState;
+use super::state::{LoaderState, OutputSink};
 use super::{hash, pe};
 
 const CP_UTF8: u32 = 65001;
@@ -15,30 +15,50 @@ const ANSI_GRAY: &str = "\x1b[37m";
 // TODO: 控制台图标（SetConsoleIcon / 嵌入 RT_ICON 资源）
 // TODO: 控制台字体大小/窗口尺寸调整
 
-pub unsafe fn init(state: &mut LoaderState) {
-    AllocConsole();
+pub unsafe fn init(state: &mut LoaderState, console_enabled: bool) {
+    if console_enabled {
+        AllocConsole();
+    }
 
     let handle = GetStdHandle(STD_OUTPUT_HANDLE);
     if handle.is_null() || handle == INVALID_HANDLE_VALUE {
         return;
     }
 
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleTitleA(b"ChuModLoader\0".as_ptr());
+    if console_enabled {
+        SetConsoleOutputCP(CP_UTF8);
+        SetConsoleTitleA(b"AppleChu\0".as_ptr());
+    }
 
-    enable_ansi(handle);
-    state.console = handle;
+    state.output = match console_ansi_enabled(handle, console_enabled) {
+        Some(ansi_enabled) => OutputSink::Console {
+            handle,
+            ansi_enabled,
+        },
+        None => OutputSink::Stream(handle),
+    };
 
     print_banner(state);
 }
 
-unsafe fn enable_ansi(handle: windows_sys_loader::Win32::Foundation::HANDLE) {
+unsafe fn console_ansi_enabled(
+    handle: windows_sys_loader::Win32::Foundation::HANDLE,
+    configure: bool,
+) -> Option<bool> {
     let mut mode: u32 = 0;
-    if GetConsoleMode(handle, &mut mode) != 0 {
-        SetConsoleMode(
-            handle,
-            mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING,
-        );
+    if GetConsoleMode(handle, &mut mode) == 0 {
+        return None;
+    }
+
+    if configure {
+        Some(
+            SetConsoleMode(
+                handle,
+                mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+            ) != 0,
+        )
+    } else {
+        Some(mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0)
     }
 }
 
@@ -57,7 +77,7 @@ fn print_banner(state: &mut LoaderState) {
     };
 
     write_banner_line(state, ANSI_CYAN, sep);
-    write_banner_line(state, ANSI_CYAN, &format!("ChuModLoader v{version} Nya~ "));
+    write_banner_line(state, ANSI_CYAN, &format!("AppleChu v{version} Nya~ "));
     write_banner_line(state, ANSI_GRAY, &format!("OS: {}", os_version()));
     write_banner_line(state, ANSI_GRAY, &format!("Hash Code: {hash_code}"));
     write_banner_line(state, ANSI_CYAN, sep);

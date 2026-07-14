@@ -21,6 +21,7 @@ use windows_sys_loader::Win32::System::LibraryLoader::GetModuleHandleA;
 
 use chu_abi::{ChuModInfo, CHUMOD_API_VERSION};
 
+use crate::config::Config;
 use crate::proxy::api_impl;
 
 use self::log::{log_info, write_log_inner};
@@ -39,12 +40,16 @@ pub unsafe fn load_mods() {
     }
     state.loaded = true;
 
-    console::init(&mut state);
-
     let base_dir = match get_self_base_dir() {
         Some(d) => d,
         None => return,
     };
+    let config = Config::load(&base_dir);
+    console::init(
+        &mut state,
+        config.get_bool("System", "EnableConsole", true),
+    );
+
     state.base_dir = base_dir.clone();
     state.log_file = File::create(format!("{}\\chumod_loader.log", base_dir)).ok();
     write_log_inner(&mut state, &format!("loader start: base={}", base_dir));

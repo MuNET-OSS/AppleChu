@@ -2,11 +2,21 @@ use std::ffi::c_void;
 use std::fs::File;
 use std::sync::Mutex;
 
-use windows_sys_loader::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys_loader::Win32::Foundation::HANDLE;
 
 use chu_abi::{ChuModFrameFunc, ChuModReadyFunc, ChuModShutdownFunc};
 
 pub type HMODULE = *mut c_void;
+
+#[derive(Clone, Copy)]
+pub enum OutputSink {
+    None,
+    Console {
+        handle: HANDLE,
+        ansi_enabled: bool,
+    },
+    Stream(HANDLE),
+}
 
 pub struct LoadedMod {
     pub handle: HMODULE,
@@ -28,7 +38,7 @@ pub struct LoaderState {
     pub manifest_paths: Vec<String>,
     pub log_file: Option<File>,
     pub current_mod_log_file: Option<File>,
-    pub console: HANDLE,
+    pub output: OutputSink,
 }
 
 unsafe impl Send for LoaderState {}
@@ -43,7 +53,7 @@ impl Default for LoaderState {
             manifest_paths: Vec::new(),
             log_file: None,
             current_mod_log_file: None,
-            console: INVALID_HANDLE_VALUE,
+            output: OutputSink::None,
         }
     }
 }

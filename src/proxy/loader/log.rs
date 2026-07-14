@@ -1,10 +1,10 @@
 use std::ffi::{c_char, c_void};
 use std::io::Write;
 
-use windows_sys_loader::Win32::Foundation::INVALID_HANDLE_VALUE;
-use windows_sys_loader::Win32::System::Console::WriteConsoleA;
+use windows_sys_loader::Win32::Storage::FileSystem::WriteFile;
+use windows_sys_loader::Win32::System::Console::WriteConsoleW;
 
-use super::state::{LoaderState, STATE};
+use super::state::{LoaderState, OutputSink, STATE};
 
 extern "system" {
     fn GetLocalTime(st: *mut SYSTEMTIME);
@@ -76,17 +76,8 @@ pub fn write_banner_line(state: &mut LoaderState, ansi: &str, msg: &str) {
             let _ = f.flush();
         }
 
-        if state.console != INVALID_HANDLE_VALUE && !state.console.is_null() {
-            let colored = format!("{ANSI_TIME}[{time}]{ANSI_RESET} {ansi}{msg}{ANSI_RESET}\n");
-            let mut written = 0u32;
-            WriteConsoleA(
-                state.console,
-                colored.as_ptr(),
-                colored.len() as u32,
-                &mut written,
-                std::ptr::null(),
-            );
-        }
+        let colored = format!("{ANSI_TIME}[{time}]{ANSI_RESET} {ansi}{msg}{ANSI_RESET}\n");
+        write_output(state.output, &plain, &colored);
     }
 }
 
@@ -115,20 +106,50 @@ pub fn write_log_inner_level(state: &mut LoaderState, level: LogLevel, msg: &str
             let _ = f.flush();
         }
 
-        if state.console != INVALID_HANDLE_VALUE && !state.console.is_null() {
-            let colored = format!(
-                "{ANSI_TIME}[{time}]{ANSI_RESET} {ANSI_TAG}[loader]{ANSI_RESET} {body}[{label}] {msg}{ANSI_RESET}\n",
-                body = level.body_ansi(),
-                label = level.label(),
-            );
+        let colored = format!(
+            "{ANSI_TIME}[{time}]{ANSI_RESET} {ANSI_TAG}[loader]{ANSI_RESET} {body}[{label}] {msg}{ANSI_RESET}\n",
+            body = level.body_ansi(),
+            label = level.label(),
+        );
+        write_output(state.output, &plain, &colored);
+    }
+}
+
+fn write_output(output: OutputSink, plain: &str, colored: &str) {
+    match output {
+        OutputSink::None => {}
+        OutputSink::Console {
+            handle,
+            ansi_enabled,
+        } => {
+            let text = if ansi_enabled { colored } else { plain };
+            let utf16: Vec<u16> = text.encode_utf16().collect();
+            let length = u32::try_from(utf16.len()).unwrap_or(u32::MAX);
             let mut written = 0u32;
-            WriteConsoleA(
-                state.console,
-                colored.as_ptr(),
-                colored.len() as u32,
-                &mut written,
-                std::ptr::null(),
-            );
+            // SAFETY: 初始化输出时已排除无效句柄，UTF-16 缓冲区在同步调用期间保持有效。
+            unsafe {
+                WriteConsoleW(
+                    handle,
+                    utf16.as_ptr(),
+                    length,
+                    &mut written,
+                    std::ptr::null(),
+                );
+            }
+        }
+        OutputSink::Stream(handle) => {
+            let length = u32::try_from(plain.len()).unwrap_or(u32::MAX);
+            let mut written = 0u32;
+            // SAFETY: 初始化输出时已排除无效句柄，字符串缓冲区在同步调用期间保持有效。
+            unsafe {
+                WriteFile(
+                    handle,
+                    plain.as_ptr(),
+                    length,
+                    &mut written,
+                    std::ptr::null_mut(),
+                );
+            }
         }
     }
 }
