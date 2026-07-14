@@ -2,13 +2,37 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::config::Config;
-use crate::patch_engine::{PatchVariant, VersionedPatch, apply_patch};
+use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat;
 
 const WINHTTP_DLL: &str = "winhttp.dll";
 const WINHTTP_OPEN_REQUEST: &str = "WinHttpOpenRequest";
 const WINHTTP_FLAG_SECURE: u32 = 0x0080_0000;
+const TLS_FLAG_PATTERN: &str = "85 C0 75 07 BE 00 00 ?? 00 EB 02 33 F6 8B 5B 34";
+const TLS_FLAG_PATTERN_OFFSET: isize = 7;
+const ENCRYPTION_FIRST_PATTERN_OFFSET: isize = 0;
+const ENCRYPTION_SECOND_PATTERN_OFFSET: isize = 4;
+const ENCRYPTION_FIRST_F5_PATTERN: &str = concat!(
+    "F5 00 00 00 ?? 00 00 00 ",
+    "?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ",
+    "01 00 00 00 00 00 00 40 FF FF FF 3F"
+);
+const ENCRYPTION_SECOND_F5_PATTERN: &str = concat!(
+    "?? 00 00 00 F5 00 00 00 ",
+    "?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ",
+    "01 00 00 00 00 00 00 40 FF FF FF 3F"
+);
+const ENCRYPTION_FIRST_FA_PATTERN: &str = concat!(
+    "FA 00 00 00 ?? 00 00 00 ",
+    "?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ",
+    "01 00 00 00 00 00 00 40 FF FF FF 3F"
+);
+const ENCRYPTION_SECOND_FA_PATTERN: &str = concat!(
+    "?? 00 00 00 FA 00 00 00 ",
+    "?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ",
+    "01 00 00 00 00 00 00 40 FF FF FF 3F"
+);
 
 type WinHttpOpenRequestFn = unsafe extern "system" fn(
     *mut c_void,
@@ -29,13 +53,22 @@ pub fn apply(api: &Api, config: &Config) {
         &VersionedPatch {
             name: "disable encryption 1",
             section: "DisableEncryption",
-            variants: &[PatchVariant {
-                pattern: None,
-                pattern_offset: 0,
-                known_offsets: &[0x17D200C],
-                expected: &[0xF5],
-                patch: &[0x00],
-            }],
+            variants: &[
+                PatchVariant {
+                    pattern: Some(ENCRYPTION_FIRST_F5_PATTERN),
+                    pattern_offset: ENCRYPTION_FIRST_PATTERN_OFFSET,
+                    known_offsets: &[0x17D200C],
+                    expected: &[0xF5],
+                    patch: &[0x00],
+                },
+                PatchVariant {
+                    pattern: Some(ENCRYPTION_FIRST_FA_PATTERN),
+                    pattern_offset: ENCRYPTION_FIRST_PATTERN_OFFSET,
+                    known_offsets: &[0x1812814],
+                    expected: &[0xFA],
+                    patch: &[0x00],
+                },
+            ],
         },
     );
     apply_patch(
@@ -44,11 +77,35 @@ pub fn apply(api: &Api, config: &Config) {
         &VersionedPatch {
             name: "disable encryption 2",
             section: "DisableEncryption",
+            variants: &[
+                PatchVariant {
+                    pattern: Some(ENCRYPTION_SECOND_F5_PATTERN),
+                    pattern_offset: ENCRYPTION_SECOND_PATTERN_OFFSET,
+                    known_offsets: &[0x17D2010],
+                    expected: &[0xF5],
+                    patch: &[0x00],
+                },
+                PatchVariant {
+                    pattern: Some(ENCRYPTION_SECOND_FA_PATTERN),
+                    pattern_offset: ENCRYPTION_SECOND_PATTERN_OFFSET,
+                    known_offsets: &[0x1812818],
+                    expected: &[0xFA],
+                    patch: &[0x00],
+                },
+            ],
+        },
+    );
+    apply_patch(
+        api,
+        config,
+        &VersionedPatch {
+            name: "disable TLS flag",
+            section: "DisableTLS",
             variants: &[PatchVariant {
-                pattern: None,
-                pattern_offset: 0,
-                known_offsets: &[0x17D2010],
-                expected: &[0xF5],
+                pattern: Some(TLS_FLAG_PATTERN),
+                pattern_offset: TLS_FLAG_PATTERN_OFFSET,
+                known_offsets: &[0xE426CB],
+                expected: &[0x80],
                 patch: &[0x00],
             }],
         },
@@ -102,4 +159,93 @@ unsafe extern "system" fn hooked_open_request(
         accept_types,
         flags & !WINHTTP_FLAG_SECURE,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tls_signature_matches_working_patch_when_revision_moves() {
+        // Given: bytes around the secure-flag instruction in the supplied revision.
+        let bytes = [
+            0x85, 0xC0, 0x75, 0x07, 0xBE, 0x00, 0x00, 0x80, 0x00, 0xEB, 0x02, 0x33, 0xF6, 0x8B,
+            0x5B, 0x34,
+        ];
+
+        // When: the version-independent TLS signature is located.
+        let found = find_pattern(&bytes, TLS_FLAG_PATTERN);
+
+        // Then: it selects the byte that the working executable clears.
+        assert_eq!(
+            found.and_then(|offset| offset.checked_add_signed(TLS_FLAG_PATTERN_OFFSET)),
+            Some(7)
+        );
+        assert_eq!(bytes[7], 0x80);
+    }
+
+    #[test]
+    fn encryption_signatures_match_fa_revision_when_offsets_move() {
+        // Given: the encryption data block from the supplied revision.
+        let bytes = encryption_fixture(0xFA);
+
+        // When: both FA signatures are located independently.
+        let first = find_pattern(&bytes, ENCRYPTION_FIRST_FA_PATTERN);
+        let second = find_pattern(&bytes, ENCRYPTION_SECOND_FA_PATTERN);
+
+        // Then: they select the two bytes cleared by the working executable.
+        assert_eq!(
+            first.and_then(|offset| offset.checked_add_signed(ENCRYPTION_FIRST_PATTERN_OFFSET)),
+            Some(0)
+        );
+        assert_eq!(
+            second.and_then(|offset| offset.checked_add_signed(ENCRYPTION_SECOND_PATTERN_OFFSET)),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn encryption_signatures_keep_f5_revision_compatible() {
+        // Given: the same data layout with the older revision's F5 values.
+        let bytes = encryption_fixture(0xF5);
+
+        // When: both legacy signatures are located independently.
+        let first = find_pattern(&bytes, ENCRYPTION_FIRST_F5_PATTERN);
+        let second = find_pattern(&bytes, ENCRYPTION_SECOND_F5_PATTERN);
+
+        // Then: both legacy patch bytes remain discoverable.
+        assert_eq!(
+            first.and_then(|offset| offset.checked_add_signed(ENCRYPTION_FIRST_PATTERN_OFFSET)),
+            Some(0)
+        );
+        assert_eq!(
+            second.and_then(|offset| offset.checked_add_signed(ENCRYPTION_SECOND_PATTERN_OFFSET)),
+            Some(4)
+        );
+    }
+
+    fn encryption_fixture(value: u8) -> [u8; 36] {
+        [
+            value, 0x00, 0x00, 0x00, value, 0x00, 0x00, 0x00, 0xC8, 0xFD, 0x8E, 0x01, 0xC8, 0xFD,
+            0x8E, 0x01, 0xD8, 0xFD, 0x8E, 0x01, 0xD8, 0xFD, 0x8E, 0x01, 0x01, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x40, 0xFF, 0xFF, 0xFF, 0x3F,
+        ]
+    }
+
+    fn find_pattern(bytes: &[u8], pattern: &str) -> Option<usize> {
+        let tokens = pattern
+            .split_whitespace()
+            .map(|token| match token {
+                "?" | "??" => Some(None),
+                value => u8::from_str_radix(value, 16).ok().map(Some),
+            })
+            .collect::<Option<Vec<_>>>()?;
+
+        bytes.windows(tokens.len()).position(|window| {
+            window
+                .iter()
+                .zip(&tokens)
+                .all(|(actual, expected)| expected.is_none_or(|value| *actual == value))
+        })
+    }
 }
