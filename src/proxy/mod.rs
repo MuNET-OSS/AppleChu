@@ -181,18 +181,6 @@ unsafe fn build_entry_stub(entry: *mut u8) -> Option<*mut u8> {
 }
 
 unsafe extern "system" fn entry_bootstrap() {
-    {
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("bootstrap_diag.log")
-        {
-            let installed = ptr::addr_of!(HIJACK.installed).read();
-            let _ = writeln!(f, "entry_bootstrap called, hijack.installed={}", installed);
-        }
-    }
-
     if HIJACK.installed {
         restore_entry_point();
     }
