@@ -1,6 +1,7 @@
 use crate::config::Config;
-use crate::patch_engine::{PatchVariant, VersionedPatch, apply_patch};
+use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::api::Api;
+use crate::util::memory::PatchMemory;
 
 const BYPASS_1080P_EXPECTED: &[u8] = &[
     0x81, 0xBC, 0x24, 0x34, 0x02, 0x00, 0x00, 0x80, 0x07, 0x00, 0x00, 0x75, 0x1F, 0x81, 0xBC, 0x24,
@@ -13,6 +14,10 @@ const BYPASS_1080P_PATCH: &[u8] = &[
 ];
 
 pub fn apply(api: &Api, config: &Config) {
+    apply_early(api, config);
+}
+
+pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     apply_bypass_1080p(api, config);
     apply_bypass_120hz(api, config);
     apply_patch(
@@ -32,7 +37,7 @@ pub fn apply(api: &Api, config: &Config) {
     );
 }
 
-pub fn apply_bypass_120hz(api: &Api, config: &Config) {
+fn apply_bypass_120hz<M: PatchMemory>(api: &M, config: &Config) {
     apply_patch(
         api,
         config,
@@ -52,7 +57,7 @@ pub fn apply_bypass_120hz(api: &Api, config: &Config) {
     );
 }
 
-fn apply_bypass_1080p(api: &Api, config: &Config) {
+fn apply_bypass_1080p<M: PatchMemory>(api: &M, config: &Config) {
     apply_patch(
         api,
         config,

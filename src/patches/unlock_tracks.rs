@@ -1,10 +1,19 @@
 use crate::config::Config;
-use crate::patch_engine::{PatchVariant, VersionedPatch, apply_patch};
+use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::api::Api;
-use crate::util::memory::write_value;
+use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
 pub fn apply(api: &Api, config: &Config) {
+    apply_unlock_limit(api, config);
+    apply_max_tracks(api, config);
+}
+
+pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
+    apply_unlock_limit(api, config);
+}
+
+fn apply_unlock_limit<M: PatchMemory>(api: &M, config: &Config) {
     apply_patch(
         api,
         config,
@@ -20,7 +29,6 @@ pub fn apply(api: &Api, config: &Config) {
             }],
         },
     );
-    apply_max_tracks(api, config);
 }
 
 fn apply_max_tracks(api: &Api, config: &Config) {
@@ -36,7 +44,7 @@ fn apply_max_tracks(api: &Api, config: &Config) {
         return;
     }
 
-    if write_value(api, addr + 1, max_tracks) {
+    if api.mem_write(addr + 1, &max_tracks.to_le_bytes()) {
         api.log_info(&format!("patch applied: max tracks = {}", max_tracks));
     } else {
         api.log_warn("patch write failed: max tracks");

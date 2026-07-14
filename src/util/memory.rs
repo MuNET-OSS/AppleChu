@@ -2,6 +2,46 @@ use std::mem::size_of;
 
 use crate::util::api::Api;
 
+pub trait PatchMemory {
+    fn game_base(&self) -> usize;
+    fn game_size(&self) -> u32;
+    fn aob_scan(&self, start: usize, size: u32, pattern: &[u8], mask: &str) -> usize;
+    fn mem_read(&self, addr: usize, buf: &mut [u8]) -> bool;
+    fn mem_write(&self, addr: usize, data: &[u8]) -> bool;
+    fn log_info(&self, message: &str);
+    fn log_warn(&self, message: &str);
+}
+
+impl PatchMemory for Api {
+    fn game_base(&self) -> usize {
+        Api::game_base(self)
+    }
+
+    fn game_size(&self) -> u32 {
+        Api::game_size(self)
+    }
+
+    fn aob_scan(&self, start: usize, size: u32, pattern: &[u8], mask: &str) -> usize {
+        Api::aob_scan(self, start, size, pattern, mask)
+    }
+
+    fn mem_read(&self, addr: usize, buf: &mut [u8]) -> bool {
+        Api::mem_read(self, addr, buf)
+    }
+
+    fn mem_write(&self, addr: usize, data: &[u8]) -> bool {
+        Api::mem_write(self, addr, data)
+    }
+
+    fn log_info(&self, message: &str) {
+        Api::log_info(self, message);
+    }
+
+    fn log_warn(&self, message: &str) {
+        Api::log_warn(self, message);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatchResult {
     Applied,
@@ -43,13 +83,13 @@ struct ImageSectionHeader {
 const IMAGE_DOS_SIGNATURE: u16 = 0x5A4D;
 const IMAGE_NT_SIGNATURE: u32 = 0x0000_4550;
 
-pub fn file_offset_to_va(api: &Api, file_offset: u32) -> usize {
+pub fn file_offset_to_va<M: PatchMemory>(api: &M, file_offset: u32) -> usize {
     let base = api.game_base();
     if base == 0 {
         return 0;
     }
 
-    let Some(dos) = read_struct::<ImageDosHeader>(api, base) else {
+    let Some(dos) = read_struct::<ImageDosHeader, _>(api, base) else {
         return 0;
     };
     if dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < 0 {
@@ -57,7 +97,7 @@ pub fn file_offset_to_va(api: &Api, file_offset: u32) -> usize {
     }
 
     let nt_addr = base + dos.e_lfanew as usize;
-    let Some(signature) = read_struct::<u32>(api, nt_addr) else {
+    let Some(signature) = read_struct::<u32, _>(api, nt_addr) else {
         return 0;
     };
     if signature != IMAGE_NT_SIGNATURE {
@@ -65,7 +105,7 @@ pub fn file_offset_to_va(api: &Api, file_offset: u32) -> usize {
     }
 
     let file_header_addr = nt_addr + size_of::<u32>();
-    let Some(file_header) = read_struct::<ImageFileHeader>(api, file_header_addr) else {
+    let Some(file_header) = read_struct::<ImageFileHeader, _>(api, file_header_addr) else {
         return 0;
     };
 
@@ -73,7 +113,7 @@ pub fn file_offset_to_va(api: &Api, file_offset: u32) -> usize {
         + size_of::<ImageFileHeader>()
         + file_header.size_of_optional_header as usize;
     for index in 0..file_header.number_of_sections as usize {
-        let Some(section) = read_struct::<ImageSectionHeader>(
+        let Some(section) = read_struct::<ImageSectionHeader, _>(
             api,
             section_addr + index * size_of::<ImageSectionHeader>(),
         ) else {
@@ -92,7 +132,12 @@ pub fn file_offset_to_va(api: &Api, file_offset: u32) -> usize {
     0
 }
 
-pub fn patch_bytes(api: &Api, addr: usize, expected: &[u8], patch: &[u8]) -> PatchResult {
+pub fn patch_bytes<M: PatchMemory>(
+    api: &M,
+    addr: usize,
+    expected: &[u8],
+    patch: &[u8],
+) -> PatchResult {
     if addr == 0 || expected.len() != patch.len() {
         return PatchResult::Mismatch;
     }
@@ -117,16 +162,16 @@ pub fn patch_bytes(api: &Api, addr: usize, expected: &[u8], patch: &[u8]) -> Pat
     }
 }
 
-pub fn write_value<T>(api: &Api, addr: usize, value: T) -> bool {
-    let bytes =
-        unsafe { std::slice::from_raw_parts((&value as *const T).cast::<u8>(), size_of::<T>()) };
-    api.mem_write(addr, bytes)
-}
-
-fn read_struct<T: Copy>(api: &Api, addr: usize) -> Option<T> {
+fn read_struct<T: Copy, M: PatchMemory>(api: &M, addr: usize) -> Option<T> {
     let mut value = std::mem::MaybeUninit::<T>::uninit();
+    // SAFETY: Category 4（未初始化内存）。切片覆盖 T 的完整对象大小，仅交给 mem_read
+    // 作为输出缓冲区；在 mem_read 成功前不会读取其中任何字节。
     let bytes =
         unsafe { std::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<T>()) };
-    api.mem_read(addr, bytes)
-        .then(|| unsafe { value.assume_init() })
+    if !api.mem_read(addr, bytes) {
+        return None;
+    }
+    // SAFETY: Category 4（未初始化内存）。mem_read 的成功契约表示完整缓冲区均已写入，
+    // 且本函数仅用于读取由 #[repr(C)]/整数构成的 PE 结构。
+    Some(unsafe { value.assume_init() })
 }

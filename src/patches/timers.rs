@@ -1,10 +1,21 @@
 use crate::config::Config;
-use crate::patch_engine::{PatchVariant, VersionedPatch, apply_patch};
+use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::api::Api;
-use crate::util::memory::write_value;
+use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
 pub fn apply(api: &Api, config: &Config) {
+    apply_disable_timer(api, config);
+    apply_custom_timers(api, config);
+    apply_all_timers(api, config);
+}
+
+pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
+    apply_disable_timer(api, config);
+    apply_all_timers(api, config);
+}
+
+fn apply_disable_timer<M: PatchMemory>(api: &M, config: &Config) {
     apply_patch(
         api,
         config,
@@ -20,7 +31,9 @@ pub fn apply(api: &Api, config: &Config) {
             }],
         },
     );
-    apply_custom_timers(api, config);
+}
+
+fn apply_all_timers<M: PatchMemory>(api: &M, config: &Config) {
     apply_patch(
         api,
         config,
@@ -89,7 +102,7 @@ fn write_timer_at(api: &Api, name: &str, addr: usize, value: i64) {
         return;
     };
 
-    if write_value(api, addr, value) {
+    if api.mem_write(addr, &value.to_le_bytes()) {
         api.log_info(&format!("patch applied: {} = {}", name, value));
     } else {
         api.log_warn(&format!("patch write failed: {}", name));

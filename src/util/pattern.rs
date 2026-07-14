@@ -1,17 +1,17 @@
-use crate::util::api::Api;
+use crate::util::memory::PatchMemory;
 
-pub fn scan(api: &Api, pattern_str: &str) -> usize {
+pub fn scan<M: PatchMemory>(api: &M, pattern_str: &str) -> usize {
     scan_range(api, api.game_base(), api.game_size(), pattern_str)
 }
 
-pub fn scan_range(api: &Api, start: usize, size: u32, pattern_str: &str) -> usize {
+pub fn scan_range<M: PatchMemory>(api: &M, start: usize, size: u32, pattern_str: &str) -> usize {
     let Some((pattern, mask)) = parse_pattern(pattern_str) else {
         return 0;
     };
     api.aob_scan(start, size, &pattern, &mask)
 }
 
-pub fn scan_bytes(api: &Api, bytes: &[u8]) -> usize {
+pub fn scan_bytes<M: PatchMemory>(api: &M, bytes: &[u8]) -> usize {
     let mask = "x".repeat(bytes.len());
     api.aob_scan(api.game_base(), api.game_size(), bytes, &mask)
 }

@@ -13,6 +13,7 @@ mod autoplay;
 mod chuniio;
 mod config;
 mod d3d9;
+mod early_patch;
 mod gfx;
 mod io4;
 mod iohook;

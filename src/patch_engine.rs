@@ -1,6 +1,5 @@
 use crate::config::Config;
-use crate::util::api::Api;
-use crate::util::memory::{file_offset_to_va, patch_bytes, PatchResult};
+use crate::util::memory::{file_offset_to_va, patch_bytes, PatchMemory, PatchResult};
 use crate::util::pattern;
 
 pub struct VersionedPatch {
@@ -17,7 +16,7 @@ pub struct PatchVariant {
     pub patch: &'static [u8],
 }
 
-pub fn apply_patch(api: &Api, config: &Config, def: &VersionedPatch) -> PatchResult {
+pub fn apply_patch<M: PatchMemory>(api: &M, config: &Config, def: &VersionedPatch) -> PatchResult {
     if !config.is_enabled(def.section) {
         return PatchResult::AlreadyPatched;
     }
@@ -47,7 +46,7 @@ pub fn apply_patch(api: &Api, config: &Config, def: &VersionedPatch) -> PatchRes
     log_result(api, def, fallback)
 }
 
-fn find_by_pattern(api: &Api, variant: &PatchVariant) -> Option<usize> {
+fn find_by_pattern<M: PatchMemory>(api: &M, variant: &PatchVariant) -> Option<usize> {
     let pattern = variant.pattern?;
     let found = pattern::scan(api, pattern);
     if found == 0 {
@@ -71,7 +70,7 @@ fn classify_known_offset_result(
     }
 }
 
-fn log_result(api: &Api, def: &VersionedPatch, result: PatchResult) -> PatchResult {
+fn log_result<M: PatchMemory>(api: &M, def: &VersionedPatch, result: PatchResult) -> PatchResult {
     match result {
         PatchResult::Applied => api.log_info(&format!("patch applied: {}", def.name)),
         PatchResult::AlreadyPatched => {

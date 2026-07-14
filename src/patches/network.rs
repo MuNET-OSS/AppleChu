@@ -5,6 +5,7 @@ use crate::config::Config;
 use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat;
+use crate::util::memory::PatchMemory;
 
 const WINHTTP_DLL: &str = "winhttp.dll";
 const WINHTTP_OPEN_REQUEST: &str = "WinHttpOpenRequest";
@@ -47,6 +48,11 @@ type WinHttpOpenRequestFn = unsafe extern "system" fn(
 static ORIG_OPEN_REQUEST: AtomicUsize = AtomicUsize::new(0);
 
 pub fn apply(api: &Api, config: &Config) {
+    apply_early(api, config);
+    apply_disable_tls(api, config);
+}
+
+pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     apply_patch(
         api,
         config,
@@ -110,7 +116,6 @@ pub fn apply(api: &Api, config: &Config) {
             }],
         },
     );
-    apply_disable_tls(api, config);
 }
 
 fn apply_disable_tls(api: &Api, config: &Config) {

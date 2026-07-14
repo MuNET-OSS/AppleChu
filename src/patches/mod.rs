@@ -14,6 +14,19 @@ pub mod unlock_tracks;
 
 use crate::config::Config;
 use crate::util::api::Api;
+use crate::util::memory::PatchMemory;
+
+pub fn apply_early<M: PatchMemory>(memory: &M, config: &Config) {
+    skip_startup::apply_early(memory, config);
+    free_play::apply_early(memory, config);
+    timers::apply_early(memory, config);
+    skip_map_anim::apply_early(memory, config);
+    unlock_tracks::apply_early(memory, config);
+    unlock_120fps::apply_early(memory, config);
+    network::apply_early(memory, config);
+    bypass::apply_early(memory, config);
+    audio::apply_early(memory, config);
+}
 
 pub fn apply_all(api: &Api, config: &Config) {
     custom_version::apply(api, config);

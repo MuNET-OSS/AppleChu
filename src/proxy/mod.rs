@@ -6,7 +6,6 @@
 
 mod api_impl;
 mod d3d9;
-mod early_patch;
 mod entry_pe;
 mod loader;
 mod x86_decoder;
@@ -63,7 +62,7 @@ unsafe extern "system" fn DllMain(h_module: HMODULE, reason: u32, _reserved: *mu
         DLL_PROCESS_ATTACH => {
             DisableThreadLibraryCalls(h_module);
             install_entry_hijack();
-            early_patch::apply_appuser(HIJACK.game_base);
+            crate::early_patch::apply(HIJACK.game_base);
         }
         DLL_PROCESS_DETACH if _reserved.is_null() => {
             loader::unload_mods();
@@ -71,6 +70,14 @@ unsafe extern "system" fn DllMain(h_module: HMODULE, reason: u32, _reserved: *mu
         _ => {}
     }
     TRUE
+}
+
+pub(crate) fn base_dir() -> Option<String> {
+    loader::pe::get_self_base_dir()
+}
+
+pub(crate) unsafe fn game_size(game_base: usize) -> u32 {
+    loader::pe::parse_game_info(game_base as *mut c_void).0
 }
 
 unsafe fn install_entry_hijack() {

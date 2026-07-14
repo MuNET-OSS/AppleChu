@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::util::api::Api;
-use crate::util::memory::{PatchResult, patch_bytes, write_value};
+use crate::util::memory::{patch_bytes, PatchResult};
 use crate::util::pattern;
 
 const FREE_PLAY_TEXT_EXPECTED: &[u8] = b"FREE PLAY";
@@ -29,7 +29,7 @@ pub fn apply(api: &Api, config: &Config) {
     }
 
     let length_addr = find_length_addr(api, text_addr);
-    if length_addr == 0 || !write_value(api, length_addr, text_bytes.len() as u8) {
+    if length_addr == 0 || !api.mem_write(length_addr, &(text_bytes.len() as u8).to_le_bytes()) {
         api.log_warn("patch write failed: custom FREE PLAY text length");
         return;
     }
@@ -46,7 +46,7 @@ fn find_length_addr(api: &Api, text_addr: usize) -> usize {
     let addr_bytes = (text_addr as u32).to_le_bytes();
     let mut sig = [0u8; 7];
     sig[0] = 0x6A; // PUSH imm8
-    // sig[1] = length (wildcard)
+                   // sig[1] = length (wildcard)
     sig[2] = 0x68; // PUSH imm32
     sig[3..7].copy_from_slice(&addr_bytes);
     let mask = "x?xxxxx";
