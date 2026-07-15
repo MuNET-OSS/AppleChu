@@ -1,4 +1,5 @@
 use std::ffi::c_void;
+use std::sync::Mutex;
 
 use windows_sys_loader::Win32::System::Diagnostics::Debug::FlushInstructionCache;
 use windows_sys_loader::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
@@ -6,7 +7,15 @@ use windows_sys_loader::Win32::System::Threading::GetCurrentProcess;
 
 use crate::config::Config;
 use crate::patches;
+use crate::util::api::Api;
 use crate::util::memory::PatchMemory;
+
+enum EarlyLog {
+    Info(String),
+    Warn(String),
+}
+
+static EARLY_LOGS: Mutex<Vec<EarlyLog>> = Mutex::new(Vec::new());
 
 struct DirectMemory {
     game_base: usize,
@@ -30,7 +39,20 @@ pub unsafe fn apply(game_base: usize) {
         game_size,
     };
     let config = Config::load(&base_dir);
-    patches::apply_early(&memory, &config);
+    patches::apply_pre_tls(&memory, &config);
+}
+
+pub fn flush_logs(api: &Api) {
+    let logs = match EARLY_LOGS.lock() {
+        Ok(mut logs) => std::mem::take(&mut *logs),
+        Err(_) => return,
+    };
+    for log in logs {
+        match log {
+            EarlyLog::Info(message) => api.log_info(&message),
+            EarlyLog::Warn(message) => api.log_warn(&message),
+        }
+    }
 }
 
 impl DirectMemory {
@@ -112,9 +134,17 @@ impl PatchMemory for DirectMemory {
         true
     }
 
-    fn log_info(&self, _message: &str) {}
+    fn log_info(&self, message: &str) {
+        if let Ok(mut logs) = EARLY_LOGS.lock() {
+            logs.push(EarlyLog::Info(message.to_owned()));
+        }
+    }
 
-    fn log_warn(&self, _message: &str) {}
+    fn log_warn(&self, message: &str) {
+        if let Ok(mut logs) = EARLY_LOGS.lock() {
+            logs.push(EarlyLog::Warn(message.to_owned()));
+        }
+    }
 }
 
 fn find_pattern(image: &[u8], pattern: &[u8], mask: &str) -> Option<usize> {
@@ -132,88 +162,4 @@ fn find_pattern(image: &[u8], pattern: &[u8], mask: &str) -> Option<usize> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::cell::RefCell;
-
-    use super::*;
-
-    struct FakeMemory {
-        base: usize,
-        image: RefCell<Vec<u8>>,
-    }
-
-    impl PatchMemory for FakeMemory {
-        fn game_base(&self) -> usize {
-            self.base
-        }
-
-        fn game_size(&self) -> u32 {
-            self.image.borrow().len() as u32
-        }
-
-        fn aob_scan(&self, start: usize, size: u32, pattern: &[u8], mask: &str) -> usize {
-            let offset = start - self.base;
-            let image = self.image.borrow();
-            find_pattern(&image[offset..offset + size as usize], pattern, mask)
-                .map_or(0, |found| start + found)
-        }
-
-        fn mem_read(&self, addr: usize, buf: &mut [u8]) -> bool {
-            let offset = addr - self.base;
-            buf.copy_from_slice(&self.image.borrow()[offset..offset + buf.len()]);
-            true
-        }
-
-        fn mem_write(&self, addr: usize, data: &[u8]) -> bool {
-            let offset = addr - self.base;
-            self.image.borrow_mut()[offset..offset + data.len()].copy_from_slice(data);
-            true
-        }
-
-        fn log_info(&self, _message: &str) {}
-
-        fn log_warn(&self, _message: &str) {}
-    }
-
-    #[test]
-    fn early_scanner_matches_wildcards_before_tls() {
-        // Given: 版本间变化的字节位于稳定指令签名中。
-        let image = [0x85, 0xC0, 0x75, 0x07, 0xBE, 0x00, 0x12, 0x80];
-        let pattern = [0x85, 0xC0, 0x75, 0x07, 0xBE, 0x00, 0x00, 0x80];
-
-        // When: TLS 前扫描器使用与晚期 patch 相同的掩码。
-        let found = find_pattern(&image, &pattern, "xxxxxx?x");
-
-        // Then: 可变字节不会破坏版本无关识别。
-        assert_eq!(found, Some(0));
-    }
-
-    #[test]
-    fn enabled_checks_are_patched_by_shared_early_pipeline() {
-        // Given: AppUser 与 TLS 检测仍是原字节，且配置明确启用两项绕过。
-        let mut image = vec![0x90; 64];
-        image[8..14].copy_from_slice(&[0x83, 0x7C, 0x24, 0x04, 0x00, 0x75]);
-        image[24..40].copy_from_slice(&[
-            0x85, 0xC0, 0x75, 0x07, 0xBE, 0x00, 0x00, 0x80, 0x00, 0xEB, 0x02, 0x33, 0xF6, 0x8B,
-            0x5B, 0x34,
-        ]);
-        let memory = FakeMemory {
-            base: 0x1000,
-            image: RefCell::new(image),
-        };
-        let config = Config {
-            base_dir: ".".to_owned(),
-            sections: "[BypassAppUser]\n[DisableTLS]"
-                .parse()
-                .expect("测试配置必须有效"),
-        };
-
-        // When: DLL_PROCESS_ATTACH 使用与晚期阶段共享的 patch 定义。
-        patches::apply_early(&memory, &config);
-
-        // Then: 两个会在 TLS 初始化中被缓存的检测都已提前改写。
-        let image = memory.image.borrow();
-        assert_eq!(image[13], 0xEB);
-        assert_eq!(image[31], 0x00);
-    }
-}
+mod tests;

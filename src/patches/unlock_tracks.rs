@@ -1,16 +1,11 @@
 use crate::config::Config;
 use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
-use crate::util::api::Api;
 use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
-pub fn apply(api: &Api, config: &Config) {
-    apply_unlock_limit(api, config);
-    apply_max_tracks(api, config);
-}
-
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     apply_unlock_limit(api, config);
+    apply_max_tracks(api, config);
 }
 
 fn apply_unlock_limit<M: PatchMemory>(api: &M, config: &Config) {
@@ -31,12 +26,15 @@ fn apply_unlock_limit<M: PatchMemory>(api: &M, config: &Config) {
     );
 }
 
-fn apply_max_tracks(api: &Api, config: &Config) {
+fn apply_max_tracks<M: PatchMemory>(api: &M, config: &Config) {
     if !config.is_enabled("UnlockTracks") {
         return;
     }
 
-    let max_tracks = config.get_int("UnlockTracks", "max", 3) as i32;
+    let Ok(max_tracks) = i32::try_from(config.get_int("UnlockTracks", "max", 3)) else {
+        api.log_warn("max tracks value out of i32 range, skipped");
+        return;
+    };
     // B8 03 00 00 00 C3 = MOV EAX, 3; RET
     let addr = pattern::scan(api, "B8 03 00 00 00 C3");
     if addr == 0 {

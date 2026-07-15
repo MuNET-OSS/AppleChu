@@ -47,8 +47,7 @@ type WinHttpOpenRequestFn = unsafe extern "system" fn(
 
 static ORIG_OPEN_REQUEST: AtomicUsize = AtomicUsize::new(0);
 
-pub fn apply(api: &Api, config: &Config) {
-    apply_early(api, config);
+pub fn install_pre_entry_hook(api: &Api, config: &Config) {
     apply_disable_tls(api, config);
 }
 

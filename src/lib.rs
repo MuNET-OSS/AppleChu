@@ -69,6 +69,9 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
 
     api.log_info("--- Begin chusan_pre_startup ---");
     let config = Config::load(&base_dir(info));
+    early_patch::flush_logs(api);
+    patches::apply_pre_entry(api, &config);
+    patches::install_pre_entry_hooks(api, &config);
 
     pin_dll(api, "D3DCompiler_43.dll");
     pin_dll(api, "dbghelp.dll");
@@ -144,7 +147,6 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
         api.log_info("device emulation DISABLED");
     }
 
-    patches::apply_all(api, &config);
     national_match::init(api, &config);
     autoplay::init_all(api, &config);
     ux::init_all(api, &config);

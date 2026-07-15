@@ -32,7 +32,7 @@ static ORIG_SEND_REQUEST: AtomicUsize = AtomicUsize::new(0);
 static ORIG_RECEIVE_RESPONSE: AtomicUsize = AtomicUsize::new(0);
 static ORIG_QUERY_HEADERS: AtomicUsize = AtomicUsize::new(0);
 
-pub fn apply(api: &Api, config: &Config) {
+pub fn install_pre_entry_hook(api: &Api, config: &Config) {
     if !config.is_enabled("NetLog") {
         return;
     }

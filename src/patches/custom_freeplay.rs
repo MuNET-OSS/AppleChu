@@ -1,12 +1,12 @@
 use crate::config::Config;
-use crate::util::api::Api;
+use crate::util::memory::PatchMemory;
 use crate::util::memory::{patch_bytes, PatchResult};
 use crate::util::pattern;
 
 const FREE_PLAY_TEXT_EXPECTED: &[u8] = b"FREE PLAY";
 const MAX_CUSTOM_TEXT_LEN: usize = u8::MAX as usize;
 
-pub fn apply(api: &Api, config: &Config) {
+pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     if !config.is_enabled("FreePlay") {
         return;
     }
@@ -28,8 +28,11 @@ pub fn apply(api: &Api, config: &Config) {
         return;
     }
 
+    let Ok(text_len) = u8::try_from(text_bytes.len()) else {
+        return;
+    };
     let length_addr = find_length_addr(api, text_addr);
-    if length_addr == 0 || !api.mem_write(length_addr, &(text_bytes.len() as u8).to_le_bytes()) {
+    if length_addr == 0 || !api.mem_write(length_addr, &text_len.to_le_bytes()) {
         api.log_warn("patch write failed: custom FREE PLAY text length");
         return;
     }
@@ -41,16 +44,19 @@ pub fn apply(api: &Api, config: &Config) {
     }
 }
 
-fn find_length_addr(api: &Api, text_addr: usize) -> usize {
+fn find_length_addr<M: PatchMemory>(api: &M, text_addr: usize) -> usize {
     // PUSH len / PUSH text_addr → 6A xx 68 [addr32_LE]
-    let addr_bytes = (text_addr as u32).to_le_bytes();
+    let Ok(text_addr) = u32::try_from(text_addr) else {
+        return 0;
+    };
+    let addr_bytes = text_addr.to_le_bytes();
     let mut sig = [0u8; 7];
     sig[0] = 0x6A; // PUSH imm8
                    // sig[1] = length (wildcard)
     sig[2] = 0x68; // PUSH imm32
     sig[3..7].copy_from_slice(&addr_bytes);
     let mask = "x?xxxxx";
-    let found = api.aob_scan(api.text_base(), api.text_size(), &sig, mask);
+    let found = api.aob_scan(api.game_base(), api.game_size(), &sig, mask);
     if found == 0 {
         return 0;
     }
@@ -58,7 +64,7 @@ fn find_length_addr(api: &Api, text_addr: usize) -> usize {
     found + 1
 }
 
-fn patch_free_play_text(api: &Api, addr: usize, text: &[u8]) -> PatchResult {
+fn patch_free_play_text<M: PatchMemory>(api: &M, addr: usize, text: &[u8]) -> PatchResult {
     if text.len() == FREE_PLAY_TEXT_EXPECTED.len() {
         return patch_bytes(api, addr, FREE_PLAY_TEXT_EXPECTED, text);
     }
@@ -81,7 +87,7 @@ fn patch_free_play_text(api: &Api, addr: usize, text: &[u8]) -> PatchResult {
     }
 }
 
-fn is_zero_padded_text(api: &Api, addr: usize, text: &[u8]) -> bool {
+fn is_zero_padded_text<M: PatchMemory>(api: &M, addr: usize, text: &[u8]) -> bool {
     let mut current = vec![0; text.len().saturating_add(1)];
     api.mem_read(addr, &mut current)
         && current.starts_with(text)

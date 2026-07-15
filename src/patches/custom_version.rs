@@ -1,11 +1,11 @@
 use crate::config::Config;
-use crate::util::api::Api;
+use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
 const X_VERSE_PATTERN: &str = "58 2D 56 45 52 53 45";
 const MAX_VERSION_TEXT_LEN: usize = 64;
 
-pub fn apply(api: &Api, config: &Config) {
+pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     let version_text = config.get_string("General", "version_text", "");
     if version_text.is_empty() {
         return;
@@ -37,7 +37,7 @@ pub fn apply(api: &Api, config: &Config) {
     }
 }
 
-fn find_string_start(api: &Api, pattern_addr: usize) -> Option<usize> {
+fn find_string_start<M: PatchMemory>(api: &M, pattern_addr: usize) -> Option<usize> {
     let search_start = pattern_addr.saturating_sub(MAX_VERSION_TEXT_LEN);
     let search_len = pattern_addr.checked_sub(search_start)?;
     let mut bytes = vec![0; search_len];

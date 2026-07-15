@@ -1,17 +1,17 @@
 use crate::config::Config;
 use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
-use crate::util::api::Api;
 use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
-pub fn apply(api: &Api, config: &Config) {
-    apply_disable_timer(api, config);
-    apply_custom_timers(api, config);
-    apply_all_timers(api, config);
+struct TimerSite {
+    name: &'static str,
+    pattern: &'static str,
+    pattern_offset: isize,
 }
 
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     apply_disable_timer(api, config);
+    apply_custom_timers(api, config);
     apply_all_timers(api, config);
 }
 
@@ -51,60 +51,59 @@ fn apply_all_timers<M: PatchMemory>(api: &M, config: &Config) {
     );
 }
 
-fn apply_custom_timers(api: &Api, config: &Config) {
+fn apply_custom_timers<M: PatchMemory>(api: &M, config: &Config) {
     if !config.is_enabled("CustomTimers") {
         return;
     }
 
-    let map_val = config.get_int("CustomTimers", "map_select", 60);
-    let ticket_val = config.get_int("CustomTimers", "ticket_select", 60);
-    let course_val = config.get_int("CustomTimers", "course_select", 60);
-
-    // map / ticket: 68 84 03 00 00 6A 0A 6A xx = PUSH 0x384 / PUSH 0xA / PUSH <timer>
-    let base = api.text_base();
-    let size = api.text_size();
-    let map_addr = pattern::scan_range(api, base, size, "68 84 03 00 00 6A 0A 6A");
-    if map_addr != 0 {
-        write_timer_at(api, "map select timer", map_addr + 7, map_val);
-
-        let ticket_addr = pattern::scan_range(
-            api,
-            map_addr + 8,
-            size - ((map_addr + 8 - base) as u32),
-            "68 84 03 00 00 6A 0A 6A",
-        );
-        if ticket_addr != 0 {
-            write_timer_at(api, "ticket select timer", ticket_addr + 7, ticket_val);
-        } else {
-            api.log_warn("ticket select timer: not found");
-        }
-    } else {
-        api.log_warn("map select timer: not found");
-    }
-
-    // course: E8 ?? ?? ?? ?? 6A xx E8 ?? ?? ?? ?? 83 C4 04 8D 4E 08 05 84 03 00 00
-    let course_addr = pattern::scan_range(
+    apply_timer(
         api,
-        base,
-        size,
-        "E8 ?? ?? ?? ?? 6A ?? E8 ?? ?? ?? ?? 83 C4 04 8D 4E 08 05 84 03 00 00",
+        config.get_int("CustomTimers", "map_select", 60),
+        &TimerSite {
+            name: "map select timer",
+            pattern: "6A 01 8B CF E8 ?? ?? ?? ?? 68 84 03 00 00 6A 0A 6A ?? 8B CF E8",
+            pattern_offset: 17,
+        },
     );
-    if course_addr != 0 {
-        write_timer_at(api, "course select timer", course_addr + 6, course_val);
-    } else {
-        api.log_warn("course select timer: not found");
-    }
+    apply_timer(
+        api,
+        config.get_int("CustomTimers", "ticket_select", 60),
+        &TimerSite {
+            name: "ticket select timer",
+            pattern: "6A 01 8B CE E8 ?? ?? ?? ?? 68 84 03 00 00 6A 0A 6A ?? 8B CE E8",
+            pattern_offset: 17,
+        },
+    );
+    apply_timer(
+        api,
+        config.get_int("CustomTimers", "course_select", 60),
+        &TimerSite {
+            name: "course select timer",
+            pattern: "E8 ?? ?? ?? ?? 6A ?? E8 ?? ?? ?? ?? 83 C4 04 8D 4E 08 05 84 03 00 00",
+            pattern_offset: 6,
+        },
+    );
 }
 
-fn write_timer_at(api: &Api, name: &str, addr: usize, value: i64) {
+fn apply_timer<M: PatchMemory>(api: &M, value: i64, site: &TimerSite) {
     let Ok(value) = i8::try_from(value) else {
-        api.log_warn(&format!("{} value out of i8 range, skipped", name));
+        api.log_warn(&format!("{} value out of i8 range, skipped", site.name));
         return;
     };
 
-    if api.mem_write(addr, &value.to_le_bytes()) {
-        api.log_info(&format!("patch applied: {} = {}", name, value));
+    let found = pattern::scan(api, site.pattern);
+    let addr = if found == 0 {
+        None
     } else {
-        api.log_warn(&format!("patch write failed: {}", name));
+        found.checked_add_signed(site.pattern_offset)
+    };
+    let Some(addr) = addr else {
+        api.log_warn(&format!("{}: not found", site.name));
+        return;
+    };
+    if api.mem_write(addr, &value.to_le_bytes()) {
+        api.log_info(&format!("patch applied: {} = {}", site.name, value));
+    } else {
+        api.log_warn(&format!("patch write failed: {}", site.name));
     }
 }

@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
-use crate::util::api::Api;
 use crate::util::memory::PatchMemory;
 
 const BYPASS_1080P_EXPECTED: &[u8] = &[
@@ -13,8 +12,23 @@ const BYPASS_1080P_PATCH: &[u8] = &[
     0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
 ];
 
-pub fn apply(api: &Api, config: &Config) {
-    apply_early(api, config);
+const APPUSER_250_EXPECTED: [u8; 34] = [
+    0x83, 0x7C, 0x24, 0x04, 0x00, 0x75, 0x1A, 0x56, 0xE8, 0x33, 0xE1, 0xFF, 0xFF, 0x8B, 0x70, 0x04,
+    0xE8, 0x9B, 0xFF, 0xFF, 0xFF, 0x56, 0x8B, 0xC8, 0xE8, 0x13, 0xFF, 0xFF, 0xFF, 0x83, 0xC4, 0x04,
+    0x5E, 0xC3,
+];
+const APPUSER_250_PATCH: [u8; 34] = patch_appuser_branch(APPUSER_250_EXPECTED);
+
+const APPUSER_247_EXPECTED: [u8; 34] = [
+    0x83, 0x7C, 0x24, 0x04, 0x00, 0x75, 0x1A, 0x56, 0xE8, 0x13, 0xF4, 0xFF, 0xFF, 0x8B, 0x70, 0x04,
+    0xE8, 0x9B, 0xFF, 0xFF, 0xFF, 0x56, 0x8B, 0xC8, 0xE8, 0x13, 0xFF, 0xFF, 0xFF, 0x83, 0xC4, 0x04,
+    0x5E, 0xC3,
+];
+const APPUSER_247_PATCH: [u8; 34] = patch_appuser_branch(APPUSER_247_EXPECTED);
+
+const fn patch_appuser_branch(mut bytes: [u8; 34]) -> [u8; 34] {
+    bytes[5] = 0xEB;
+    bytes
 }
 
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
@@ -26,13 +40,36 @@ pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
         &VersionedPatch {
             name: "bypass AppUser check",
             section: "BypassAppUser",
-            variants: &[PatchVariant {
-                pattern: Some("83 7C 24 04 00 75"),
-                pattern_offset: 5,
-                known_offsets: &[],
-                expected: &[0x75],
-                patch: &[0xEB],
-            }],
+            variants: &[
+                PatchVariant {
+                    pattern: None,
+                    pattern_offset: 0,
+                    known_offsets: &[0x8B3A0],
+                    expected: &APPUSER_250_EXPECTED,
+                    patch: &APPUSER_250_PATCH,
+                },
+                PatchVariant {
+                    pattern: None,
+                    pattern_offset: 0,
+                    known_offsets: &[0x890C0],
+                    expected: &APPUSER_247_EXPECTED,
+                    patch: &APPUSER_247_PATCH,
+                },
+                PatchVariant {
+                    pattern: None,
+                    pattern_offset: 0,
+                    known_offsets: &[0x89075],
+                    expected: &[0x75],
+                    patch: &[0xEB],
+                },
+                PatchVariant {
+                    pattern: Some("83 7C 24 04 00 75"),
+                    pattern_offset: 5,
+                    known_offsets: &[],
+                    expected: &[0x75],
+                    patch: &[0xEB],
+                },
+            ],
         },
     );
 }
