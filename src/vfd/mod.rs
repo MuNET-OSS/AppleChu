@@ -2,7 +2,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::aime;
-use crate::config::Config;
 use crate::iohook::uart;
 use crate::iohook::{self, Irp, IrpOp};
 use crate::util::api::Api;
@@ -296,14 +295,12 @@ impl VfdDevice {
     }
 }
 
-pub fn init(api: &Api, config: &Config) {
-    if !config
-        .section::<VfdConfig>()
-        .is_some_and(|config| config.enabled)
-    {
-        return;
-    }
-
+#[applechu_macros::config_section(
+    stage = Device,
+    order = 40,
+    condition = crate::system_config::is_sp_mode
+)]
+pub fn init(api: &Api, _config: &VfdConfig) {
     if let Ok(mut device) = VFD.lock() {
         *device = Some(VfdDevice::default());
     }

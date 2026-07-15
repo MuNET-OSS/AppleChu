@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct SkipStartupConfig => SKIP_STARTUP_CONFIG_SECTION {
         section: "SkipStartup",
         order: 130,
-        default_enabled: true,
+        default_enabled: false,
         always_enabled: false,
         hidden: false,
         comment: "跳过启动画面",

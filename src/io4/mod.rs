@@ -15,7 +15,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
 };
 
-use crate::config::Config;
 use crate::iohook::{self, Irp, IrpOp};
 use crate::util::api::Api;
 
@@ -155,14 +154,8 @@ impl<O: Io4Ops> Io4Device<O> {
     }
 }
 
-pub fn init(api: &Api, config: &Config) {
-    let Some(config) = config
-        .section::<Io4Config>()
-        .filter(|config| config.enabled)
-    else {
-        return;
-    };
-
+#[applechu_macros::config_section(stage = Device, order = 20)]
+pub fn init(api: &Api, config: &Io4Config) {
     unsafe {
         let Some(fd) = iohook::open_nul_fd() else {
             api.log_info("IO4 emulator skipped: failed to open NUL handle");

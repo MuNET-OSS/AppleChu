@@ -223,6 +223,41 @@ fn refresh_rate_uses_hertz_in_user_config() {
     assert!(config.to_toml().contains("RefreshRate = 120"));
 }
 
+#[test]
+fn optional_user_features_are_disabled_by_default() {
+    let disabled = [
+        "D3D9Ex",
+        "FreePlay",
+        "SkipStartup",
+        "DisableTimer",
+        "SkipMapAnimation",
+        "Unlock120fps",
+        "DisableEncryption",
+        "DisableTLS",
+        "DpiAware",
+    ];
+    let sections = Config::registered_sections();
+
+    for name in disabled {
+        let section = sections
+            .iter()
+            .find(|section| section.name == name)
+            .unwrap_or_else(|| panic!("缺少配置栏目 {name}"));
+        assert!(!section.default_enabled, "{name} 不应默认启用");
+    }
+}
+
+#[test]
+fn window_defaults_to_fullscreen() {
+    let config = Config::parse(".", "Version = \"1\"\n").expect("测试配置必须有效");
+    let window = config
+        .section::<crate::gfx::WindowConfig>()
+        .expect("窗口配置必须完成注入");
+
+    assert!(window.enabled);
+    assert!(!window.windowed);
+}
+
 fn temporary_directory(case: &str) -> std::path::PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)

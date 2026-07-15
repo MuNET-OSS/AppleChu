@@ -1,6 +1,5 @@
 use std::ffi::{c_char, c_void};
 
-use crate::config::Config;
 use crate::iohook::proc_addr;
 use crate::platform::winapi;
 use crate::util::api::Api;
@@ -17,22 +16,14 @@ crate::config_section! {
     }
 }
 
-pub fn init(api: &Api, config: &Config) {
-    if !config
-        .section::<AmVideoConfig>()
-        .is_some_and(|config| config.enabled)
-    {
-        return;
-    }
-
+#[applechu_macros::config_section(stage = Platform, order = 30)]
+pub fn init(api: &Api, _config: &AmVideoConfig) {
     proc_addr::push_get_proc_override("amvideo.dll", get_proc_override);
     proc_addr::push_load_override_a(load_override_a);
     proc_addr::push_load_override_w(load_override_w);
 
     api.log_info("AMVideo hook initialized");
 }
-
-pub fn shutdown() {}
 
 fn get_proc_override(_module: usize, name: &str) -> Option<*const ()> {
     amvideo_proc(name).map(|proc| proc.cast())

@@ -1,13 +1,12 @@
 use std::ffi::c_void;
 
-use crate::config::Config;
 use crate::util::api::Api;
 
 crate::config_section! {
     pub(crate) struct DpiAwareConfig => DPI_AWARE_CONFIG_SECTION {
         section: "DpiAware",
         order: 180,
-        default_enabled: true,
+        default_enabled: false,
         always_enabled: false,
         hidden: false,
         comment: "启用 Per-Monitor V2 DPI 感知",
@@ -25,14 +24,8 @@ extern "system" {
     fn GetProcAddress(module: usize, proc_name: *const u8) -> *const c_void;
 }
 
-pub fn init(api: &Api, config: &Config) {
-    if !config
-        .section::<DpiAwareConfig>()
-        .is_some_and(|config| config.enabled)
-    {
-        return;
-    }
-
+#[applechu_macros::config_section(stage = Late, order = 30)]
+pub fn init(api: &Api, _config: &DpiAwareConfig) {
     unsafe {
         let user32 = GetModuleHandleA(b"user32.dll\0".as_ptr());
         if user32 == 0 {

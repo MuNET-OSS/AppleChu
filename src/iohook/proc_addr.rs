@@ -72,6 +72,7 @@ impl Drop for ReentryGuard {
     }
 }
 
+#[applechu_macros::config_section(stage = PlatformCore, order = 10)]
 pub fn init(api: &Api) {
     unsafe {
         cache_real_get_proc_address();

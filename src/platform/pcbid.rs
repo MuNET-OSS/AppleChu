@@ -2,7 +2,6 @@ use std::ffi::c_char;
 
 use once_cell::sync::OnceCell;
 
-use crate::config::Config;
 use crate::platform::winapi::{self, GetComputerNameAFn};
 use crate::util::api::Api;
 
@@ -25,14 +24,8 @@ crate::config_section! {
     }
 }
 
-pub fn init(api: &Api, config: &Config) {
-    let Some(config) = config
-        .section::<PcbIdConfig>()
-        .filter(|config| config.enabled)
-    else {
-        return;
-    };
-
+#[applechu_macros::config_section(stage = Platform, order = 60)]
+pub fn init(api: &Api, config: &PcbIdConfig) {
     unsafe {
         let _ = SERIAL_NO.set(config.serial_no.clone());
         ORIG_GET_COMPUTER_NAME_A = winapi::hook_import(
@@ -45,8 +38,6 @@ pub fn init(api: &Api, config: &Config) {
 
     api.log_info("PCBID hook initialized");
 }
-
-pub fn shutdown() {}
 
 unsafe extern "system" fn hooked_get_computer_name_a(buffer: *mut c_char, size: *mut u32) -> i32 {
     let Some(serial) = SERIAL_NO.get() else {

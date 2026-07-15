@@ -1,7 +1,6 @@
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use crate::config::Config;
 use crate::gfx::WindowConfig;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat_all_modules;
@@ -49,11 +48,9 @@ extern "system" {
     fn AdjustWindowRect(rect: *mut Rect, style: u32, menu: i32) -> i32;
 }
 
-pub fn init(api: &Api, config: &Config) {
-    let Some(config) = config.section::<WindowConfig>() else {
-        return;
-    };
-    if !config.enabled || !config.windowed {
+#[applechu_macros::config_section(stage = Graphics, order = 10)]
+pub fn init(api: &Api, config: &WindowConfig) {
+    if !config.windowed {
         return;
     }
 

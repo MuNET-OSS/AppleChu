@@ -261,14 +261,9 @@ impl Led15093Device {
     }
 }
 
-pub fn init(api: &Api, config: &Config, is_sp: bool) {
-    let Some(section) = config
-        .section::<Led15093SectionConfig>()
-        .filter(|config| config.enabled)
-    else {
-        return;
-    };
-
+#[applechu_macros::config_section(stage = Device, order = 50)]
+pub fn init(api: &Api, config: &Config, section: &Led15093SectionConfig) {
+    let is_sp = crate::system_config::is_sp_mode(config);
     let defaults = if is_sp { [20, 21] } else { [2, 3] };
     let ports = [
         if section.port0 == 0 {
@@ -286,7 +281,7 @@ pub fn init(api: &Api, config: &Config, is_sp: bool) {
     if let Ok(mut led_ports) = LED_PORTS.lock() {
         *led_ports = ports;
     }
-    let led_config = Led15093Config::from_section(&section);
+    let led_config = Led15093Config::from_section(section);
     if let Ok(mut boards) = LED_BOARDS.lock() {
         *boards = Some([
             Led15093Device::new(0, 2, 1, led_config.clone()),

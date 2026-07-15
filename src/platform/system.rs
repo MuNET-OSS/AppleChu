@@ -7,6 +7,7 @@ use crate::util::api::Api;
 
 const SYSFILE_NAME: &str = "sysfile.dat";
 
+#[applechu_macros::config_section(stage = Platform, order = 80)]
 pub fn init(api: &Api, config: &Config) {
     let Some(system) = config.section::<SystemConfig>() else {
         return;

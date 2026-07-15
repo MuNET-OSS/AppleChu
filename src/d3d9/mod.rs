@@ -36,6 +36,7 @@ crate::config_section! {
     }
 }
 
+#[applechu_macros::config_section(stage = Late, order = 40)]
 pub fn init_all(api: &Api, config: &Config) {
     let fps_enabled = config
         .section::<FpsDisplayConfig>()

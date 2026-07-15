@@ -13,7 +13,7 @@ crate::config_section! {
     pub(crate) struct D3D9ExConfig => D3D9EX_CONFIG_SECTION {
         section: "D3D9Ex",
         order: 110,
-        default_enabled: true,
+        default_enabled: false,
         always_enabled: false,
         hidden: false,
         comment: "D3D9Ex 透明升级、设备丢失恢复与快速重启",
@@ -94,6 +94,7 @@ extern "system" {
     fn Sleep(milliseconds: u32);
 }
 
+#[applechu_macros::config_section(stage = Graphics, order = 30)]
 pub fn init(api: &Api, config: &Config) {
     let window = config.section::<WindowConfig>();
     let d3d9ex_config = config.section::<D3D9ExConfig>();

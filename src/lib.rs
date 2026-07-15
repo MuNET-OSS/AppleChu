@@ -18,6 +18,7 @@ mod gfx;
 mod io4;
 mod iohook;
 mod led;
+mod module_registry;
 mod national_match;
 mod patch_engine;
 mod patches;
@@ -32,7 +33,6 @@ mod vfd;
 use std::ffi::c_char;
 
 use crate::config::{Config, DiagnosticLevel};
-use crate::system_config::{HookModeConfig, SystemConfig};
 use crate::util::api::{Api, ChuModAPI, ChuModInfo, API};
 
 const NAME: &[u8] = b"AppleChu\0";
@@ -90,57 +90,7 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
     pin_dll(api, "D3DCompiler_43.dll");
     pin_dll(api, "dbghelp.dll");
 
-    gfx::init_all(api, config);
-
-    let hook_mode = config.section::<HookModeConfig>();
-    let enable_platform = hook_mode.as_ref().is_none_or(|config| config.platform);
-    let enable_devices = hook_mode.as_ref().is_none_or(|config| config.devices);
-
-    if enable_platform {
-        iohook::proc_addr::init(api);
-        if hook_mode
-            .as_ref()
-            .is_none_or(|config| config.platform_modules)
-        {
-            platform::init_all(api, config);
-        } else {
-            api.log_info("platform modules DISABLED (diag)");
-        }
-        if hook_mode.as_ref().is_none_or(|config| config.iohook) {
-            iohook::init_all(api, config);
-        } else {
-            api.log_info("iohook DISABLED (diag)");
-        }
-    }
-
-    if enable_devices {
-        let is_sp = config
-            .section::<SystemConfig>()
-            .is_some_and(|config| config.is_sp_mode());
-
-        chuniio::init(api, config);
-        io4::init(api, config);
-        slider::init(api, config);
-
-        if is_sp {
-            vfd::init(api, config);
-        }
-
-        led::init(api, config, is_sp);
-        aime::init(api, config, is_sp);
-    }
-
-    if !enable_platform {
-        api.log_info("platform hooks DISABLED");
-    }
-    if !enable_devices {
-        api.log_info("device emulation DISABLED");
-    }
-
-    national_match::init(api, config);
-    autoplay::init_all(api, config);
-    ux::init_all(api, config);
-    d3d9::init_all(api, config);
+    module_registry::init_all(api, config);
 
     api.log_info("--- End chusan_pre_startup ---");
     0
@@ -175,8 +125,7 @@ fn base_dir(info: *const ChuModInfo) -> String {
 #[no_mangle]
 pub extern "C" fn chumod_shutdown() {
     if let Some(api) = API.get() {
-        autoplay::shutdown_all();
-        platform::shutdown_all();
+        module_registry::shutdown_all();
         api.log_info("AppleChu unloaded");
     }
 }

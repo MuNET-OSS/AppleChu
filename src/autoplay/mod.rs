@@ -20,14 +20,14 @@ crate::config_section! {
     }
 }
 
-pub fn init_all(api: &Api, config: &Config) {
-    if let Some(config) = config
-        .section::<AutoplayConfig>()
-        .filter(|config| config.enabled)
-    {
-        autoplay::init(api, &config.hotkey);
-        autoplay::init_upload_guard(api);
-    }
+#[applechu_macros::config_section(
+    stage = Late,
+    order = 20,
+    shutdown = shutdown_all
+)]
+pub fn init_all(api: &Api, config: &AutoplayConfig) {
+    autoplay::init(api, &config.hotkey);
+    autoplay::init_upload_guard(api);
 }
 
 pub fn is_config_enabled(config: &Config) -> bool {

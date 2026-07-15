@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::chuniio;
-use crate::config::Config;
 use crate::iohook::uart;
 use crate::iohook::{self, Irp, IrpOp};
 use crate::util::api::Api;
@@ -103,14 +102,8 @@ impl SliderDevice {
     }
 }
 
-pub fn init(api: &Api, config: &Config) {
-    if !config
-        .section::<SliderDeviceConfig>()
-        .is_some_and(|config| config.enabled)
-    {
-        return;
-    }
-
+#[applechu_macros::config_section(stage = Device, order = 30)]
+pub fn init(api: &Api, _config: &SliderDeviceConfig) {
     if chuniio::slider_init().is_ok() {
         if let Ok(mut slider) = SLIDER.lock() {
             *slider = Some(SliderDevice::new());

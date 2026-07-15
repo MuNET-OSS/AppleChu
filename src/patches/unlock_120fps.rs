@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct Unlock120fpsConfig => UNLOCK_120FPS_CONFIG_SECTION {
         section: "Unlock120fps",
         order: 155,
-        default_enabled: true,
+        default_enabled: false,
         always_enabled: false,
         hidden: false,
         comment: "解锁 120fps",

@@ -9,6 +9,7 @@ name = "winhttp"
 crate-type = ["cdylib"]
 
 [dependencies]
+applechu-macros = { path = "applechu-macros" }
 chu-abi = { path = "chu-abi" }
 linkme = "0.3.36"
 toml = "0.8"

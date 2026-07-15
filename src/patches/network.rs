@@ -51,7 +51,7 @@ crate::config_section! {
     pub(crate) struct DisableEncryptionConfig => DISABLE_ENCRYPTION_CONFIG_SECTION {
         section: "DisableEncryption",
         order: 160,
-        default_enabled: true,
+        default_enabled: false,
         always_enabled: false,
         hidden: false,
         comment: "关闭网络加密，私服需要",
@@ -63,7 +63,7 @@ crate::config_section! {
     pub(crate) struct DisableTlsConfig => DISABLE_TLS_CONFIG_SECTION {
         section: "DisableTLS",
         order: 170,
-        default_enabled: true,
+        default_enabled: false,
         always_enabled: false,
         hidden: false,
         comment: "关闭 TLS，私服需要",

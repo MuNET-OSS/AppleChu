@@ -7,7 +7,7 @@ crate::config_section! {
     pub(crate) struct DisableTimerConfig => DISABLE_TIMER_CONFIG_SECTION {
         section: "DisableTimer",
         order: 140,
-        default_enabled: true,
+        default_enabled: false,
         always_enabled: false,
         hidden: false,
         comment: "禁用选歌计时器",

@@ -147,6 +147,7 @@ impl RegValue {
     }
 }
 
+#[applechu_macros::config_section(stage = Platform, order = 10)]
 pub fn init(api: &Api, _config: &Config) {
     let _ = API.set(*api);
     install_hooks(api);

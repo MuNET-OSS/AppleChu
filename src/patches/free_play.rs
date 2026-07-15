@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct FreePlayConfig => FREE_PLAY_CONFIG_SECTION {
         section: "FreePlay",
         order: 120,
-        default_enabled: true,
+        default_enabled: false,
         always_enabled: false,
         hidden: false,
         comment: "免费游玩",

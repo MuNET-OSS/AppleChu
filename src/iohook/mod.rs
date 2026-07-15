@@ -154,6 +154,7 @@ static mut ORIGINAL_SET_FILE_POINTER: *const () = ptr::null();
 static mut ORIGINAL_SET_FILE_POINTER_EX: *const () = ptr::null();
 static mut ORIGINAL_FLUSH_FILE_BUFFERS: *const () = ptr::null();
 
+#[applechu_macros::config_section(stage = IoHook, order = 10)]
 pub fn init_all(api: &Api, config: &Config) {
     unsafe {
         let patched = install();

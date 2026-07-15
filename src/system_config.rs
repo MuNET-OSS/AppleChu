@@ -1,4 +1,5 @@
 use crate::config::value::ConfigValue;
+use crate::config::Config;
 
 #[derive(Clone, Debug)]
 pub(crate) enum CabinetMode {
@@ -86,6 +87,12 @@ impl SystemConfig {
             matches!(self.refresh_rate, RefreshRate::Hz60),
         ]
     }
+}
+
+pub(crate) fn is_sp_mode(config: &Config) -> bool {
+    config
+        .section::<SystemConfig>()
+        .is_some_and(|config| config.is_sp_mode())
 }
 
 crate::config_section! {

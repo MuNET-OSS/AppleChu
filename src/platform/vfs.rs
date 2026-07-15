@@ -50,14 +50,8 @@ crate::config_section! {
     }
 }
 
-pub fn init(api: &Api, config: &Config) {
-    let Some(section) = config
-        .section::<VfsSectionConfig>()
-        .filter(|config| config.enabled)
-    else {
-        return;
-    };
-
+#[applechu_macros::config_section(stage = Platform, order = 20)]
+pub fn init(api: &Api, config: &Config, section: &VfsSectionConfig) {
     let amfs = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.amfs));
     let appdata = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.appdata));
     let option = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.option));
@@ -83,8 +77,6 @@ pub fn init(api: &Api, config: &Config) {
 
     api.log_info("VFS hook initialized");
 }
-
-pub fn shutdown() {}
 
 fn option_proc_override(_module: usize, name: &str) -> Option<*const ()> {
     if name == "AppImage_getOptionMountRootPath" {

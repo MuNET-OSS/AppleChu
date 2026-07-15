@@ -177,14 +177,10 @@ impl AimeReader {
     }
 }
 
-pub fn init(api: &Api, config: &Config, is_sp: bool) {
-    let Some(section) = config.section::<AimeSectionConfig>() else {
-        return;
-    };
-    if !section.enabled {
-        return;
-    }
-    let cfg = load_config(&section, config.base_dir());
+#[applechu_macros::config_section(stage = Device, order = 60)]
+pub fn init(api: &Api, config: &Config, section: &AimeSectionConfig) {
+    let cfg = load_config(section, config.base_dir());
+    let is_sp = crate::system_config::is_sp_mode(config);
     let port = if is_sp { cfg.sp_port } else { cfg.cvt_port };
 
     let path = config

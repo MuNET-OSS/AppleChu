@@ -7,7 +7,6 @@ use windows_sys::Win32::Networking::WinSock::{SOCKADDR, SOCKADDR_IN, WSABUF};
 
 mod music;
 
-use crate::config::Config;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat;
 
@@ -67,14 +66,8 @@ crate::config_section! {
     }
 }
 
-pub fn init(api: &Api, config: &Config) {
-    if !config
-        .section::<NationalMatchConfig>()
-        .is_some_and(|config| config.enabled)
-    {
-        return;
-    }
-
+#[applechu_macros::config_section(stage = Late, order = 10)]
+pub fn init(api: &Api, _config: &NationalMatchConfig) {
     let _ = STATE.set(State {
         reflector: Mutex::new(None),
         reflector_addr: Mutex::new(None),

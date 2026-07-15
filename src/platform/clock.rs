@@ -1,4 +1,3 @@
-use crate::config::Config;
 use crate::platform::winapi::{
     self, FileTime, GetLocalTimeFn, GetSystemTimeAsFileTimeFn, GetSystemTimeFn,
     GetTimeZoneInformationFn, SetLocalTimeFn, SetSystemTimeFn, SetTimeZoneInformationFn,
@@ -51,14 +50,8 @@ crate::config_section! {
     }
 }
 
-pub fn init(api: &Api, config: &Config) {
-    let Some(config) = config
-        .section::<ClockSectionConfig>()
-        .filter(|config| config.enabled)
-    else {
-        return;
-    };
-
+#[applechu_macros::config_section(stage = Platform, order = 40)]
+pub fn init(api: &Api, config: &ClockSectionConfig) {
     unsafe {
         CONFIG = ClockConfig {
             timezone: match config.timezone.to_ascii_lowercase().as_str() {
@@ -114,8 +107,6 @@ pub fn init(api: &Api, config: &Config) {
 
     api.log_info("clock hook initialized");
 }
-
-pub fn shutdown() {}
 
 unsafe extern "system" fn hooked_get_system_time_as_file_time(file_time: *mut FileTime) {
     if let Some(orig) = ORIG_GET_SYSTEM_TIME_AS_FILE_TIME {

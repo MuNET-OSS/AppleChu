@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct SkipMapAnimationConfig => SKIP_MAP_ANIMATION_CONFIG_SECTION {
         section: "SkipMapAnimation",
         order: 150,
-        default_enabled: true,
+        default_enabled: false,
         always_enabled: false,
         hidden: false,
         comment: "跳过地图动画",

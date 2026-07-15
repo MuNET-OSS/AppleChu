@@ -58,6 +58,7 @@ struct ChuniIoBackend {
 
 static BACKEND: Lazy<Mutex<Option<ChuniIoBackend>>> = Lazy::new(|| Mutex::new(None));
 
+#[applechu_macros::config_section(stage = Device, order = 10)]
 pub fn init(api: &Api, config: &Config) {
     let led_config = config
         .section::<LedOutputConfig>()

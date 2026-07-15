@@ -2,7 +2,6 @@ use std::ffi::c_char;
 
 use once_cell::sync::OnceCell;
 
-use crate::config::Config;
 use crate::platform::winapi::{self, ExitWindowsExFn, RegQueryValueExAFn, RegQueryValueExWFn};
 use crate::util::api::Api;
 
@@ -12,7 +11,7 @@ static mut ORIG_REG_QUERY_VALUE_EX_W: Option<RegQueryValueExWFn> = None;
 static CONFIG: OnceCell<MiscConfig> = OnceCell::new();
 
 crate::config_section! {
-    struct MiscConfig => MISC_CONFIG_SECTION {
+    pub(crate) struct MiscConfig => MISC_CONFIG_SECTION {
         section: "Misc",
         order: 950,
         default_enabled: true,
@@ -33,14 +32,8 @@ crate::config_section! {
     }
 }
 
-pub fn init(api: &Api, config: &Config) {
-    let Some(config) = config
-        .section::<MiscConfig>()
-        .filter(|config| config.enabled)
-    else {
-        return;
-    };
-
+#[applechu_macros::config_section(stage = Platform, order = 50)]
+pub fn init(api: &Api, config: &MiscConfig) {
     unsafe {
         let _ = CONFIG.set((*config).clone());
         ORIG_EXIT_WINDOWS_EX = winapi::hook_import(
@@ -65,8 +58,6 @@ pub fn init(api: &Api, config: &Config) {
 
     api.log_info("misc platform hook initialized");
 }
-
-pub fn shutdown() {}
 
 unsafe extern "system" fn hooked_exit_windows_ex(flags: u32, reason: u32) -> i32 {
     if CONFIG.get().is_some_and(|config| config.allow_reboot) {
