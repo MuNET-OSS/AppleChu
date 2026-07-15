@@ -7,6 +7,18 @@ use crate::iohook::uart;
 use crate::iohook::{self, Irp, IrpOp};
 use crate::util::api::Api;
 
+crate::config_section! {
+    pub(crate) struct SliderDeviceConfig => SLIDER_DEVICE_CONFIG_SECTION {
+        section: "SliderDevice",
+        order: 350,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "触摸条设备模拟",
+        fields: {}
+    }
+}
+
 const SYNC: u8 = 0xFF;
 const ESC: u8 = 0xFD;
 const CMD_AUTO_SCAN: u8 = 0x01;
@@ -92,7 +104,10 @@ impl SliderDevice {
 }
 
 pub fn init(api: &Api, config: &Config) {
-    if !config.get_bool_alias(&[("SliderDevice", "enable"), ("slider", "enable")], true) {
+    if !config
+        .section::<SliderDeviceConfig>()
+        .is_some_and(|config| config.enabled)
+    {
         return;
     }
 

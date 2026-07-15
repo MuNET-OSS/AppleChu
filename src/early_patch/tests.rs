@@ -50,10 +50,7 @@ impl PatchMemory for FakeMemory {
 }
 
 fn config(source: &str) -> Config {
-    Config {
-        base_dir: ".".to_owned(),
-        sections: source.parse().expect("测试配置必须有效"),
-    }
+    Config::parse(".", source).expect("测试配置必须有效")
 }
 
 fn pe_image(size: usize) -> Vec<u8> {
@@ -158,7 +155,7 @@ fn fast_restart_is_patched_by_early_pipeline() {
     let memory = FakeMemory::new(image);
 
     // When: DLL_PROCESS_ATTACH 执行 D3D9Ex early patch。
-    patches::apply_pre_entry(&memory, &config("[D3D9Ex]\nenable=true\nfast_restart=true"));
+    patches::apply_pre_entry(&memory, &config("[D3D9Ex]\nfast_restart=true"));
 
     // Then: 目标函数与失败分支在游戏入口点前同时完成改写。
     let image = memory.image.borrow();
@@ -231,6 +228,25 @@ fn tls_and_appuser_are_patched_in_their_required_stages() {
     let image = memory.image.borrow();
     assert_eq!(image[13], 0xEB);
     assert_eq!(image[31], 0x00);
+}
+
+#[test]
+fn invalid_config_skips_pre_tls_memory_changes() {
+    // Given: TLS 特征存在，但配置版本无效。
+    let mut image = vec![0x90; 48];
+    image[16..32].copy_from_slice(&[
+        0x85, 0xC0, 0x75, 0x07, 0xBE, 0x00, 0x00, 0x80, 0x00, 0xEB, 0x02, 0x33, 0xF6, 0x8B, 0x5B,
+        0x34,
+    ]);
+    let memory = FakeMemory::new(image);
+    let config = Config::parse(".", "Version = \"0\"\n[DisableTLS]\n")
+        .expect("TOML 语法必须有效");
+
+    // When: TLS 前入口尝试应用配置。
+    apply_pre_tls_if_valid(&memory, &config);
+
+    // Then: 校验失败会阻止所有 early patch 写入。
+    assert_eq!(memory.image.borrow()[23], 0x80);
 }
 
 #[test]

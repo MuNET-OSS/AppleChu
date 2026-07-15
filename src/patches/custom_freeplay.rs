@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::patches::free_play::FreePlayConfig;
 use crate::util::memory::PatchMemory;
 use crate::util::memory::{patch_bytes, PatchResult};
 use crate::util::pattern;
@@ -7,11 +8,14 @@ const FREE_PLAY_TEXT_EXPECTED: &[u8] = b"FREE PLAY";
 const MAX_CUSTOM_TEXT_LEN: usize = u8::MAX as usize;
 
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
-    if !config.is_enabled("FreePlay") {
+    let Some(config) = config
+        .section::<FreePlayConfig>()
+        .filter(|config| config.enabled)
+    else {
         return;
-    }
+    };
 
-    let custom_text = config.get_string("FreePlay", "custom_text", "");
+    let custom_text = &config.custom_text;
     if custom_text.is_empty() {
         return;
     }

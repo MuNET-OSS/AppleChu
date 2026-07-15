@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 chu-abi = { path = "chu-abi" }
+linkme = "0.3.36"
 toml = "0.8"
 once_cell = "1"
 retour = "0.4.0-alpha.4"

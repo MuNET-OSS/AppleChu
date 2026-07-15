@@ -19,6 +19,21 @@ use crate::config::Config;
 use crate::iohook::{self, Irp, IrpOp};
 use crate::util::api::Api;
 
+crate::config_section! {
+    pub(crate) struct Io4Config => IO4_CONFIG_SECTION {
+        section: "Io4",
+        order: 310,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "IO4 USB HID 模拟",
+        fields: {
+            pub foreground: bool = true,
+            comment: "仅在游戏窗口位于前台时读取输入";
+        }
+    }
+}
+
 pub const BUTTON_TEST: u16 = 1 << 9;
 pub const BUTTON_SERVICE: u16 = 1 << 6;
 pub const REPORT_LEN: usize = 0x40;
@@ -141,9 +156,12 @@ impl<O: Io4Ops> Io4Device<O> {
 }
 
 pub fn init(api: &Api, config: &Config) {
-    if !config.get_bool_alias(&[("Io4", "enable"), ("io4", "enable")], true) {
+    let Some(config) = config
+        .section::<Io4Config>()
+        .filter(|config| config.enabled)
+    else {
         return;
-    }
+    };
 
     unsafe {
         let Some(fd) = iohook::open_nul_fd() else {
@@ -157,7 +175,7 @@ pub fn init(api: &Api, config: &Config) {
         if let Ok(mut device) = IO4_DEVICE.lock() {
             *device = Some(Io4Device::new(
                 chusan_io4::ChusanIo4Ops,
-                config.get_bool_alias(&[("Io4", "foreground"), ("io4", "foreground")], true),
+                config.foreground,
             ));
         }
         iohook::push_handler(io4_irp_handler);

@@ -32,7 +32,7 @@
 
 ## 配置
 
-所有功能通过游戏目录下的 `AppleChu.toml` 控制。取消注释对应的 `[Section]` 即可启用该功能，并填写其下的键值
+所有功能通过游戏目录下的 `AppleChu.toml` 控制。默认关闭的栏目取消注释即可启用；默认开启的栏目可用 `Disabled = true` 关闭。程序会根据各模块声明的 schema 校验并规范化配置文件。
 
 > [!NOTE]
 > 如需图形化编辑，可使用 [ChuChartManager](https://github.com/MuNET-OSS/ChuChartManager)

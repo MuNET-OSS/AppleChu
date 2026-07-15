@@ -2,13 +2,29 @@ use crate::config::Config;
 use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::memory::PatchMemory;
 
+crate::config_section! {
+    pub(crate) struct SkipMapAnimationConfig => SKIP_MAP_ANIMATION_CONFIG_SECTION {
+        section: "SkipMapAnimation",
+        order: 150,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "跳过地图动画",
+        fields: {}
+    }
+}
+
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
+    if !config
+        .section::<SkipMapAnimationConfig>()
+        .is_some_and(|config| config.enabled)
+    {
+        return;
+    }
     apply_patch(
         api,
-        config,
         &VersionedPatch {
             name: "skip map animation",
-            section: "SkipMapAnimation",
             variants: &[PatchVariant {
                 pattern: None,
                 pattern_offset: 0,

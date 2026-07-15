@@ -17,6 +17,25 @@ use self::config::ChuniIoConfig;
 use self::external::ExternalChuniIo;
 use self::led_output::LedOutputConfig;
 
+crate::config_section! {
+    pub(crate) struct ExternalChuniIoConfig => CHUNI_IO_CONFIG_SECTION {
+        section: "ChuniIo",
+        order: 309,
+        default_enabled: true,
+        always_enabled: true,
+        hidden: false,
+        comment: "外部 ChuniIO DLL",
+        fields: {
+            pub path: String = String::new(),
+            comment: "所有架构共用的 DLL 路径";
+            pub path32: String = String::new(),
+            comment: "32 位 DLL 路径";
+            pub path64: String = String::new(),
+            comment: "64 位 DLL 路径";
+        }
+    }
+}
+
 type SliderCallback = Arc<dyn Fn([u8; 32]) + Send + Sync + 'static>;
 
 pub const OPBTN_TEST: u8 = 0x01;
@@ -40,7 +59,10 @@ struct ChuniIoBackend {
 static BACKEND: Lazy<Mutex<Option<ChuniIoBackend>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn init(api: &Api, config: &Config) {
-    led_output::init(LedOutputConfig::load(config));
+    let led_config = config
+        .section::<LedOutputConfig>()
+        .map_or_else(LedOutputConfig::default, |value| (*value).clone());
+    led_output::init(led_config);
     let (path, single_dll) = chuniio_path(config);
     if !path.is_empty() {
         match unsafe { ExternalChuniIo::load(&path) } {
@@ -281,14 +303,17 @@ pub fn led_set_colors(board: u8, rgb: &mut [u8]) {
 /// `path32`/`path64` form is the dual-DLL mode (each process loads its own
 /// matching DLL) and does not use chu2to3.
 fn chuniio_path(config: &Config) -> (String, bool) {
-    let path = config.get_string_alias(&[("ChuniIo", "path"), ("chuniio", "path")], "");
+    let config = config
+        .section::<ExternalChuniIoConfig>()
+        .map_or_else(ExternalChuniIoConfig::default, |value| (*value).clone());
+    let path = config.path;
     if !path.is_empty() {
         return (path, true);
     }
     let split = if cfg!(target_pointer_width = "64") {
-        config.get_string_alias(&[("ChuniIo", "path64"), ("chuniio", "path64")], "")
+        config.path64
     } else {
-        config.get_string_alias(&[("ChuniIo", "path32"), ("chuniio", "path32")], "")
+        config.path32
     };
     (split, false)
 }

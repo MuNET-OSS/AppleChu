@@ -1,14 +1,16 @@
 use std::fs;
 
 use crate::config::Config;
+use crate::patches::free_play::FreePlayConfig;
+use crate::system_config::SystemConfig;
 use crate::util::api::Api;
 
 const SYSFILE_NAME: &str = "sysfile.dat";
 
 pub fn init(api: &Api, config: &Config) {
-    if !config.get_bool("System", "enable", true) {
+    let Some(system) = config.section::<SystemConfig>() else {
         return;
-    }
+    };
 
     let Some(mut path) = crate::platform::vfs::resolve_path(&format!("E:\\{}", SYSFILE_NAME))
     else {
@@ -24,12 +26,14 @@ pub fn init(api: &Api, config: &Config) {
     };
 
     let mut changed = false;
-    let freeplay = config.get_bool("System", "freeplay", config.is_enabled("FreePlay"));
+    let freeplay = config
+        .section::<FreePlayConfig>()
+        .is_some_and(|config| config.enabled);
     if patch_token(&mut data, b"freeplay", u8::from(freeplay)) {
         changed = true;
     }
 
-    let dipsw = dipsw_bits(config);
+    let dipsw = dipsw_bits(system.dipsw());
     if patch_token(&mut data, b"dip_switches", dipsw) || patch_token(&mut data, b"dipsw", dipsw) {
         changed = true;
     }
@@ -43,11 +47,11 @@ pub fn init(api: &Api, config: &Config) {
     }
 }
 
-fn dipsw_bits(config: &Config) -> u8 {
+fn dipsw_bits(switches: [bool; 3]) -> u8 {
     let mut bits = 0u8;
-    for index in 1..=3 {
-        if config.get_bool("System", &format!("dipsw{}", index), false) {
-            bits |= 1 << (index - 1);
+    for (index, enabled) in switches.into_iter().enumerate() {
+        if enabled {
+            bits |= 1 << index;
         }
     }
     bits

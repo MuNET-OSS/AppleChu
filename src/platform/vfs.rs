@@ -28,23 +28,39 @@ struct VfsConfig {
     allow_amfs_downloads: bool,
 }
 
-pub fn init(api: &Api, config: &Config) {
-    if !config.get_bool("VFS", "enable", true) {
-        return;
+crate::config_section! {
+    pub(crate) struct VfsSectionConfig => VFS_CONFIG_SECTION {
+        section: "VFS",
+        order: 970,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: true,
+        comment: "虚拟文件系统",
+        fields: {
+            pub amfs: String = String::from("amfs"),
+            comment: "AMFS 目录";
+            pub appdata: String = String::from("appdata"),
+            comment: "APPDATA 目录";
+            pub option: String = String::from("option"),
+            comment: "选项资源目录";
+            pub allow_amfs_downloads: bool = false,
+            key: "allowAmfsDownloads",
+            comment: "允许写入 AMFS 下载内容";
+        }
     }
+}
 
-    let amfs = winapi::fixup_path(&winapi::absolutize(
-        &config.base_dir,
-        &config.get_string("VFS", "amfs", "amfs"),
-    ));
-    let appdata = winapi::fixup_path(&winapi::absolutize(
-        &config.base_dir,
-        &config.get_string("VFS", "appdata", "appdata"),
-    ));
-    let option = winapi::fixup_path(&winapi::absolutize(
-        &config.base_dir,
-        &config.get_string("VFS", "option", "option"),
-    ));
+pub fn init(api: &Api, config: &Config) {
+    let Some(section) = config
+        .section::<VfsSectionConfig>()
+        .filter(|config| config.enabled)
+    else {
+        return;
+    };
+
+    let amfs = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.amfs));
+    let appdata = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.appdata));
+    let option = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.option));
     let nthome = winapi::fixup_path(std::path::Path::new(&winapi::userprofile()));
 
     winapi::mkdir_rec(&amfs);
@@ -56,7 +72,7 @@ pub fn init(api: &Api, config: &Config) {
         option: option.clone(),
         appdata,
         nthome,
-        allow_amfs_downloads: config.get_bool("VFS", "allowAmfsDownloads", false),
+        allow_amfs_downloads: section.allow_amfs_downloads,
     });
     path_hook::push(vfs_path_transform);
     push_registry_key();

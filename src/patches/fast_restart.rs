@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::gfx::d3d9::D3D9ExConfig;
 use crate::util::memory::PatchMemory;
 use crate::util::memory::{patch_bytes, PatchResult};
 use crate::util::pattern;
@@ -7,10 +8,10 @@ const FORCE_TRUE_CALLSITE: &str = "E8 ? ? ? ? 84 C0 74 DB 8D 8B ? 00 00 00 E8";
 const SKIP_FAILURE_BRANCH: &str = "C2 83 F8 07 74 20";
 
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
-    if !config.is_enabled("D3D9Ex")
-        || !config.get_bool("D3D9Ex", "enable", true)
-        || !config.get_bool("D3D9Ex", "fast_restart", true)
-    {
+    let Some(config) = config.section::<D3D9ExConfig>() else {
+        return;
+    };
+    if !config.enabled || !config.fast_restart {
         return;
     }
 

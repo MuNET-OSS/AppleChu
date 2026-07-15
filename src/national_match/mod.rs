@@ -11,7 +11,6 @@ use crate::config::Config;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat;
 
-const SECTION: &str = "NationalMatch";
 const WS2_32: &str = "ws2_32.dll";
 
 const TYPE_HOLDPUNCH: u8 = 0;
@@ -56,8 +55,23 @@ static STATE: OnceCell<State> = OnceCell::new();
 static ORIG_SENDTO: OnceCell<WsaSendToFn> = OnceCell::new();
 static ORIG_RECVFROM: OnceCell<WsaRecvFromFn> = OnceCell::new();
 
+crate::config_section! {
+    pub(crate) struct NationalMatchConfig => NATIONAL_MATCH_CONFIG_SECTION {
+        section: "NationalMatch",
+        order: 185,
+        default_enabled: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "全国对战 TCP 中继",
+        fields: {}
+    }
+}
+
 pub fn init(api: &Api, config: &Config) {
-    if !config.is_enabled(SECTION) {
+    if !config
+        .section::<NationalMatchConfig>()
+        .is_some_and(|config| config.enabled)
+    {
         return;
     }
 
@@ -84,7 +98,7 @@ pub fn init(api: &Api, config: &Config) {
 
     api.log_info("national match: enabled (UDP<->TCP relay)");
 
-    music::init(api, config);
+    music::init(api);
 }
 
 unsafe fn collect_payload(buffers: *const WSABUF, count: u32) -> Vec<u8> {

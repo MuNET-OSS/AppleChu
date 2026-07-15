@@ -38,8 +38,16 @@ pub unsafe fn apply(game_base: usize) {
         game_base,
         game_size,
     };
-    let config = Config::load(&base_dir);
-    patches::apply_pre_tls(&memory, &config);
+    let config = Config::global(&base_dir);
+    apply_pre_tls_if_valid(&memory, config);
+}
+
+fn apply_pre_tls_if_valid<M: PatchMemory>(memory: &M, config: &Config) {
+    if !config.is_valid() {
+        memory.log_warn("early patch skipped: invalid AppleChu.toml");
+        return;
+    }
+    patches::apply_pre_tls(memory, config);
 }
 
 pub fn flush_logs(api: &Api) {

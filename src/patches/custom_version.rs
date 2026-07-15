@@ -2,11 +2,32 @@ use crate::config::Config;
 use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
+crate::config_section! {
+    pub(crate) struct GeneralConfig => GENERAL_CONFIG_SECTION {
+        section: "General",
+        order: 290,
+        default_enabled: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "自定义版本号",
+        fields: {
+            pub version_text: String = String::new(),
+            comment: "版本号显示文本";
+        }
+    }
+}
+
 const X_VERSE_PATTERN: &str = "58 2D 56 45 52 53 45";
 const MAX_VERSION_TEXT_LEN: usize = 64;
 
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
-    let version_text = config.get_string("General", "version_text", "");
+    let Some(config) = config
+        .section::<GeneralConfig>()
+        .filter(|config| config.enabled)
+    else {
+        return;
+    };
+    let version_text = &config.version_text;
     if version_text.is_empty() {
         return;
     }

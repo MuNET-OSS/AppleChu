@@ -1,10 +1,8 @@
-use crate::config::Config;
 use crate::util::memory::{file_offset_to_va, patch_bytes, PatchMemory, PatchResult};
 use crate::util::pattern;
 
 pub struct VersionedPatch {
     pub name: &'static str,
-    pub section: &'static str,
     pub variants: &'static [PatchVariant],
 }
 
@@ -16,11 +14,7 @@ pub struct PatchVariant {
     pub patch: &'static [u8],
 }
 
-pub fn apply_patch<M: PatchMemory>(api: &M, config: &Config, def: &VersionedPatch) -> PatchResult {
-    if !config.is_enabled(def.section) {
-        return PatchResult::AlreadyPatched;
-    }
-
+pub fn apply_patch<M: PatchMemory>(api: &M, def: &VersionedPatch) -> PatchResult {
     let mut fallback = PatchResult::Mismatch;
     for variant in def.variants {
         if let Some(addr) = find_by_pattern(api, variant) {

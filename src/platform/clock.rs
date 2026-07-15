@@ -32,23 +32,41 @@ enum TimezoneMode {
     Jst,
 }
 
-pub fn init(api: &Api, config: &Config) {
-    if !config.get_bool("Clock", "enable", true) {
-        return;
+crate::config_section! {
+    pub(crate) struct ClockSectionConfig => CLOCK_CONFIG_SECTION {
+        section: "Clock",
+        order: 940,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: true,
+        comment: "系统时钟模拟",
+        fields: {
+            pub timezone: String = String::from("jst"),
+            comment: "时区模式：jst 或 real";
+            pub timewarp: i64 = 0,
+            comment: "时间偏移秒数";
+            pub writeable: bool = false,
+            comment: "允许游戏修改系统时间";
+        }
     }
+}
+
+pub fn init(api: &Api, config: &Config) {
+    let Some(config) = config
+        .section::<ClockSectionConfig>()
+        .filter(|config| config.enabled)
+    else {
+        return;
+    };
 
     unsafe {
         CONFIG = ClockConfig {
-            timezone: match config
-                .get_string("Clock", "timezone", "jst")
-                .to_ascii_lowercase()
-                .as_str()
-            {
+            timezone: match config.timezone.to_ascii_lowercase().as_str() {
                 "real" | "local" | "system" => TimezoneMode::Real,
                 _ => TimezoneMode::Jst,
             },
-            timewarp_seconds: config.get_int("Clock", "timewarp", 0),
-            writeable: config.get_bool("Clock", "writeable", false),
+            timewarp_seconds: config.timewarp,
+            writeable: config.writeable,
         };
         ORIG_GET_SYSTEM_TIME_AS_FILE_TIME = winapi::hook_import(
             api,

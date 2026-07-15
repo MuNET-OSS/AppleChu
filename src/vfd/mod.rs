@@ -7,6 +7,18 @@ use crate::iohook::uart;
 use crate::iohook::{self, Irp, IrpOp};
 use crate::util::api::Api;
 
+crate::config_section! {
+    pub(crate) struct VfdConfig => VFD_CONFIG_SECTION {
+        section: "Vfd",
+        order: 390,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "VFD 显示板模拟，仅 SP 模式",
+        fields: {}
+    }
+}
+
 const SYNC1: u8 = 0x1B;
 const SYNC2: u8 = 0x1F;
 const CMD_GET_VERSION: u8 = 0x5B;
@@ -285,7 +297,10 @@ impl VfdDevice {
 }
 
 pub fn init(api: &Api, config: &Config) {
-    if !config.is_enabled("Vfd") {
+    if !config
+        .section::<VfdConfig>()
+        .is_some_and(|config| config.enabled)
+    {
         return;
     }
 

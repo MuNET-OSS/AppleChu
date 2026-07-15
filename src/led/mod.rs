@@ -30,6 +30,41 @@ const CMD_GET_PROTOCOL_VER: u8 = 0xF3;
 const CMD_SET_BOOTMODE: u8 = 0xFD;
 const CMD_FW_UPDATE: u8 = 0xFE;
 
+crate::config_section! {
+    pub(crate) struct Led15093SectionConfig => LED_15093_CONFIG_SECTION {
+        section: "Led15093",
+        order: 320,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "15093 LED 控制板模拟",
+        fields: {
+            pub port0: u32 = 0,
+            comment: "第一块控制板串口号；0 表示按机台模式选择";
+            pub port1: u32 = 0,
+            comment: "第二块控制板串口号；0 表示按机台模式选择";
+            pub board_number: String = String::from("15093-06"),
+            key: "boardNumber",
+            comment: "控制板型号";
+            pub chip_number: String = String::from("6710 "),
+            key: "chipNumber",
+            comment: "应用固件芯片型号";
+            pub boot_chip_number: String = String::from("6709 "),
+            key: "bootChipNumber",
+            comment: "引导固件芯片型号";
+            pub fw_ver: u8 = 0x90,
+            key: "fwVer",
+            comment: "固件版本";
+            pub fw_sum: u16 = 0xADF7,
+            key: "fwSum",
+            comment: "固件校验和";
+            pub high_baudrate: bool = false,
+            key: "highBaud",
+            comment: "使用高波特率";
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Led15093Config {
     board_number: [u8; 8],
@@ -226,15 +261,32 @@ impl Led15093Device {
     }
 }
 
-pub fn init(api: &Api, config: &Config, ports: &[u32; 2]) {
-    if !config.get_bool_alias(&[("Led15093", "enable"), ("led15093", "enable")], true) {
+pub fn init(api: &Api, config: &Config, is_sp: bool) {
+    let Some(section) = config
+        .section::<Led15093SectionConfig>()
+        .filter(|config| config.enabled)
+    else {
         return;
-    }
+    };
+
+    let defaults = if is_sp { [20, 21] } else { [2, 3] };
+    let ports = [
+        if section.port0 == 0 {
+            defaults[0]
+        } else {
+            section.port0
+        },
+        if section.port1 == 0 {
+            defaults[1]
+        } else {
+            section.port1
+        },
+    ];
 
     if let Ok(mut led_ports) = LED_PORTS.lock() {
-        *led_ports = *ports;
+        *led_ports = ports;
     }
-    let led_config = Led15093Config::load(config);
+    let led_config = Led15093Config::from_section(&section);
     if let Ok(mut boards) = LED_BOARDS.lock() {
         *boards = Some([
             Led15093Device::new(0, 2, 1, led_config.clone()),
@@ -349,31 +401,14 @@ unsafe fn open_board_index(irp: &Irp) -> Option<usize> {
 }
 
 impl Led15093Config {
-    fn load(config: &Config) -> Self {
+    fn from_section(config: &Led15093SectionConfig) -> Self {
         Self {
-            board_number: fixed_ascii(&config.get_string_alias(
-                &[("Led15093", "boardNumber"), ("led15093", "boardNumber")],
-                "15093-06",
-            )),
-            chip_number: fixed_ascii(&config.get_string_alias(
-                &[("Led15093", "chipNumber"), ("led15093", "chipNumber")],
-                "6710 ",
-            )),
-            boot_chip_number: fixed_ascii(&config.get_string_alias(
-                &[
-                    ("Led15093", "bootChipNumber"),
-                    ("led15093", "bootChipNumber"),
-                ],
-                "6709 ",
-            )),
-            fw_ver: config.get_int_alias(&[("Led15093", "fwVer"), ("led15093", "fwVer")], 0x90)
-                as u8,
-            fw_sum: config.get_int_alias(&[("Led15093", "fwSum"), ("led15093", "fwSum")], 0xADF7)
-                as u16,
-            high_baudrate: config.get_bool_alias(
-                &[("Led15093", "highBaud"), ("led15093", "highBaud")],
-                false,
-            ),
+            board_number: fixed_ascii(&config.board_number),
+            chip_number: fixed_ascii(&config.chip_number),
+            boot_chip_number: fixed_ascii(&config.boot_chip_number),
+            fw_ver: config.fw_ver,
+            fw_sum: config.fw_sum,
+            high_baudrate: config.high_baudrate,
         }
     }
 }

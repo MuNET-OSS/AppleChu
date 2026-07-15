@@ -24,9 +24,71 @@ static AIME_DEVICE: Mutex<Option<SgNfcDevice>> = Mutex::new(None);
 static AIME_FD: AtomicUsize = AtomicUsize::new(0);
 static EXTERNAL: Lazy<Mutex<Option<ExternalAimeIo>>> = Lazy::new(|| Mutex::new(None));
 
+crate::config_section! {
+    pub(crate) struct AimeSectionConfig => AIME_CONFIG_SECTION {
+        section: "Aime",
+        order: 300,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "Aime 读卡器模拟",
+        fields: {
+            pub cvt_port: u32 = 2,
+            key: "cvtPort",
+            comment: "CVT 模式串口号";
+            pub sp_port: u32 = 3,
+            key: "spPort",
+            comment: "SP 模式串口号";
+            pub high_baudrate: bool = false,
+            key: "highBaud",
+            comment: "使用高波特率";
+            pub aime_path: String = String::from("aime.txt"),
+            key: "aimePath",
+            comment: "Aime 卡号文件";
+            pub felica_path: String = String::from("felica.txt"),
+            key: "felicaPath",
+            comment: "FeliCa 卡号文件";
+            pub authdata_path: String = String::from("DEVICE\\authdata.bin"),
+            key: "authdataPath",
+            comment: "认证数据文件";
+            pub aime_gen: bool = true,
+            key: "aimeGen",
+            comment: "缺少 Aime 卡号时自动生成";
+            pub felica_gen: bool = false,
+            key: "felicaGen",
+            comment: "缺少 FeliCa 卡号时自动生成";
+            pub scan: i32 = 0x0D,
+            comment: "读卡按键的虚拟键码";
+            pub gen: u8 = 3,
+            comment: "读卡器代数";
+            pub proxy_flag: u8 = 2,
+            key: "proxyFlag",
+            comment: "读卡代理标志";
+        }
+    }
+}
+
+crate::config_section! {
+    pub(crate) struct AimeIoConfig => AIME_IO_CONFIG_SECTION {
+        section: "AimeIo",
+        order: 301,
+        default_enabled: true,
+        always_enabled: true,
+        hidden: false,
+        comment: "外部 Aime IO DLL",
+        fields: {
+            pub path: String = String::new(),
+            comment: "所有架构共用的 DLL 路径";
+            pub path32: String = String::new(),
+            comment: "32 位 DLL 路径";
+            pub path64: String = String::new(),
+            comment: "64 位 DLL 路径";
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AimeConfig {
-    pub enable: bool,
     pub cvt_port: u32,
     pub sp_port: u32,
     pub high_baudrate: bool,
@@ -115,13 +177,19 @@ impl AimeReader {
     }
 }
 
-pub fn init(api: &Api, config: &Config, port: u32) {
-    let cfg = load_config(config, &config.base_dir);
-    if !cfg.enable {
+pub fn init(api: &Api, config: &Config, is_sp: bool) {
+    let Some(section) = config.section::<AimeSectionConfig>() else {
+        return;
+    };
+    if !section.enabled {
         return;
     }
+    let cfg = load_config(&section, config.base_dir());
+    let port = if is_sp { cfg.sp_port } else { cfg.cvt_port };
 
-    let path = dll_path(config, "AimeIo", "aimeio");
+    let path = config
+        .section::<AimeIoConfig>()
+        .map_or_else(String::new, |config| dll_path(&config));
     if !path.is_empty() {
         match unsafe { ExternalAimeIo::load(&path) } {
             Ok(external) => {
@@ -254,48 +322,19 @@ fn aime_port() -> u32 {
     AIME_PORT.lock().map_or(4, |p| *p)
 }
 
-pub fn load_config(config: &Config, base_dir: impl AsRef<Path>) -> AimeConfig {
-    let path = config.get_string_alias(&[("Aime", "aime_path"), ("aime", "aimePath")], "aime.txt");
-    let aime_path = if Path::new(&path).is_absolute() {
-        PathBuf::from(&path)
-    } else {
-        base_dir.as_ref().join(path)
-    };
-    let authdata_path = resolve_path(
-        base_dir.as_ref(),
-        &config.get_string_alias(
-            &[
-                ("Aime", "authdata_path"),
-                ("Aime", "authdataPath"),
-                ("aime", "authdataPath"),
-            ],
-            "DEVICE\\authdata.bin",
-        ),
-    );
-    let felica_path = config.get_string_alias(
-        &[("Aime", "felica_path"), ("aime", "felicaPath")],
-        "felica.txt",
-    );
-    let felica_path = if Path::new(&felica_path).is_absolute() {
-        PathBuf::from(&felica_path)
-    } else {
-        base_dir.as_ref().join(felica_path)
-    };
-
+fn load_config(config: &AimeSectionConfig, base_dir: impl AsRef<Path>) -> AimeConfig {
     AimeConfig {
-        enable: config.get_bool_alias(&[("Aime", "enable"), ("aime", "enable")], true),
-        cvt_port: config.get_int_alias(&[("Aime", "cvt_port"), ("aime", "cvtPort")], 4) as u32,
-        sp_port: config.get_int_alias(&[("Aime", "sp_port"), ("aime", "spPort")], 3) as u32,
-        high_baudrate: config
-            .get_bool_alias(&[("Aime", "high_baudrate"), ("aime", "highBaud")], false),
-        aime_path,
-        felica_path,
-        authdata_path,
-        aime_gen: config.get_bool_alias(&[("Aime", "aime_gen"), ("aime", "aimeGen")], true),
-        felica_gen: config.get_bool_alias(&[("Aime", "felica_gen"), ("aime", "felicaGen")], false),
-        scan_key: config.get_int_alias(&[("Aime", "scan"), ("aime", "scan")], 0x0D) as i32,
-        gen: config.get_int_alias(&[("Aime", "gen"), ("aime", "gen")], 3) as u8,
-        proxy_flag: config.get_int_alias(&[("Aime", "proxy_flag"), ("aime", "proxyFlag")], 2) as u8,
+        cvt_port: config.cvt_port,
+        sp_port: config.sp_port,
+        high_baudrate: config.high_baudrate,
+        aime_path: resolve_path(base_dir.as_ref(), &config.aime_path),
+        felica_path: resolve_path(base_dir.as_ref(), &config.felica_path),
+        authdata_path: resolve_path(base_dir.as_ref(), &config.authdata_path),
+        aime_gen: config.aime_gen,
+        felica_gen: config.felica_gen,
+        scan_key: config.scan,
+        gen: config.gen,
+        proxy_flag: config.proxy_flag,
     }
 }
 
@@ -307,16 +346,16 @@ where
     guard.as_ref().map(call)
 }
 
-fn dll_path(config: &Config, upper: &str, lower: &str) -> String {
+fn dll_path(config: &AimeIoConfig) -> String {
     let arch_path = if cfg!(target_pointer_width = "64") {
-        config.get_string_alias(&[(upper, "path64"), (lower, "path64")], "")
+        &config.path64
     } else {
-        config.get_string_alias(&[(upper, "path32"), (lower, "path32")], "")
+        &config.path32
     };
     if !arch_path.is_empty() {
-        return arch_path;
+        return arch_path.clone();
     }
-    config.get_string_alias(&[(upper, "path"), (lower, "path")], "")
+    config.path.clone()
 }
 
 fn resolve_path(base_dir: impl AsRef<Path>, path: &str) -> PathBuf {

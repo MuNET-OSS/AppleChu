@@ -18,8 +18,6 @@ use windows_sys::Win32::System::Pipes::{
 };
 use windows_sys::Win32::System::Threading::Sleep;
 
-use crate::config::Config;
-
 const FRAMING: u8 = 0xE0;
 const ESCAPE: u8 = 0xD0;
 const BOARD_COUNT: usize = 3;
@@ -28,54 +26,36 @@ const PIPE_NAME: &str = "\\\\.\\pipe\\chuni_led";
 const PIPE_ACCESS_OUTBOUND: u32 = 0x0000_0002;
 const GENERIC_WRITE: u32 = 0x4000_0000;
 
-#[derive(Clone)]
-pub struct LedOutputConfig {
-    pub cab_pipe: bool,
-    pub cab_serial: bool,
-    pub controller_pipe: bool,
-    pub controller_serial: bool,
-    pub controller_openithm: bool,
-    pub serial_port: String,
-    pub serial_baud: u32,
-}
-
-impl LedOutputConfig {
-    pub fn load(config: &Config) -> Self {
-        Self {
-            cab_pipe: config.get_bool_alias(
-                &[("Led", "cabLedOutputPipe"), ("led", "cabLedOutputPipe")],
-                true,
-            ),
-            cab_serial: config.get_bool_alias(
-                &[("Led", "cabLedOutputSerial"), ("led", "cabLedOutputSerial")],
-                false,
-            ),
-            controller_pipe: config.get_bool_alias(
-                &[
-                    ("Led", "controllerLedOutputPipe"),
-                    ("led", "controllerLedOutputPipe"),
-                ],
-                true,
-            ),
-            controller_serial: config.get_bool_alias(
-                &[
-                    ("Led", "controllerLedOutputSerial"),
-                    ("led", "controllerLedOutputSerial"),
-                ],
-                false,
-            ),
-            controller_openithm: config.get_bool_alias(
-                &[
-                    ("Led", "controllerLedOutputOpeNITHM"),
-                    ("led", "controllerLedOutputOpeNITHM"),
-                ],
-                false,
-            ),
-            serial_port: config
-                .get_string_alias(&[("Led", "serialPort"), ("led", "serialPort")], "COM5"),
-            serial_baud: config
-                .get_int_alias(&[("Led", "serialBaud"), ("led", "serialBaud")], 921600)
-                as u32,
+crate::config_section! {
+    pub(crate) struct LedOutputConfig => LED_OUTPUT_CONFIG_SECTION {
+        section: "Led",
+        order: 313,
+        default_enabled: true,
+        always_enabled: true,
+        hidden: false,
+        comment: "灯光输出",
+        fields: {
+            pub cab_pipe: bool = true,
+            key: "cabLedOutputPipe",
+            comment: "通过命名管道输出机台灯光";
+            pub cab_serial: bool = false,
+            key: "cabLedOutputSerial",
+            comment: "通过串口输出机台灯光";
+            pub controller_pipe: bool = true,
+            key: "controllerLedOutputPipe",
+            comment: "通过命名管道输出控制器灯光";
+            pub controller_serial: bool = false,
+            key: "controllerLedOutputSerial",
+            comment: "通过串口输出控制器灯光";
+            pub controller_openithm: bool = false,
+            key: "controllerLedOutputOpeNITHM",
+            comment: "使用 OpeNITHM 控制器灯光格式";
+            pub serial_port: String = String::from("COM5"),
+            key: "serialPort",
+            comment: "灯光输出串口";
+            pub serial_baud: u32 = 921_600,
+            key: "serialBaud",
+            comment: "灯光输出串口波特率";
         }
     }
 }

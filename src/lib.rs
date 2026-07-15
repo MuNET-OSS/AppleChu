@@ -24,13 +24,15 @@ mod patches;
 mod platform;
 mod proxy;
 mod slider;
+mod system_config;
 mod util;
 mod ux;
 mod vfd;
 
 use std::ffi::c_char;
 
-use crate::config::Config;
+use crate::config::{Config, DiagnosticLevel};
+use crate::system_config::{HookModeConfig, SystemConfig};
 use crate::util::api::{Api, ChuModAPI, ChuModInfo, API};
 
 const NAME: &[u8] = b"AppleChu\0";
@@ -68,76 +70,64 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
     };
 
     api.log_info("--- Begin chusan_pre_startup ---");
-    let config = Config::load(&base_dir(info));
+    let config = Config::global(&base_dir(info));
     early_patch::flush_logs(api);
-    patches::apply_pre_entry(api, &config);
-    patches::install_pre_entry_hooks(api, &config);
+    for diagnostic in config.diagnostics() {
+        match diagnostic.level {
+            DiagnosticLevel::Warning => api.log_warn(&diagnostic.message),
+            DiagnosticLevel::Error => api.log_error(&diagnostic.message),
+        }
+    }
+    if !config.is_valid() {
+        return -1;
+    }
+    if let Err(error) = config.sync() {
+        api.log_warn(&format!("写入规范化 AppleChu.toml 失败: {error}"));
+    }
+    patches::apply_pre_entry(api, config);
+    patches::install_pre_entry_hooks(api, config);
 
     pin_dll(api, "D3DCompiler_43.dll");
     pin_dll(api, "dbghelp.dll");
 
-    gfx::init_all(api, &config);
+    gfx::init_all(api, config);
 
-    let enable_platform = config.get_bool("HookMode", "platform", true);
-    let enable_devices = config.get_bool("HookMode", "devices", true);
+    let hook_mode = config.section::<HookModeConfig>();
+    let enable_platform = hook_mode.as_ref().is_none_or(|config| config.platform);
+    let enable_devices = hook_mode.as_ref().is_none_or(|config| config.devices);
 
     if enable_platform {
         iohook::proc_addr::init(api);
-        if config.get_bool("HookMode", "platformModules", true) {
-            platform::init_all(api, &config);
+        if hook_mode
+            .as_ref()
+            .is_none_or(|config| config.platform_modules)
+        {
+            platform::init_all(api, config);
         } else {
             api.log_info("platform modules DISABLED (diag)");
         }
-        if config.get_bool("HookMode", "iohook", true) {
-            iohook::init_all(api, &config);
+        if hook_mode.as_ref().is_none_or(|config| config.iohook) {
+            iohook::init_all(api, config);
         } else {
             api.log_info("iohook DISABLED (diag)");
         }
     }
 
     if enable_devices {
-        let is_sp = config.is_sp_mode();
+        let is_sp = config
+            .section::<SystemConfig>()
+            .is_some_and(|config| config.is_sp_mode());
 
-        chuniio::init(api, &config);
-        io4::init(api, &config);
-        slider::init(api, &config);
+        chuniio::init(api, config);
+        io4::init(api, config);
+        slider::init(api, config);
 
         if is_sp {
-            vfd::init(api, &config);
+            vfd::init(api, config);
         }
 
-        let default_led: [u32; 2] = if is_sp { [20, 21] } else { [2, 3] };
-        let led_ports: [u32; 2] = [
-            config.get_int_alias(
-                &[
-                    ("Led15093", "port0"),
-                    ("Led15093", "portNo1"),
-                    ("led15093", "portNo1"),
-                ],
-                default_led[0] as i64,
-            ) as u32,
-            config.get_int_alias(
-                &[
-                    ("Led15093", "port1"),
-                    ("Led15093", "portNo2"),
-                    ("led15093", "portNo2"),
-                ],
-                default_led[1] as i64,
-            ) as u32,
-        ];
-        led::init(api, &config, &led_ports);
-
-        let default_aime: u32 = if is_sp { 3 } else { 2 };
-        let aime_port = config.get_int_alias(
-            &[
-                ("Aime", "port"),
-                ("Aime", "port_no"),
-                ("Aime", "portNo"),
-                ("aime", "portNo"),
-            ],
-            default_aime as i64,
-        ) as u32;
-        aime::init(api, &config, aime_port);
+        led::init(api, config, is_sp);
+        aime::init(api, config, is_sp);
     }
 
     if !enable_platform {
@@ -147,10 +137,10 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
         api.log_info("device emulation DISABLED");
     }
 
-    national_match::init(api, &config);
-    autoplay::init_all(api, &config);
-    ux::init_all(api, &config);
-    d3d9::init_all(api, &config);
+    national_match::init(api, config);
+    autoplay::init_all(api, config);
+    ux::init_all(api, config);
+    d3d9::init_all(api, config);
 
     api.log_info("--- End chusan_pre_startup ---");
     0

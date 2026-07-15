@@ -9,15 +9,40 @@ use crate::util::api::Api;
 
 static FPS_ENABLED: AtomicBool = AtomicBool::new(false);
 
-pub fn init_all(api: &Api, config: &Config) {
-    if config.is_enabled("DeviceLostFix") {
-        api.log_info("device lost fix is loader-managed");
+crate::config_section! {
+    pub(crate) struct FpsDisplayConfig => FPS_DISPLAY_CONFIG_SECTION {
+        section: "FpsDisplay",
+        order: 210,
+        default_enabled: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "FPS 显示",
+        fields: {}
     }
+}
 
-    let fps_enabled = config.is_enabled("FpsDisplay");
+crate::config_section! {
+    pub(crate) struct FrameLockConfig => FRAME_LOCK_CONFIG_SECTION {
+        section: "FrameLock",
+        order: 220,
+        default_enabled: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "帧率锁定",
+        fields: {
+            pub fps: u32 = 60,
+            comment: "目标帧率";
+        }
+    }
+}
+
+pub fn init_all(api: &Api, config: &Config) {
+    let fps_enabled = config
+        .section::<FpsDisplayConfig>()
+        .is_some_and(|config| config.enabled);
     FPS_ENABLED.store(fps_enabled, Ordering::Relaxed);
     osd::set_fps_visible(fps_enabled);
-    if fps_enabled || config.is_enabled("Autoplay") {
+    if fps_enabled || crate::autoplay::is_config_enabled(config) {
         if api.register_present_callback(on_present) {
             api.log_info("in-game OSD registered (loader d3d9 callback)");
         } else {
@@ -25,8 +50,11 @@ pub fn init_all(api: &Api, config: &Config) {
         }
     }
 
-    if config.is_enabled("FrameLock") {
-        let fps = config.get_int("FrameLock", "fps", 0) as u32;
+    if let Some(config) = config
+        .section::<FrameLockConfig>()
+        .filter(|config| config.enabled)
+    {
+        let fps = config.fps;
         if fps > 0 {
             if api.set_frame_lock(fps) {
                 api.log_info(&format!("frame lock: {}fps (loader d3d9)", fps));

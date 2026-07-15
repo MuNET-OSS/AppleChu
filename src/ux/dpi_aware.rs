@@ -3,6 +3,18 @@ use std::ffi::c_void;
 use crate::config::Config;
 use crate::util::api::Api;
 
+crate::config_section! {
+    pub(crate) struct DpiAwareConfig => DPI_AWARE_CONFIG_SECTION {
+        section: "DpiAware",
+        order: 180,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "启用 Per-Monitor V2 DPI 感知",
+        fields: {}
+    }
+}
+
 type SetProcessDpiAwarenessContextFn = unsafe extern "system" fn(isize) -> i32;
 
 const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: isize = -4isize;
@@ -14,7 +26,10 @@ extern "system" {
 }
 
 pub fn init(api: &Api, config: &Config) {
-    if !config.is_enabled("DpiAware") {
+    if !config
+        .section::<DpiAwareConfig>()
+        .is_some_and(|config| config.enabled)
+    {
         return;
     }
 

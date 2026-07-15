@@ -2,8 +2,23 @@ use crate::config::Config;
 use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::memory::PatchMemory;
 
+crate::config_section! {
+    pub(crate) struct Unlock120fpsConfig => UNLOCK_120FPS_CONFIG_SECTION {
+        section: "Unlock120fps",
+        order: 155,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "解锁 120fps",
+        fields: {}
+    }
+}
+
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
-    if !config.is_enabled("Unlock120fps") {
+    if !config
+        .section::<Unlock120fpsConfig>()
+        .is_some_and(|config| config.enabled)
+    {
         return;
     }
 
@@ -12,10 +27,8 @@ pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     // 改 MOV EAX,60 → MOV EAX,120 强制 120fps
     apply_patch(
         api,
-        config,
         &VersionedPatch {
             name: "unlock 120fps",
-            section: "Unlock120fps",
             variants: &[PatchVariant {
                 pattern: Some("B9 78 00 00 00 B8 3C 00 00 00 0F 45 C1"),
                 pattern_offset: 5,

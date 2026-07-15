@@ -128,12 +128,12 @@ pub fn normalize_path(value: &str) -> String {
     value.replace('/', "\\").to_ascii_lowercase()
 }
 
-pub fn absolutize(base_dir: &str, value: &str) -> PathBuf {
+pub fn absolutize(base_dir: impl AsRef<Path>, value: &str) -> PathBuf {
     let path = Path::new(value);
     if path.is_absolute() {
         path.to_path_buf()
     } else {
-        Path::new(base_dir).join(path)
+        base_dir.as_ref().join(path)
     }
 }
 

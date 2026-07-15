@@ -2,7 +2,6 @@ use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
-use crate::config::Config;
 use crate::util::api::Api;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -38,9 +37,9 @@ extern "system" {
 }
 const VK_HOME: i32 = 0x24;
 
-pub fn init(api: &Api, config: &Config) {
+pub fn init(api: &Api, hotkey: &str) {
     unsafe { API_HANDLE = Some(*api) };
-    let hotkey = parse_hotkey_config(config).unwrap_or(VK_HOME);
+    let hotkey = parse_hotkey(hotkey).unwrap_or(VK_HOME);
     HOTKEY.store(hotkey, Ordering::Relaxed);
     RUNNING.store(true, Ordering::Relaxed);
 
@@ -461,14 +460,6 @@ fn jump_target(text: &[u8], text_base: usize, target: usize) -> Option<usize> {
     }
     let rel = read_le_i32(text, offset + 1)?;
     Some((target + 5).wrapping_add(rel as usize))
-}
-
-fn parse_hotkey_config(config: &Config) -> Option<i32> {
-    match config.get_value("Autoplay", "hotkey")? {
-        toml::Value::Integer(value) => i32::try_from(*value).ok().filter(|value| *value > 0),
-        toml::Value::String(value) => parse_hotkey(value),
-        _ => None,
-    }
 }
 
 fn parse_hotkey(value: &str) -> Option<i32> {

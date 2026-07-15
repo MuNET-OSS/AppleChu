@@ -44,11 +44,11 @@ pub unsafe fn load_mods() {
         Some(d) => d,
         None => return,
     };
-    let config = Config::load(&base_dir);
-    console::init(
-        &mut state,
-        config.get_bool("System", "EnableConsole", true),
-    );
+    let config = Config::global(&base_dir);
+    let enable_console = config
+        .section::<crate::system_config::SystemConfig>()
+        .is_none_or(|config| config.enable_console);
+    console::init(&mut state, enable_console);
 
     state.base_dir = base_dir.clone();
     state.log_file = File::create(format!("{}\\chumod_loader.log", base_dir)).ok();

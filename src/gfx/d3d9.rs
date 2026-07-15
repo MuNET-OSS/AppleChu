@@ -5,8 +5,26 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use once_cell::sync::OnceCell;
 
 use crate::config::Config;
+use crate::gfx::WindowConfig;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat;
+
+crate::config_section! {
+    pub(crate) struct D3D9ExConfig => D3D9EX_CONFIG_SECTION {
+        section: "D3D9Ex",
+        order: 110,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "D3D9Ex 透明升级、设备丢失恢复与快速重启",
+        fields: {
+            pub device_lost_recover: bool = true,
+            comment: "设备丢失后自动恢复";
+            pub fast_restart: bool = true,
+            comment: "启用快速重启补丁";
+        }
+    }
+}
 
 const D3DERR_DEVICELOST: i32 = 0x8876_0868u32 as i32;
 const D3DERR_DEVICENOTRESET: i32 = 0x8876_0869u32 as i32;
@@ -77,12 +95,19 @@ extern "system" {
 }
 
 pub fn init(api: &Api, config: &Config) {
-    let windowed = config.get_int("Window", "windowed", 0) != 0;
-    let monitor = config.get_int("Window", "monitor", 0).max(0) as u32;
-    let d3d9ex = (config.is_enabled("D3D9Ex") && config.get_bool("D3D9Ex", "enable", true))
-        || config.is_enabled("DeviceLostFix");
+    let window = config.section::<WindowConfig>();
+    let d3d9ex_config = config.section::<D3D9ExConfig>();
+    let windowed = window
+        .as_ref()
+        .is_some_and(|config| config.enabled && config.windowed);
+    let monitor = window
+        .as_ref()
+        .filter(|config| config.enabled)
+        .and_then(|config| u32::try_from(config.monitor.max(0)).ok())
+        .unwrap_or(0);
+    let d3d9ex = d3d9ex_config.as_ref().is_some_and(|config| config.enabled);
 
-    if !config.is_enabled("Window") && !d3d9ex {
+    if !window.as_ref().is_some_and(|config| config.enabled) && !d3d9ex {
         return;
     }
     if !windowed && monitor == 0 && !d3d9ex {
@@ -93,7 +118,9 @@ pub fn init(api: &Api, config: &Config) {
     WINDOWED.store(windowed, Ordering::SeqCst);
     D3D9EX_ENABLED.store(d3d9ex, Ordering::SeqCst);
     DEVICE_LOST_RECOVER.store(
-        config.get_bool("D3D9Ex", "device_lost_recover", true),
+        d3d9ex_config
+            .as_ref()
+            .is_some_and(|config| config.enabled && config.device_lost_recover),
         Ordering::SeqCst,
     );
 

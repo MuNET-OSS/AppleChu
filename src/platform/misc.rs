@@ -11,24 +11,38 @@ static mut ORIG_REG_QUERY_VALUE_EX_A: Option<RegQueryValueExAFn> = None;
 static mut ORIG_REG_QUERY_VALUE_EX_W: Option<RegQueryValueExWFn> = None;
 static CONFIG: OnceCell<MiscConfig> = OnceCell::new();
 
-#[derive(Clone)]
-struct MiscConfig {
-    allow_reboot: bool,
-    allow_master_key_write: bool,
-    next_process_file_path: String,
+crate::config_section! {
+    struct MiscConfig => MISC_CONFIG_SECTION {
+        section: "Misc",
+        order: 950,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: true,
+        comment: "其他平台行为",
+        fields: {
+            allow_reboot: bool = false,
+            key: "allowReboot",
+            comment: "允许游戏重启系统";
+            allow_master_key_write: bool = false,
+            key: "allowMasterKeyWrite",
+            comment: "允许写入主密钥";
+            next_process_file_path: String = String::new(),
+            key: "nextProcessFilePath",
+            comment: "下一个进程路径";
+        }
+    }
 }
 
 pub fn init(api: &Api, config: &Config) {
-    if !config.get_bool("Misc", "enable", true) {
+    let Some(config) = config
+        .section::<MiscConfig>()
+        .filter(|config| config.enabled)
+    else {
         return;
-    }
+    };
 
     unsafe {
-        let _ = CONFIG.set(MiscConfig {
-            allow_reboot: config.get_bool("Misc", "allowReboot", false),
-            allow_master_key_write: config.get_bool("Misc", "allowMasterKeyWrite", false),
-            next_process_file_path: config.get_string("Misc", "nextProcessFilePath", ""),
-        });
+        let _ = CONFIG.set((*config).clone());
         ORIG_EXIT_WINDOWS_EX = winapi::hook_import(
             api,
             "user32.dll",

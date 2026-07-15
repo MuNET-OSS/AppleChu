@@ -32,8 +32,23 @@ static ORIG_SEND_REQUEST: AtomicUsize = AtomicUsize::new(0);
 static ORIG_RECEIVE_RESPONSE: AtomicUsize = AtomicUsize::new(0);
 static ORIG_QUERY_HEADERS: AtomicUsize = AtomicUsize::new(0);
 
+crate::config_section! {
+    pub(crate) struct NetLogConfig => NET_LOG_CONFIG_SECTION {
+        section: "NetLog",
+        order: 175,
+        default_enabled: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "网络请求日志",
+        fields: {}
+    }
+}
+
 pub fn install_pre_entry_hook(api: &Api, config: &Config) {
-    if !config.is_enabled("NetLog") {
+    if !config
+        .section::<NetLogConfig>()
+        .is_some_and(|config| config.enabled)
+    {
         return;
     }
 

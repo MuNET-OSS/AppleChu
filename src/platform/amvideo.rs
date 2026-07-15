@@ -5,8 +5,23 @@ use crate::iohook::proc_addr;
 use crate::platform::winapi;
 use crate::util::api::Api;
 
+crate::config_section! {
+    pub(crate) struct AmVideoConfig => AM_VIDEO_CONFIG_SECTION {
+        section: "AMVideo",
+        order: 920,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: true,
+        comment: "AMVideo 平台模拟",
+        fields: {}
+    }
+}
+
 pub fn init(api: &Api, config: &Config) {
-    if !config.get_bool("AMVideo", "enable", true) {
+    if !config
+        .section::<AmVideoConfig>()
+        .is_some_and(|config| config.enabled)
+    {
         return;
     }
 

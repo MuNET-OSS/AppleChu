@@ -2,6 +2,42 @@ use crate::config::Config;
 use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::memory::PatchMemory;
 
+crate::config_section! {
+    pub(crate) struct BypassAppUserConfig => BYPASS_APPUSER_CONFIG_SECTION {
+        section: "BypassAppUser",
+        order: 250,
+        default_enabled: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "绕过 AppUser 检测",
+        fields: {}
+    }
+}
+
+crate::config_section! {
+    pub(crate) struct Bypass120hzConfig => BYPASS_120HZ_CONFIG_SECTION {
+        section: "Bypass120hz",
+        order: 240,
+        default_enabled: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "绕过 120Hz 检测",
+        fields: {}
+    }
+}
+
+crate::config_section! {
+    pub(crate) struct Bypass1080pConfig => BYPASS_1080P_CONFIG_SECTION {
+        section: "Bypass1080p",
+        order: 230,
+        default_enabled: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "绕过 1080P 检测",
+        fields: {}
+    }
+}
+
 const BYPASS_1080P_EXPECTED: &[u8] = &[
     0x81, 0xBC, 0x24, 0x34, 0x02, 0x00, 0x00, 0x80, 0x07, 0x00, 0x00, 0x75, 0x1F, 0x81, 0xBC, 0x24,
     0x38, 0x02, 0x00, 0x00, 0x38, 0x04, 0x00, 0x00, 0x75, 0x12,
@@ -34,12 +70,16 @@ const fn patch_appuser_branch(mut bytes: [u8; 34]) -> [u8; 34] {
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     apply_bypass_1080p(api, config);
     apply_bypass_120hz(api, config);
+    if !config
+        .section::<BypassAppUserConfig>()
+        .is_some_and(|config| config.enabled)
+    {
+        return;
+    }
     apply_patch(
         api,
-        config,
         &VersionedPatch {
             name: "bypass AppUser check",
-            section: "BypassAppUser",
             variants: &[
                 PatchVariant {
                     pattern: None,
@@ -75,12 +115,16 @@ pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
 }
 
 fn apply_bypass_120hz<M: PatchMemory>(api: &M, config: &Config) {
+    if !config
+        .section::<Bypass120hzConfig>()
+        .is_some_and(|config| config.enabled)
+    {
+        return;
+    }
     apply_patch(
         api,
-        config,
         &VersionedPatch {
             name: "bypass 120Hz check",
-            section: "Bypass120hz",
             variants: &[PatchVariant {
                 pattern: Some(
                     "85 C0 74 3F ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 81 BC 24 34 02 00 00 80 07 00 00",
@@ -95,12 +139,16 @@ fn apply_bypass_120hz<M: PatchMemory>(api: &M, config: &Config) {
 }
 
 fn apply_bypass_1080p<M: PatchMemory>(api: &M, config: &Config) {
+    if !config
+        .section::<Bypass1080pConfig>()
+        .is_some_and(|config| config.enabled)
+    {
+        return;
+    }
     apply_patch(
         api,
-        config,
         &VersionedPatch {
             name: "bypass 1080p check",
-            section: "Bypass1080p",
             variants: &[PatchVariant {
                 pattern: Some(
                     "81 BC 24 34 02 00 00 80 07 00 00 75 1F 81 BC 24 38 02 00 00 38 04 00 00 75 12",

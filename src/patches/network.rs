@@ -47,78 +47,100 @@ type WinHttpOpenRequestFn = unsafe extern "system" fn(
 
 static ORIG_OPEN_REQUEST: AtomicUsize = AtomicUsize::new(0);
 
+crate::config_section! {
+    pub(crate) struct DisableEncryptionConfig => DISABLE_ENCRYPTION_CONFIG_SECTION {
+        section: "DisableEncryption",
+        order: 160,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "关闭网络加密，私服需要",
+        fields: {}
+    }
+}
+
+crate::config_section! {
+    pub(crate) struct DisableTlsConfig => DISABLE_TLS_CONFIG_SECTION {
+        section: "DisableTLS",
+        order: 170,
+        default_enabled: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "关闭 TLS，私服需要",
+        fields: {}
+    }
+}
+
 pub fn install_pre_entry_hook(api: &Api, config: &Config) {
     apply_disable_tls(api, config);
 }
 
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
-    apply_patch(
-        api,
-        config,
-        &VersionedPatch {
-            name: "disable encryption 1",
-            section: "DisableEncryption",
-            variants: &[
-                PatchVariant {
-                    pattern: Some(ENCRYPTION_FIRST_F5_PATTERN),
-                    pattern_offset: ENCRYPTION_FIRST_PATTERN_OFFSET,
-                    known_offsets: &[0x17D200C],
-                    expected: &[0xF5],
+    if config
+        .section::<DisableEncryptionConfig>()
+        .is_some_and(|config| config.enabled)
+    {
+        apply_patch(api, &VersionedPatch {
+                name: "disable encryption 1",
+                variants: &[
+                    PatchVariant {
+                        pattern: Some(ENCRYPTION_FIRST_F5_PATTERN),
+                        pattern_offset: ENCRYPTION_FIRST_PATTERN_OFFSET,
+                        known_offsets: &[0x17D200C],
+                        expected: &[0xF5],
+                        patch: &[0x00],
+                    },
+                    PatchVariant {
+                        pattern: Some(ENCRYPTION_FIRST_FA_PATTERN),
+                        pattern_offset: ENCRYPTION_FIRST_PATTERN_OFFSET,
+                        known_offsets: &[0x1812814],
+                        expected: &[0xFA],
+                        patch: &[0x00],
+                    },
+                ],
+        });
+        apply_patch(api, &VersionedPatch {
+                name: "disable encryption 2",
+                variants: &[
+                    PatchVariant {
+                        pattern: Some(ENCRYPTION_SECOND_F5_PATTERN),
+                        pattern_offset: ENCRYPTION_SECOND_PATTERN_OFFSET,
+                        known_offsets: &[0x17D2010],
+                        expected: &[0xF5],
+                        patch: &[0x00],
+                    },
+                    PatchVariant {
+                        pattern: Some(ENCRYPTION_SECOND_FA_PATTERN),
+                        pattern_offset: ENCRYPTION_SECOND_PATTERN_OFFSET,
+                        known_offsets: &[0x1812818],
+                        expected: &[0xFA],
+                        patch: &[0x00],
+                    },
+                ],
+        });
+    }
+    if config
+        .section::<DisableTlsConfig>()
+        .is_some_and(|config| config.enabled)
+    {
+        apply_patch(api, &VersionedPatch {
+                name: "disable TLS flag",
+                variants: &[PatchVariant {
+                    pattern: Some(TLS_FLAG_PATTERN),
+                    pattern_offset: TLS_FLAG_PATTERN_OFFSET,
+                    known_offsets: &[0xE426CB],
+                    expected: &[0x80],
                     patch: &[0x00],
-                },
-                PatchVariant {
-                    pattern: Some(ENCRYPTION_FIRST_FA_PATTERN),
-                    pattern_offset: ENCRYPTION_FIRST_PATTERN_OFFSET,
-                    known_offsets: &[0x1812814],
-                    expected: &[0xFA],
-                    patch: &[0x00],
-                },
-            ],
-        },
-    );
-    apply_patch(
-        api,
-        config,
-        &VersionedPatch {
-            name: "disable encryption 2",
-            section: "DisableEncryption",
-            variants: &[
-                PatchVariant {
-                    pattern: Some(ENCRYPTION_SECOND_F5_PATTERN),
-                    pattern_offset: ENCRYPTION_SECOND_PATTERN_OFFSET,
-                    known_offsets: &[0x17D2010],
-                    expected: &[0xF5],
-                    patch: &[0x00],
-                },
-                PatchVariant {
-                    pattern: Some(ENCRYPTION_SECOND_FA_PATTERN),
-                    pattern_offset: ENCRYPTION_SECOND_PATTERN_OFFSET,
-                    known_offsets: &[0x1812818],
-                    expected: &[0xFA],
-                    patch: &[0x00],
-                },
-            ],
-        },
-    );
-    apply_patch(
-        api,
-        config,
-        &VersionedPatch {
-            name: "disable TLS flag",
-            section: "DisableTLS",
-            variants: &[PatchVariant {
-                pattern: Some(TLS_FLAG_PATTERN),
-                pattern_offset: TLS_FLAG_PATTERN_OFFSET,
-                known_offsets: &[0xE426CB],
-                expected: &[0x80],
-                patch: &[0x00],
-            }],
-        },
-    );
+                }],
+        });
+    }
 }
 
 fn apply_disable_tls(api: &Api, config: &Config) {
-    if !config.is_enabled("DisableTLS") {
+    if !config
+        .section::<DisableTlsConfig>()
+        .is_some_and(|config| config.enabled)
+    {
         return;
     }
 

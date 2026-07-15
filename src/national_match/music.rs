@@ -14,11 +14,8 @@ use std::sync::Mutex;
 
 use once_cell::sync::OnceCell;
 
-use crate::config::Config;
 use crate::util::api::Api;
 use crate::util::pattern;
-
-const SECTION: &str = "NationalMatch";
 
 /// 曲库加载 CALL 点签名：`PUSH EAX; CALL <load>; LEA ECX,[EBP-0x118]; CALL ...`
 const MUSIC_LOAD_SIG: &str = "50 E8 ?? ?? ?? ?? 8D 8D E8 FE FF FF E8";
@@ -46,11 +43,7 @@ static TRAMPOLINE: OnceCell<usize> = OnceCell::new();
 static MUSIC_PAYLOAD: Mutex<Option<Vec<u8>>> = Mutex::new(None);
 static MUSIC_CONTAINER: AtomicUsize = AtomicUsize::new(0);
 
-pub fn init(api: &Api, config: &Config) {
-    if !config.is_enabled(SECTION) {
-        return;
-    }
-
+pub fn init(api: &Api) {
     let text_base = api.text_base();
     let text_size = api.text_size();
     if text_base == 0 || text_size == 0 {

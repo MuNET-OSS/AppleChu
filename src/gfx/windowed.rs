@@ -2,6 +2,7 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::config::Config;
+use crate::gfx::WindowConfig;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat_all_modules;
 
@@ -49,12 +50,15 @@ extern "system" {
 }
 
 pub fn init(api: &Api, config: &Config) {
-    if !config.is_enabled("Window") || config.get_int("Window", "windowed", 0) == 0 {
+    let Some(config) = config.section::<WindowConfig>() else {
+        return;
+    };
+    if !config.enabled || !config.windowed {
         return;
     }
 
     WINDOWED.store(true, Ordering::SeqCst);
-    FRAMED.store(config.get_int("Window", "framed", 1) != 0, Ordering::SeqCst);
+    FRAMED.store(config.framed, Ordering::SeqCst);
 
     let mut installed = false;
     unsafe {
