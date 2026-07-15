@@ -1,0 +1,22 @@
+[package]
+name = "applechu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme = "../../README.md"
+
+[lib]
+name = "winhttp"
+crate-type = ["cdylib"]
+
+[dependencies]
+applechu-macros.workspace = true
+chu-abi.workspace = true
+linkme.workspace = true
+once_cell.workspace = true
+retour.workspace = true
+toml.workspace = true
+windows-sys.workspace = true
+
+[build-dependencies]
+forward-dll.workspace = true
