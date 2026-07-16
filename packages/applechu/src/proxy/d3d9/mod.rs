@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use chu_abi::{ChuModPresentCallback, ChuModResetCallback};
 
+use crate::d3d9::D3dPresentParameters;
 use crate::proxy::loader::log::{log_info, log_warn};
 
 use self::iat_hook::{hook_iat, patch_slot, vtable_slot};
@@ -42,7 +43,7 @@ type CreateDeviceFn = unsafe extern "system" fn(
     u32,
     usize,
     u32,
-    *mut c_void,
+    *mut D3dPresentParameters,
     *mut *mut c_void,
 ) -> i32;
 type PresentFn = unsafe extern "system" fn(
@@ -60,6 +61,7 @@ static HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
 static ORIGINAL_DIRECT3D_CREATE9: AtomicUsize = AtomicUsize::new(0);
 static ORIGINAL_CREATE_DEVICE: AtomicUsize = AtomicUsize::new(0);
 static DEVICE_HOOKED: AtomicBool = AtomicBool::new(false);
+static WINDOWED_MODE: AtomicBool = AtomicBool::new(false);
 
 static ORIGINAL_PRESENT: AtomicUsize = AtomicUsize::new(0);
 static ORIGINAL_RESET: AtomicUsize = AtomicUsize::new(0);
@@ -95,6 +97,10 @@ static RESET_CALLBACKS: [AtomicUsize; MAX_RESET_CALLBACKS] = [
     AtomicUsize::new(0),
     AtomicUsize::new(0),
 ];
+
+pub(crate) fn set_windowed_mode(enabled: bool) {
+    WINDOWED_MODE.store(enabled, Ordering::SeqCst);
+}
 
 #[link(name = "kernel32")]
 extern "system" {

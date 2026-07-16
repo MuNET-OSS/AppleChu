@@ -66,12 +66,18 @@ unsafe extern "system" fn hooked_create_device(
     device_type: u32,
     focus_window: usize,
     behavior_flags: u32,
-    presentation_parameters: *mut c_void,
+    presentation_parameters: *mut D3dPresentParameters,
     returned_device_interface: *mut *mut c_void,
 ) -> i32 {
     let addr = ORIGINAL_CREATE_DEVICE.load(Ordering::SeqCst);
     if addr == 0 {
         return -1;
+    }
+    if WINDOWED_MODE.load(Ordering::SeqCst) {
+        // SAFETY: [类别 8：FFI 边界] Direct3D 保证非空参数在调用期间指向可写且正确对齐的展示参数。
+        if let Some(parameters) = unsafe { presentation_parameters.as_mut() } {
+            parameters.force_windowed();
+        }
     }
     let original: CreateDeviceFn = std::mem::transmute(addr);
     let result = original(
@@ -94,7 +100,7 @@ unsafe extern "system" fn hooked_create_device(
     result
 }
 
-unsafe fn hook_device(device: *mut c_void, presentation_parameters: *mut c_void) {
+unsafe fn hook_device(device: *mut c_void, presentation_parameters: *mut D3dPresentParameters) {
     if DEVICE_HOOKED.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -162,5 +168,54 @@ unsafe fn hook_slot(
         ));
     } else {
         log_warn(&format!("d3d9: {name} vtable write failed"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "system" fn fake_create_device(
+        _this: *mut c_void,
+        _adapter: u32,
+        _device_type: u32,
+        _focus_window: usize,
+        _behavior_flags: u32,
+        _presentation_parameters: *mut D3dPresentParameters,
+        _returned_device_interface: *mut *mut c_void,
+    ) -> i32 {
+        0
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Win32 vtable 函数地址通过 usize 保存")]
+    fn create_device_forces_windowed_without_d3d9ex() {
+        // Given: loader 直接代理普通 D3D9，游戏仍传入全屏参数。
+        let previous_create_device =
+            ORIGINAL_CREATE_DEVICE.swap(fake_create_device as *const () as usize, Ordering::SeqCst);
+        let previous_windowed = WINDOWED_MODE.swap(true, Ordering::SeqCst);
+        let mut parameters = D3dPresentParameters::default();
+        parameters.full_screen_refresh_rate_in_hz = 60;
+
+        // When: 参数经过 loader 的通用 CreateDevice hook。
+        // SAFETY: [类别 8：FFI 边界] 假函数签名与 CreateDeviceFn 完全一致，参数在本次调用期间有效。
+        let result = unsafe {
+            hooked_create_device(
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                &mut parameters,
+                std::ptr::null_mut(),
+            )
+        };
+        ORIGINAL_CREATE_DEVICE.store(previous_create_device, Ordering::SeqCst);
+        WINDOWED_MODE.store(previous_windowed, Ordering::SeqCst);
+
+        // Then: 普通 D3D9 后端也收到窗口展示参数。
+        assert_eq!(result, 0);
+        assert_eq!(parameters.windowed, 1);
+        assert_eq!(parameters.full_screen_refresh_rate_in_hz, 0);
     }
 }

@@ -15,13 +15,13 @@ use std::ptr;
 
 use windows_sys::Win32::Foundation::{BOOL, HMODULE, TRUE};
 use windows_sys::Win32::System::Diagnostics::Debug::FlushInstructionCache;
-use windows_sys::Win32::System::LibraryLoader::{
-    DisableThreadLibraryCalls, GetModuleHandleA,
-};
+use windows_sys::Win32::System::LibraryLoader::{DisableThreadLibraryCalls, GetModuleHandleA};
 use windows_sys::Win32::System::Memory::{
     VirtualAlloc, VirtualProtect, MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE,
 };
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+pub(crate) use d3d9::set_windowed_mode;
 
 const DLL_PROCESS_ATTACH: u32 = 1;
 const DLL_PROCESS_DETACH: u32 = 0;

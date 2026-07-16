@@ -9,6 +9,32 @@ use crate::util::api::Api;
 
 static FPS_ENABLED: AtomicBool = AtomicBool::new(false);
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct D3dPresentParameters {
+    back_buffer_width: u32,
+    back_buffer_height: u32,
+    back_buffer_format: u32,
+    back_buffer_count: u32,
+    multi_sample_type: u32,
+    multi_sample_quality: u32,
+    swap_effect: u32,
+    device_window: usize,
+    pub(crate) windowed: i32,
+    enable_auto_depth_stencil: i32,
+    auto_depth_stencil_format: u32,
+    flags: u32,
+    pub(crate) full_screen_refresh_rate_in_hz: u32,
+    presentation_interval: u32,
+}
+
+impl D3dPresentParameters {
+    pub(crate) fn force_windowed(&mut self) {
+        self.windowed = 1;
+        self.full_screen_refresh_rate_in_hz = 0;
+    }
+}
+
 crate::config_section! {
     pub(crate) struct FpsDisplayConfig => FPS_DISPLAY_CONFIG_SECTION {
         section: "FpsDisplay",
@@ -71,4 +97,26 @@ unsafe extern "C" fn on_present(device: *mut c_void) {
         fps_osd::on_present(device);
     }
     osd::render(device);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::D3dPresentParameters;
+
+    #[test]
+    fn force_windowed_sets_required_d3d_fields() {
+        // Given: 全屏展示参数带有非零刷新率。
+        let mut parameters = D3dPresentParameters {
+            windowed: 0,
+            full_screen_refresh_rate_in_hz: 60,
+            ..Default::default()
+        };
+
+        // When: 窗口模式在进入 D3D9 前被强制应用。
+        parameters.force_windowed();
+
+        // Then: D3D9 同时收到窗口标志与窗口模式要求的刷新率。
+        assert_eq!(parameters.windowed, 1);
+        assert_eq!(parameters.full_screen_refresh_rate_in_hz, 0);
+    }
 }

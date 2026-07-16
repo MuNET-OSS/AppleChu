@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use once_cell::sync::OnceCell;
 
 use crate::config::Config;
+use crate::d3d9::D3dPresentParameters;
 use crate::gfx::WindowConfig;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat;
@@ -54,25 +55,6 @@ static D3D9EX_ENABLED: AtomicBool = AtomicBool::new(false);
 static DEVICE_LOST_RECOVER: AtomicBool = AtomicBool::new(true);
 static D3D9_VTABLE: OnceCell<Box<[usize; 17]>> = OnceCell::new();
 static DEVICE_VTABLE: OnceCell<Box<[usize; 119]>> = OnceCell::new();
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct D3dPresentParameters {
-    back_buffer_width: u32,
-    back_buffer_height: u32,
-    back_buffer_format: u32,
-    back_buffer_count: u32,
-    multi_sample_type: u32,
-    multi_sample_quality: u32,
-    swap_effect: u32,
-    device_window: usize,
-    windowed: i32,
-    enable_auto_depth_stencil: i32,
-    auto_depth_stencil_format: u32,
-    flags: u32,
-    full_screen_refresh_rate_in_hz: u32,
-    presentation_interval: u32,
-}
 
 #[repr(C)]
 struct D3d9ExProxy {
@@ -510,8 +492,7 @@ unsafe extern "system" fn d3d9_create_device(
 
     let selected_adapter = MONITOR_INDEX.load(Ordering::SeqCst);
     if WINDOWED.load(Ordering::SeqCst) && !presentation_parameters.is_null() {
-        (*presentation_parameters).windowed = 1;
-        (*presentation_parameters).full_screen_refresh_rate_in_hz = 0;
+        (*presentation_parameters).force_windowed();
     }
 
     let real = (*this).real;

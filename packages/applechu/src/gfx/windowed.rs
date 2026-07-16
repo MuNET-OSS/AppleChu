@@ -2,6 +2,7 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::gfx::WindowConfig;
+use crate::proxy::set_windowed_mode;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat_all_modules;
 
@@ -50,6 +51,7 @@ extern "system" {
 
 #[applechu_macros::config_section(stage = Graphics, order = 10)]
 pub fn init(api: &Api, config: &WindowConfig) {
+    set_windowed_mode(config.windowed);
     if !config.windowed {
         return;
     }
