@@ -1,3 +1,5 @@
+mod debug_output;
+
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -84,6 +86,7 @@ impl ExternalChuniIo {
         if module.is_null() {
             return Err(format!("LoadLibraryW failed for {path}"));
         }
+        debug_output::install(module);
 
         let api_version = resolve_any(
             module,
@@ -186,22 +189,23 @@ impl ExternalChuniIo {
     }
 
     unsafe fn ensure_jvs_init(&self) {
-        if !self.jvs_started.swap(true, Ordering::SeqCst) {
-            (self.jvs_init)();
+        if let Some(status) = call_init_once(&self.jvs_started, || (self.jvs_init)()) {
+            debug_output::log_init_status("JVS", status);
         }
     }
 
     unsafe fn ensure_slider_init(&self) {
-        if !self.slider_started.swap(true, Ordering::SeqCst) {
-            (self.slider_init)();
+        if let Some(status) = call_init_once(&self.slider_started, || (self.slider_init)()) {
+            debug_output::log_init_status("slider", status);
         }
     }
 
     pub unsafe fn ensure_led_init(&self) {
-        if !self.led_started.swap(true, Ordering::SeqCst) {
-            if let Some(func) = self.led_init {
-                func();
-            }
+        let Some(func) = self.led_init else {
+            return;
+        };
+        if let Some(status) = call_init_once(&self.led_started, || func()) {
+            debug_output::log_init_status("LED", status);
         }
     }
 
@@ -250,4 +254,8 @@ impl ExternalChuniIo {
             func(board, rgb);
         }
     }
+}
+
+fn call_init_once(started: &AtomicBool, init: impl FnOnce() -> i32) -> Option<i32> {
+    (!started.swap(true, Ordering::SeqCst)).then(init)
 }
