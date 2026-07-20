@@ -92,7 +92,7 @@ fn shared_audio_is_patched_by_early_pipeline() {
     let memory = FakeMemory::new(image);
 
     // When: DLL_PROCESS_ATTACH 执行 early patch 管线。
-    patches::apply_pre_entry(&memory, &config("[ForceSharedAudio]"));
+    patches::apply_pre_tls(&memory, &config("[ForceSharedAudio]"));
 
     // Then: 只改写真实 WASAPI share mode，不触碰前面的同形指令。
     let image = memory.image.borrow();
@@ -119,7 +119,7 @@ fn custom_timers_are_patched_by_early_pipeline() {
     let memory = FakeMemory::new(image);
 
     // When: DLL_PROCESS_ATTACH 读取三个配置值并执行 early patch。
-    patches::apply_pre_entry(
+    patches::apply_pre_tls(
         &memory,
         &config("[CustomTimers]\nmap_select=61\nticket_select=62\ncourse_select=63"),
     );
@@ -130,6 +130,25 @@ fn custom_timers_are_patched_by_early_pipeline() {
 }
 
 #[test]
+fn disable_timer_uses_unique_context_in_pre_tls_pipeline() {
+    let mut image = vec![0x90; 160];
+    image[8..11].copy_from_slice(&[0x32, 0xC0, 0xC3]);
+    image[48..107].copy_from_slice(&[
+        0x85, 0xC0, 0x74, 0x6F, 0x83, 0xF8, 0x08, 0x74, 0x6A, 0xE8, 0, 0, 0, 0, 0x3C, 0x01, 0x74,
+        0x55, 0x8B, 0x0D, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0, 0x8B, 0xC8, 0xE8, 0, 0, 0, 0, 0x8D, 0x48,
+        0x78, 0xE8, 0, 0, 0, 0, 0x3C, 0x01, 0x74, 0x37, 0x56, 0x8D, 0x8F, 0xA8, 0, 0, 0, 0xE8, 0,
+        0, 0,
+    ]);
+    let memory = FakeMemory::new(image);
+
+    patches::apply_pre_tls(&memory, &config("[DisableTimer]"));
+
+    let image = memory.image.borrow();
+    assert_eq!(&image[8..11], &[0x32, 0xC0, 0xC3]);
+    assert_eq!(image[94], 0xEB);
+}
+
+#[test]
 fn max_tracks_is_patched_by_early_pipeline() {
     // Given: 最大曲数函数返回默认值 3，配置要求 7。
     let mut image = vec![0x90; 96];
@@ -137,7 +156,7 @@ fn max_tracks_is_patched_by_early_pipeline() {
     let memory = FakeMemory::new(image);
 
     // When: DLL_PROCESS_ATTACH 执行 UnlockTracks early patch。
-    patches::apply_pre_entry(&memory, &config("[UnlockTracks]\nmax=7"));
+    patches::apply_pre_tls(&memory, &config("[UnlockTracks]\nmax=7"));
 
     // Then: 返回立即数在入口点运行前已改为 7。
     assert_eq!(&memory.image.borrow()[41..45], &7_i32.to_le_bytes());
@@ -155,7 +174,7 @@ fn fast_restart_is_patched_by_early_pipeline() {
     let memory = FakeMemory::new(image);
 
     // When: DLL_PROCESS_ATTACH 执行 D3D9Ex early patch。
-    patches::apply_pre_entry(&memory, &config("[D3D9Ex]\nfast_restart=true"));
+    patches::apply_pre_tls(&memory, &config("[D3D9Ex]\nfast_restart=true"));
 
     // Then: 目标函数与失败分支在游戏入口点前同时完成改写。
     let image = memory.image.borrow();
@@ -173,7 +192,7 @@ fn custom_version_is_patched_by_early_pipeline() {
     let memory = FakeMemory::new(image);
 
     // When: DLL_PROCESS_ATTACH 执行 General early patch。
-    patches::apply_pre_entry(&memory, &config("[General]\nversion_text='EARLY'"));
+    patches::apply_pre_tls(&memory, &config("[General]\nversion_text='EARLY'"));
 
     // Then: 自定义版本文字在游戏入口点前写入。
     assert_eq!(&memory.image.borrow()[80..86], b"EARLY\0");
@@ -197,7 +216,7 @@ fn custom_free_play_text_is_patched_by_early_pipeline() {
     let memory = FakeMemory::new(image);
 
     // When: DLL_PROCESS_ATTACH 执行 FreePlay early patch。
-    patches::apply_pre_entry(&memory, &config("[FreePlay]\ncustom_text='EARLY'"));
+    patches::apply_pre_tls(&memory, &config("[FreePlay]\ncustom_text='EARLY'"));
 
     // Then: 字符串长度与内容在游戏入口点前保持一致。
     let image = memory.image.borrow();
@@ -206,7 +225,7 @@ fn custom_free_play_text_is_patched_by_early_pipeline() {
 }
 
 #[test]
-fn tls_and_appuser_are_patched_in_their_required_stages() {
+fn tls_and_appuser_are_patched_in_single_pre_tls_pass() {
     // Given: AppUser 与 TLS 检测仍是原字节，且配置明确启用两项绕过。
     let mut image = vec![0x90; 64];
     image[8..14].copy_from_slice(&[0x83, 0x7C, 0x24, 0x04, 0x00, 0x75]);
@@ -218,13 +237,10 @@ fn tls_and_appuser_are_patched_in_their_required_stages() {
 
     let config = config("[BypassAppUser]\n[DisableTLS]");
 
-    // When: TLS 前阶段先执行，TLS 完成后再执行入口点前阶段。
+    // When: DLL_PROCESS_ATTACH 在 EXE TLS callback 前执行全部内存补丁。
     patches::apply_pre_tls(&memory, &config);
-    assert_eq!(memory.image.borrow()[13], 0x75);
-    assert_eq!(memory.image.borrow()[31], 0x00);
-    patches::apply_pre_entry(&memory, &config);
 
-    // Then: 两个会在初始化中被缓存的检测都已提前改写。
+    // Then: 两个可能在初始化中被缓存的检测都已提前改写。
     let image = memory.image.borrow();
     assert_eq!(image[13], 0xEB);
     assert_eq!(image[31], 0x00);
@@ -239,8 +255,7 @@ fn invalid_config_skips_pre_tls_memory_changes() {
         0x34,
     ]);
     let memory = FakeMemory::new(image);
-    let config = Config::parse(".", "Version = \"0\"\n[DisableTLS]\n")
-        .expect("TOML 语法必须有效");
+    let config = Config::parse(".", "Version = \"0\"\n[DisableTLS]\n").expect("TOML 语法必须有效");
 
     // When: TLS 前入口尝试应用配置。
     apply_pre_tls_if_valid(&memory, &config);
@@ -250,7 +265,7 @@ fn invalid_config_skips_pre_tls_memory_changes() {
 }
 
 #[test]
-fn appuser_uses_current_revision_site_in_single_pre_entry_pass() {
+fn appuser_uses_current_revision_site_in_single_pre_tls_pass() {
     // Given: 2.50 同时保留旧检查函数与当前实际检查函数。
     let mut image = pe_image(0x8B400);
     image[0x8A0C0..0x8A0E2].copy_from_slice(&[
@@ -265,8 +280,8 @@ fn appuser_uses_current_revision_site_in_single_pre_entry_pass() {
     ]);
     let memory = FakeMemory::new(image);
 
-    // When: AppUser patch 在原始入口前只执行一次。
-    patches::apply_pre_entry(&memory, &config("[BypassAppUser]"));
+    // When: AppUser patch 在 EXE TLS callback 前只执行一次。
+    patches::apply_pre_tls(&memory, &config("[BypassAppUser]"));
 
     // Then: 旧函数保持原样，当前版本位点被绕过。
     let image = memory.image.borrow();

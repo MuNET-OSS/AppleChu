@@ -3,6 +3,13 @@ use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
+const DISABLE_TIMER_PATTERN: &str = concat!(
+    "85 C0 74 ?? 83 F8 08 74 ?? E8 ?? ?? ?? ?? 3C 01 74 ?? ",
+    "8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? ",
+    "8D 48 78 E8 ?? ?? ?? ?? 3C 01 74 ?? 56 8D 8F A8 00 00 00 E8"
+);
+const DISABLE_TIMER_PATTERN_OFFSET: isize = 46;
+
 crate::config_section! {
     pub(crate) struct DisableTimerConfig => DISABLE_TIMER_CONFIG_SECTION {
         section: "DisableTimer",
@@ -70,11 +77,11 @@ fn apply_disable_timer<M: PatchMemory>(api: &M, config: &Config) {
         &VersionedPatch {
             name: "disable song timer",
             variants: &[PatchVariant {
-                pattern: Some("32 C0 C3"),
-                pattern_offset: 0,
-                known_offsets: &[],
-                expected: &[0x32, 0xC0],
-                patch: &[0xB0, 0x01],
+                pattern: Some(DISABLE_TIMER_PATTERN),
+                pattern_offset: DISABLE_TIMER_PATTERN_OFFSET,
+                known_offsets: &[0x9BE10D, 0x9DCEED, 0x9DD9BD],
+                expected: &[0x74],
+                patch: &[0xEB],
             }],
         },
     );

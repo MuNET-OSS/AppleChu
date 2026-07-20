@@ -18,9 +18,6 @@ use crate::util::memory::PatchMemory;
 
 pub fn apply_pre_tls<M: PatchMemory>(memory: &M, config: &Config) {
     network::apply_early(memory, config);
-}
-
-pub fn apply_pre_entry<M: PatchMemory>(memory: &M, config: &Config) {
     custom_version::apply_early(memory, config);
     skip_startup::apply_early(memory, config);
     free_play::apply_early(memory, config);

@@ -84,7 +84,6 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
     if let Err(error) = config.sync() {
         api.log_warn(&format!("写入规范化 AppleChu.toml 失败: {error}"));
     }
-    patches::apply_pre_entry(api, config);
     patches::install_pre_entry_hooks(api, config);
 
     pin_dll(api, "D3DCompiler_43.dll");
