@@ -1,8 +1,8 @@
 use std::cell::Cell;
-use std::ffi::{CStr, c_char};
+use std::ffi::{c_char, CStr};
 use std::ptr;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
 use windows_sys::Win32::Foundation::{HANDLE, HMODULE};
@@ -31,6 +31,7 @@ struct ProcAddrSymbol {
 struct ProcAddrTable {
     dll_name: &'static str,
     symbols: Vec<ProcAddrSymbol>,
+    sync_originals: fn(),
 }
 
 static TABLES: Lazy<Mutex<Vec<ProcAddrTable>>> = Lazy::new(|| Mutex::new(Vec::new()));
@@ -110,7 +111,7 @@ pub fn init(api: &Api) {
     }
 }
 
-pub fn push(dll_name: &'static str, symbols: &[HookSymbol]) {
+pub fn push(dll_name: &'static str, symbols: &[HookSymbol], sync_originals: fn()) {
     let entries = symbols
         .iter()
         .map(|symbol| ProcAddrSymbol {
@@ -120,11 +121,13 @@ pub fn push(dll_name: &'static str, symbols: &[HookSymbol]) {
         })
         .collect::<Vec<_>>();
     let count = entries.len();
+    let table = ProcAddrTable {
+        dll_name,
+        symbols: entries,
+        sync_originals,
+    };
     if let Ok(mut tables) = TABLES.lock() {
-        tables.push(ProcAddrTable {
-            dll_name,
-            symbols: entries,
-        });
+        tables.push(table);
     }
     log_info(&format!(
         "proc_addr: registered {dll_name} ({count} symbols)"
@@ -157,7 +160,10 @@ pub fn rehook_module(module: HMODULE) -> usize {
     tables
         .iter()
         .map(|table| unsafe {
-            hook_table::hook_table_apply(module, table.dll_name, &table.to_hook_symbols())
+            let patched =
+                hook_table::hook_table_apply(module, table.dll_name, &table.to_hook_symbols());
+            (table.sync_originals)();
+            patched
         })
         .sum()
 }
@@ -268,6 +274,7 @@ fn lookup_detour(module: usize, name: &CStr, real: *const ()) -> Option<*const (
                 .find(|symbol| name.to_bytes() == symbol.name.as_bytes())
             {
                 unsafe { write_original(symbol.original, real) };
+                (table.sync_originals)();
                 return Some(symbol.patch as *const ());
             }
         }
@@ -322,7 +329,7 @@ impl ProcAddrTable {
             .map(|symbol| HookSymbol {
                 name: symbol.name,
                 patch: symbol.patch as *const (),
-                original: ptr::null_mut(),
+                original: symbol.original as *mut *const (),
             })
             .collect()
     }

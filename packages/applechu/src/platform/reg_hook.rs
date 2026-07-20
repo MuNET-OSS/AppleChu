@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::ptr;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use once_cell::sync::{Lazy, OnceCell};
 
 use crate::config::Config;
-use crate::iohook::hook_table::{HookSymbol, hook_table_apply, null_module};
+use crate::iohook::hook_table::{hook_table_apply, null_module, HookSymbol};
 use crate::iohook::proc_addr;
 use crate::platform::winapi::{self, RegQueryValueExAFn, RegQueryValueExWFn};
 use crate::util::api::Api;
@@ -227,19 +227,26 @@ fn install_hooks(api: &Api) {
                 original: ptr::addr_of_mut!(ORIG_ENUM_VALUE_W_PTR),
             },
         ];
-        proc_addr::push("advapi32.dll", &symbols);
+        proc_addr::push("advapi32.dll", &symbols, sync_originals);
         let patched = hook_table_apply(null_module(), "advapi32.dll", &symbols);
+        sync_originals();
         if patched > 0 {
-            ORIG_OPEN_KEY_EX_W.store(ORIG_OPEN_KEY_EX_W_PTR as usize, Ordering::SeqCst);
-            ORIG_CREATE_KEY_EX_W.store(ORIG_CREATE_KEY_EX_W_PTR as usize, Ordering::SeqCst);
-            ORIG_CLOSE_KEY.store(ORIG_CLOSE_KEY_PTR as usize, Ordering::SeqCst);
-            ORIG_QUERY_VALUE_EX_A.store(ORIG_QUERY_VALUE_EX_A_PTR as usize, Ordering::SeqCst);
-            ORIG_QUERY_VALUE_EX_W.store(ORIG_QUERY_VALUE_EX_W_PTR as usize, Ordering::SeqCst);
-            ORIG_GET_VALUE_W.store(ORIG_GET_VALUE_W_PTR as usize, Ordering::SeqCst);
-            ORIG_QUERY_INFO_KEY_W.store(ORIG_QUERY_INFO_KEY_W_PTR as usize, Ordering::SeqCst);
-            ORIG_ENUM_VALUE_W.store(ORIG_ENUM_VALUE_W_PTR as usize, Ordering::SeqCst);
             api.log_info(&format!("reg_hook: advapi32 hooks installed ({patched})"));
         }
+    }
+}
+
+fn sync_originals() {
+    // SAFETY: 原函数槽由 hook 安装过程写入，随后通过原子变量发布给并发调用者。
+    unsafe {
+        ORIG_OPEN_KEY_EX_W.store(ORIG_OPEN_KEY_EX_W_PTR as usize, Ordering::SeqCst);
+        ORIG_CREATE_KEY_EX_W.store(ORIG_CREATE_KEY_EX_W_PTR as usize, Ordering::SeqCst);
+        ORIG_CLOSE_KEY.store(ORIG_CLOSE_KEY_PTR as usize, Ordering::SeqCst);
+        ORIG_QUERY_VALUE_EX_A.store(ORIG_QUERY_VALUE_EX_A_PTR as usize, Ordering::SeqCst);
+        ORIG_QUERY_VALUE_EX_W.store(ORIG_QUERY_VALUE_EX_W_PTR as usize, Ordering::SeqCst);
+        ORIG_GET_VALUE_W.store(ORIG_GET_VALUE_W_PTR as usize, Ordering::SeqCst);
+        ORIG_QUERY_INFO_KEY_W.store(ORIG_QUERY_INFO_KEY_W_PTR as usize, Ordering::SeqCst);
+        ORIG_ENUM_VALUE_W.store(ORIG_ENUM_VALUE_W_PTR as usize, Ordering::SeqCst);
     }
 }
 

@@ -124,23 +124,30 @@ pub fn init(api: &Api) {
                 original: std::ptr::addr_of_mut!(ORIG_DESTROY_LIST_PTR),
             },
         ];
-        proc_addr::push("setupapi.dll", &symbols);
+        proc_addr::push("setupapi.dll", &symbols, sync_originals);
         let patched = crate::iohook::hook_table::hook_table_apply(
             crate::iohook::hook_table::null_module(),
             "setupapi.dll",
             &symbols,
         );
+        sync_originals();
         let loaded = GetModuleHandleA(b"setupapi.dll\0".as_ptr()) != 0;
         api.log_info(&format!(
             "iohook: setupapi hook_table_apply patched={patched}, setupapi.dll loaded={loaded}"
         ));
         if patched > 0 {
-            ORIG_GET_CLASS_DEVS.store(ORIG_GET_CLASS_DEVS_PTR as usize, Ordering::SeqCst);
-            ORIG_ENUM_INTERFACES.store(ORIG_ENUM_INTERFACES_PTR as usize, Ordering::SeqCst);
-            ORIG_GET_DETAIL.store(ORIG_GET_DETAIL_PTR as usize, Ordering::SeqCst);
-            ORIG_DESTROY_LIST.store(ORIG_DESTROY_LIST_PTR as usize, Ordering::SeqCst);
             api.log_info(&format!("iohook: setupapi hooks installed ({patched})"));
         }
+    }
+}
+
+fn sync_originals() {
+    // SAFETY: 原函数槽由 hook 安装过程写入，随后通过原子变量发布给并发调用者。
+    unsafe {
+        ORIG_GET_CLASS_DEVS.store(ORIG_GET_CLASS_DEVS_PTR as usize, Ordering::SeqCst);
+        ORIG_ENUM_INTERFACES.store(ORIG_ENUM_INTERFACES_PTR as usize, Ordering::SeqCst);
+        ORIG_GET_DETAIL.store(ORIG_GET_DETAIL_PTR as usize, Ordering::SeqCst);
+        ORIG_DESTROY_LIST.store(ORIG_DESTROY_LIST_PTR as usize, Ordering::SeqCst);
     }
 }
 
@@ -151,9 +158,8 @@ unsafe extern "system" fn hooked_get_class_devs(
     flags: u32,
 ) -> usize {
     let original_addr = ORIG_GET_CLASS_DEVS.load(Ordering::SeqCst);
-    let wants_io4 = flags & DIGCF_DEVICEINTERFACE != 0
-        && enumerator.is_null()
-        && is_hid_guid(class_guid);
+    let wants_io4 =
+        flags & DIGCF_DEVICEINTERFACE != 0 && enumerator.is_null() && is_hid_guid(class_guid);
     if original_addr == 0 {
         return if wants_io4 { FAKE_DEVICE_INFO_SET } else { 0 };
     }
