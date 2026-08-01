@@ -4,6 +4,8 @@ use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
 const MAX_TRACKS_PATTERN: &str = "B8 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC CC CC 8B 44 24 04 53 B3 14 8B 10 85 D2 78 1E 83 FA 10";
+const CLAMP_247_OFFSET: u32 = 0x6F8F92;
+const CLAMP_250_OFFSET: u32 = 0x3DF06D;
 
 crate::config_section! {
     pub(crate) struct UnlockTracksConfig => UNLOCK_TRACKS_CONFIG_SECTION {
@@ -36,13 +38,22 @@ fn apply_unlock_limit<M: PatchMemory>(api: &M) {
         api,
         &VersionedPatch {
             name: "unlock track limit",
-            variants: &[PatchVariant {
-                pattern: Some("B8 09 00 00 00 3B F0 5F 0F 47"),
-                pattern_offset: 10,
-                known_offsets: &[],
-                expected: &[0xF0],
-                patch: &[0xC0],
-            }],
+            variants: &[
+                PatchVariant {
+                    pattern: None,
+                    pattern_offset: 0,
+                    known_offsets: &[CLAMP_250_OFFSET],
+                    expected: &[0xB8, 0x07, 0, 0, 0, 0x3B, 0xC1, 0x0F, 0x47, 0xC1, 0xC3],
+                    patch: &[0xB8, 0x63, 0, 0, 0, 0x3B, 0xC1, 0x90, 0x90, 0x90, 0xC3],
+                },
+                PatchVariant {
+                    pattern: None,
+                    pattern_offset: 0,
+                    known_offsets: &[CLAMP_247_OFFSET],
+                    expected: &[0xF0],
+                    patch: &[0xC0],
+                },
+            ],
         },
     );
 }

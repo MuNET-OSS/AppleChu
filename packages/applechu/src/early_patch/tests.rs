@@ -169,6 +169,44 @@ fn max_tracks_is_patched_by_early_pipeline() {
 }
 
 #[test]
+fn unlock_track_clamp_is_patched_for_247() {
+    // Given: 247 clamp 指令仍使用 ESI 比较操作数。
+    let offset = 0x6F8F92;
+    let mut image = pe_image(offset + 3);
+    image[offset..offset + 3].copy_from_slice(&[0xF0, 0x8B, 0xC6]);
+    let memory = FakeMemory::new(image);
+
+    // When: DLL_PROCESS_ATTACH 执行 247 UnlockTracks clamp 补丁。
+    patches::apply_pre_tls(&memory, &config("[UnlockTracks]\nmax=7"));
+
+    // Then: 247 的条件移动寄存器被改为自身，clamp 不再限制上限。
+    assert_eq!(memory.image.borrow()[offset], 0xC0);
+}
+
+#[test]
+fn unlock_track_clamp_is_patched_for_250() {
+    // Given: 250 clamp 返回 7 与 ECX 的较小值。
+    let offset = 0x3DF06D;
+    let mut image = pe_image(offset + 11);
+    image[offset..offset + 11]
+        .copy_from_slice(&[0xB8, 0x07, 0, 0, 0, 0x3B, 0xC1, 0x0F, 0x47, 0xC1, 0xC3]);
+    let memory = FakeMemory::new(image);
+
+    // When: DLL_PROCESS_ATTACH 执行 250 UnlockTracks clamp 补丁。
+    patches::apply_pre_tls(&memory, &config("[UnlockTracks]\nmax=7"));
+
+    // Then: 250 返回上限改为 99，条件移动指令被 NOP。
+    assert_eq!(
+        &memory.image.borrow()[offset + 1..offset + 5],
+        &99_i32.to_le_bytes()
+    );
+    assert_eq!(
+        &memory.image.borrow()[offset + 7..offset + 10],
+        &[0x90, 0x90, 0x90]
+    );
+}
+
+#[test]
 fn fast_restart_is_patched_by_early_pipeline() {
     // Given: D3D9Ex 快速重启的目标函数和失败分支仍为原始指令。
     let mut image = vec![0x90; 128];
