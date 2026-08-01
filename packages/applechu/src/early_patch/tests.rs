@@ -150,15 +150,21 @@ fn disable_timer_uses_unique_context_in_pre_tls_pipeline() {
 
 #[test]
 fn max_tracks_is_patched_by_early_pipeline() {
-    // Given: 最大曲数函数返回默认值 3，配置要求 7。
+    // Given: 无关函数先返回 3，真实曲数函数当前返回 11，配置要求 7。
     let mut image = vec![0x90; 96];
-    image[40..46].copy_from_slice(&[0xB8, 0x03, 0, 0, 0, 0xC3]);
+    image[8..14].copy_from_slice(&[0xB8, 0x03, 0, 0, 0, 0xC3]);
+    image[40..72].copy_from_slice(&[
+        0xB8, 0x0B, 0, 0, 0, 0xC3, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+        0x8B, 0x44, 0x24, 0x04, 0x53, 0xB3, 0x14, 0x8B, 0x10, 0x85, 0xD2, 0x78, 0x1E, 0x83, 0xFA,
+        0x10,
+    ]);
     let memory = FakeMemory::new(image);
 
     // When: DLL_PROCESS_ATTACH 执行 UnlockTracks early patch。
     patches::apply_pre_tls(&memory, &config("[UnlockTracks]\nmax=7"));
 
-    // Then: 返回立即数在入口点运行前已改为 7。
+    // Then: 无关函数保持不变，真实曲数函数在入口点运行前从 11 改为 7。
+    assert_eq!(&memory.image.borrow()[9..13], &3_i32.to_le_bytes());
     assert_eq!(&memory.image.borrow()[41..45], &7_i32.to_le_bytes());
 }
 

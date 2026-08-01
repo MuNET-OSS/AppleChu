@@ -3,6 +3,8 @@ use crate::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
+const MAX_TRACKS_PATTERN: &str = "B8 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC CC CC 8B 44 24 04 53 B3 14 8B 10 85 D2 78 1E 83 FA 10";
+
 crate::config_section! {
     pub(crate) struct UnlockTracksConfig => UNLOCK_TRACKS_CONFIG_SECTION {
         section: "UnlockTracks",
@@ -46,8 +48,8 @@ fn apply_unlock_limit<M: PatchMemory>(api: &M) {
 }
 
 fn apply_max_tracks<M: PatchMemory>(api: &M, max_tracks: i32) {
-    // B8 03 00 00 00 C3 = MOV EAX, 3; RET
-    let addr = pattern::scan(api, "B8 03 00 00 00 C3");
+    // 立即数可能已被硬补丁改写，后继函数前缀用于锁定真实曲数函数。
+    let addr = pattern::scan(api, MAX_TRACKS_PATTERN);
     if addr == 0 {
         api.log_warn("max tracks: target function not found");
         return;
