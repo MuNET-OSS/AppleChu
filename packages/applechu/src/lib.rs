@@ -6,8 +6,6 @@
     clippy::module_inception,
     clippy::too_many_arguments
 )]
-#![feature(c_variadic)]
-
 mod aime;
 mod autoplay;
 mod chuniio;
