@@ -1,12 +1,12 @@
 use std::ffi::CString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use once_cell::sync::OnceCell;
 
 use crate::config::Config;
 use crate::iohook::proc_addr;
-use crate::platform::reg_hook::{self, HKEY_LOCAL_MACHINE, RegValue};
+use crate::platform::reg_hook::{self, RegValue, HKEY_LOCAL_MACHINE};
 use crate::platform::{path_hook, winapi};
 use crate::util::api::Api;
 
@@ -54,7 +54,8 @@ crate::config_section! {
 pub fn init(api: &Api, config: &Config, section: &VfsSectionConfig) {
     let amfs = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.amfs));
     let appdata = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.appdata));
-    let option = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.option));
+    let configured_option = winapi::absolutize(config.base_dir(), &section.option);
+    let option = winapi::fixup_path(&select_option_path(config.base_dir(), &configured_option));
     let nthome = winapi::fixup_path(std::path::Path::new(&winapi::userprofile()));
 
     winapi::mkdir_rec(&amfs);
@@ -178,3 +179,31 @@ fn push_registry_key() {
         ],
     );
 }
+
+fn select_option_path(base_dir: &Path, configured: &Path) -> PathBuf {
+    if is_non_empty_directory(configured) {
+        return configured.to_path_buf();
+    }
+
+    let parent_dir = base_dir.parent().unwrap_or(base_dir);
+    let candidates = [
+        base_dir.join("option"),
+        parent_dir.join("option"),
+        base_dir.join("options"),
+        parent_dir.join("options"),
+    ];
+    candidates
+        .into_iter()
+        .find(|candidate| is_non_empty_directory(candidate))
+        .unwrap_or_else(|| configured.to_path_buf())
+}
+
+fn is_non_empty_directory(path: &Path) -> bool {
+    let Ok(mut entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+    entries.next().is_some_and(|entry| entry.is_ok())
+}
+
+#[cfg(test)]
+mod tests;
