@@ -26,6 +26,7 @@ mod platform;
 mod proxy;
 mod slider;
 mod system_config;
+mod unlocker;
 mod util;
 mod ux;
 mod vfd;

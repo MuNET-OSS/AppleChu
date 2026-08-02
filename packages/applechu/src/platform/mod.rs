@@ -7,4 +7,4 @@ pub mod pcbid;
 pub mod reg_hook;
 pub mod system;
 pub mod vfs;
-mod winapi;
+pub mod winapi;
