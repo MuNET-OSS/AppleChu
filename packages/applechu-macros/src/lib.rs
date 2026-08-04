@@ -98,12 +98,12 @@ fn expand_config_section(
                         .section::<#config_type>()
                         .is_some_and(|section| section.enabled)
                 ),
-                quote!(
+                quote! {
                     let Some(section) = config.section::<#config_type>() else {
-                        return;
+                        return Err("required configuration section is missing".to_owned());
                     };
-                    #call;
-                ),
+                    crate::module_registry::normalize_init_result(#call)
+                },
             )
         }
         None => {
@@ -117,7 +117,10 @@ fn expand_config_section(
                     ));
                 }
             };
-            (quote!(true), quote!(#call;))
+            (
+                quote!(true),
+                quote!(crate::module_registry::normalize_init_result(#call)),
+            )
         }
     };
 
@@ -132,7 +135,7 @@ fn expand_config_section(
             #condition && #config_gate
         }
 
-        fn #wrapper(api: &crate::util::api::Api, config: &crate::config::Config) {
+        fn #wrapper(api: &crate::util::api::Api, config: &crate::config::Config) -> Result<(), String> {
             #call
         }
 
