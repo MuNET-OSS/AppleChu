@@ -198,15 +198,13 @@ impl AimeReader {
         external_call(|external| unsafe { external.radio_off() }).unwrap_or(iohook::S_OK)
     }
 
-    pub fn to_update_mode(&mut self) -> i32 {
+    pub fn enter_update_mode(&mut self) -> i32 {
         self.update_mode = true;
         external_call(|external| unsafe { external.to_update_mode() }).unwrap_or(iohook::S_OK)
     }
 
     pub fn read_mifare_uid(&self) -> Option<[u8; 4]> {
-        if self.aime_id.is_none() {
-            return None;
-        }
+        self.aime_id?;
         if let Ok(guard) = EXTERNAL.lock() {
             if let Some(external) = guard.as_ref() {
                 return unsafe { external.get_mifare_uid() };

@@ -365,12 +365,15 @@ unsafe extern "system" fn hooked_reg_set_value_ex_w(
 ) -> u32 {
     if let Some(key) = key_for_handle(handle) {
         let name = winapi::wide_to_string(name).unwrap_or_default();
-        return key
+        return if key
             .values
             .iter()
             .any(|value| value.name.eq_ignore_ascii_case(&name))
-            .then_some(winapi::ERROR_SUCCESS)
-            .unwrap_or(winapi::ERROR_FILE_NOT_FOUND);
+        {
+            winapi::ERROR_SUCCESS
+        } else {
+            winapi::ERROR_FILE_NOT_FOUND
+        };
     }
     original_set_value_ex_w(handle, name, reserved, data_type, data, data_len)
 }

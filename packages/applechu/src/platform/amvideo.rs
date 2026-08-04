@@ -118,7 +118,7 @@ pub extern "C" fn am_dll_video_set_resolution(_: *mut c_void, _: *mut c_void) ->
 }
 
 #[cfg_attr(target_arch = "x86", no_mangle)]
-pub extern "C" fn am_dll_video_get_vbios_version(
+pub unsafe extern "C" fn am_dll_video_get_vbios_version(
     _: *mut c_void,
     buffer: *mut c_char,
     len: usize,
@@ -129,11 +129,9 @@ pub extern "C" fn am_dll_video_get_vbios_version(
         return -1;
     }
 
-    let copy_len = VERSION.len().min(len as usize);
-    unsafe {
-        std::ptr::copy_nonoverlapping(VERSION.as_ptr().cast::<c_char>(), buffer, copy_len);
-        *buffer.add(copy_len.saturating_sub(1)) = 0;
-    }
+    let copy_len = VERSION.len().min(len);
+    std::ptr::copy_nonoverlapping(VERSION.as_ptr().cast::<c_char>(), buffer, copy_len);
+    *buffer.add(copy_len.saturating_sub(1)) = 0;
     0
 }
 

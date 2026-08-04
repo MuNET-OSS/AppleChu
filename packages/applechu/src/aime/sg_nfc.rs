@@ -135,7 +135,7 @@ impl SgNfcDevice {
             }
             CMD_RADIO_ON => self.cmd_unit(addr, seq, cmd, reader.radio_on()),
             CMD_RADIO_OFF => self.cmd_unit(addr, seq, cmd, reader.radio_off()),
-            CMD_TO_UPDATE_MODE => self.cmd_unit(addr, seq, cmd, reader.to_update_mode()),
+            CMD_TO_UPDATE_MODE => self.cmd_unit(addr, seq, cmd, reader.enter_update_mode()),
             CMD_SEND_HEX_DATA => self.cmd_send_hex_data(addr, seq, cmd, payload),
             _ => Err(()),
         };

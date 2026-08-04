@@ -42,7 +42,7 @@ pub struct SliderDevice;
 
 impl SliderDevice {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     pub fn process(&mut self, written: &mut Vec<u8>, readable: &mut Vec<u8>) -> Result<(), i32> {
@@ -179,10 +179,8 @@ unsafe fn process_slider_write(irp: &mut Irp) -> i32 {
     if !uart::restore_written(handle, written) {
         return iohook::E_FAIL;
     }
-    if !readable.is_empty() {
-        if !uart::push_readable(handle, &readable) {
-            return iohook::E_FAIL;
-        }
+    if !readable.is_empty() && !uart::push_readable(handle, &readable) {
+        return iohook::E_FAIL;
     }
     result.map_or(iohook::E_FAIL, |()| hr)
 }

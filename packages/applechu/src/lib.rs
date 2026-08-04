@@ -3,7 +3,11 @@
     dead_code,
     clashing_extern_declarations,
     clippy::manual_c_str_literals,
+    clippy::missing_safety_doc,
+    clippy::missing_transmute_annotations,
     clippy::module_inception,
+    clippy::not_unsafe_ptr_arg_deref,
+    clippy::items_after_test_module,
     clippy::too_many_arguments
 )]
 mod aime;
