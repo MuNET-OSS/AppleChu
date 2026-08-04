@@ -1,0 +1,20 @@
+[package]
+name = "applechu-amdaemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "winmm"
+crate-type = ["cdylib"]
+
+[dependencies]
+applechu = { path = "../applechu" }
+applechu-macros.workspace = true
+linkme.workspace = true
+once_cell.workspace = true
+toml.workspace = true
+windows-sys.workspace = true
+
+[build-dependencies]
+forward-dll.workspace = true

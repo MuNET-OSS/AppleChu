@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "packages/applechu",
+    "packages/applechu-amdaemon",
     "packages/applechu-macros",
     "packages/applechu-schema",
     "packages/chu-abi",
