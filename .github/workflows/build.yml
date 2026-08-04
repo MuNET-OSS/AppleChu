@@ -16,14 +16,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-07-31
-          targets: i686-pc-windows-msvc
-          components: clippy
+          targets: i686-pc-windows-msvc,x86_64-pc-windows-msvc
+          components: clippy,rustfmt
 
-      - name: Clippy
-        run: cargo clippy -- -D warnings
+      - name: Format check
+        run: cargo fmt --all -- --check
 
-      - name: Build
-        run: cargo build --release
+      - name: Schema tests
+        run: cargo test --locked -p applechu-schema --target x86_64-pc-windows-msvc
+
+      - name: Check game-side proxy
+        run: cargo check --locked -p applechu --tests --target i686-pc-windows-msvc
+
+      - name: Check AM Daemon proxy
+        run: cargo check --locked -p applechu-amdaemon --target x86_64-pc-windows-msvc
+
+      - name: Clippy game-side proxy
+        run: cargo clippy --locked -p applechu --all-targets --target i686-pc-windows-msvc -- -D warnings
+
+      - name: Clippy AM Daemon proxy
+        run: cargo clippy --locked -p applechu-amdaemon --target x86_64-pc-windows-msvc -- -D warnings
 
   build:
     runs-on: windows-latest
@@ -34,16 +46,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-07-31
-          targets: i686-pc-windows-msvc
+          targets: i686-pc-windows-msvc,x86_64-pc-windows-msvc
 
-      - name: Build
-        run: cargo build --release
+      - name: Build game-side winhttp.dll
+        run: cargo build --locked --release -p applechu --target i686-pc-windows-msvc
 
-      - name: Upload artifact
+      - name: Build AM Daemon winmm.dll
+        run: cargo build --locked --release -p applechu-amdaemon --target x86_64-pc-windows-msvc
+
+      - name: Verify embedded schema
+        run: cargo run --locked -p applechu-schema --bin verify_pe --target x86_64-pc-windows-msvc -- target/i686-pc-windows-msvc/release/winhttp.dll
+
+      - name: Upload game-side proxy
         uses: actions/upload-artifact@v4
         with:
           name: winhttp.dll
           path: target/i686-pc-windows-msvc/release/winhttp.dll
+
+      - name: Upload AM Daemon proxy
+        uses: actions/upload-artifact@v4
+        with:
+          name: winmm.dll
+          path: target/x86_64-pc-windows-msvc/release/winmm.dll
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -54,8 +78,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: winhttp.dll
+          pattern: '*.dll'
+          merge-multiple: true
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: winhttp.dll
+          files: |
+            winhttp.dll
+            winmm.dll
