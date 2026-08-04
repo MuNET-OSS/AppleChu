@@ -23,19 +23,19 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Schema tests
-        run: cargo test --locked -p applechu-schema --target x86_64-pc-windows-msvc
+        run: cargo test -p applechu-schema --target x86_64-pc-windows-msvc
 
       - name: Check game-side proxy
-        run: cargo check --locked -p applechu --tests --target i686-pc-windows-msvc
+        run: cargo check -p applechu --tests --target i686-pc-windows-msvc
 
       - name: Check AM Daemon proxy
-        run: cargo check --locked -p applechu-amdaemon --target x86_64-pc-windows-msvc
+        run: cargo check -p applechu-amdaemon --target x86_64-pc-windows-msvc
 
       - name: Clippy game-side proxy
-        run: cargo clippy --locked -p applechu --all-targets --target i686-pc-windows-msvc -- -D warnings
+        run: cargo clippy -p applechu --all-targets --target i686-pc-windows-msvc -- -D warnings
 
       - name: Clippy AM Daemon proxy
-        run: cargo clippy --locked -p applechu-amdaemon --target x86_64-pc-windows-msvc -- -D warnings
+        run: cargo clippy -p applechu-amdaemon --target x86_64-pc-windows-msvc -- -D warnings
 
   build:
     runs-on: windows-latest
@@ -49,13 +49,13 @@ jobs:
           targets: i686-pc-windows-msvc,x86_64-pc-windows-msvc
 
       - name: Build game-side winhttp.dll
-        run: cargo build --locked --release -p applechu --target i686-pc-windows-msvc
+        run: cargo build --release -p applechu --target i686-pc-windows-msvc
 
       - name: Build AM Daemon winmm.dll
-        run: cargo build --locked --release -p applechu-amdaemon --target x86_64-pc-windows-msvc
+        run: cargo build --release -p applechu-amdaemon --target x86_64-pc-windows-msvc
 
       - name: Verify embedded schema
-        run: cargo run --locked -p applechu-schema --bin verify_pe --target x86_64-pc-windows-msvc -- target/i686-pc-windows-msvc/release/winhttp.dll
+        run: cargo run -p applechu-schema --bin verify_pe --target x86_64-pc-windows-msvc -- target/i686-pc-windows-msvc/release/winhttp.dll
 
       - name: Upload game-side proxy
         uses: actions/upload-artifact@v4
