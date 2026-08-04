@@ -1,3 +1,4 @@
+use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -8,8 +9,12 @@ use crate::util::api::Api;
 
 const SYNC: u8 = 0xE0;
 const ESC: u8 = 0xD0;
+const ERROR_ACCESS_DENIED: u32 = 5;
+const ERROR_INVALID_FUNCTION: u32 = 1;
 const STATUS_OK: u8 = 0x01;
 const REPORT_OK: u8 = 0x01;
+const REPORT_ERR2: u8 = 0x04;
+const LED_DATA_LEN: usize = 198;
 const CMD_RESET: u8 = 0x10;
 const CMD_SET_TIMEOUT: u8 = 0x11;
 const CMD_SET_DISABLE_RESPONSE: u8 = 0x14;
@@ -30,11 +35,15 @@ const CMD_GET_PROTOCOL_VER: u8 = 0xF3;
 const CMD_SET_BOOTMODE: u8 = 0xFD;
 const CMD_FW_UPDATE: u8 = 0xFE;
 
+// 所有架构都使用共享、重叠串口句柄
+const EMULATED_OPEN_SHARE: u32 = 3; // FILE_SHARE_READ | FILE_SHARE_WRITE
+const EMULATED_OPEN_FLAGS: u32 = 0x4000_0000; // FILE_FLAG_OVERLAPPED
+
 crate::config_section! {
     pub(crate) struct Led15093SectionConfig => LED_15093_CONFIG_SECTION {
         section: "Led15093",
         order: 320,
-        default_enabled: true,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         comment: "15093 LED 控制板模拟",
@@ -78,6 +87,7 @@ static LED_PORTS: Mutex<[u32; 2]> = Mutex::new([2, 3]);
 
 static LED_BOARDS: Mutex<Option<[Led15093Device; 2]>> = Mutex::new(None);
 static LED_FDS: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
+static LED_START_STATUS: Mutex<[Option<i32>; 2]> = Mutex::new([None, None]);
 
 pub struct Led15093Device {
     board_index: u8,
@@ -89,9 +99,13 @@ pub struct Led15093Device {
     board_status: [u8; 4],
     status_code: u8,
     report_code: u8,
-    rx: Vec<u8>,
+    led_count: u8,
+    fade_depth: u8,
+    fade_cycle: u8,
+    // 回复暂存区在一次 WriteFile 处理结束后会转移到公共 UART readable 队列
     tx: Vec<u8>,
-    led: Vec<u8>,
+    led: [u8; LED_DATA_LEN],
+    led_bright: [u8; LED_DATA_LEN],
 }
 
 impl Led15093Device {
@@ -106,28 +120,44 @@ impl Led15093Device {
             board_status: [0, 0, 0, 1],
             status_code: STATUS_OK,
             report_code: REPORT_OK,
-            rx: Vec::new(),
+            led_count: 66,
+            fade_depth: 32,
+            fade_cycle: 8,
             tx: Vec::new(),
-            led: Vec::new(),
+            led: [0; LED_DATA_LEN],
+            led_bright: [0x3F; LED_DATA_LEN],
         }
     }
 
-    pub fn write(&mut self, bytes: &[u8]) -> Result<(), i32> {
-        self.rx.extend_from_slice(bytes);
-        while let Some(frame) = decode_frame(&mut self.rx)? {
-            self.dispatch(&frame)?;
+    pub fn process(&mut self, written: &mut Vec<u8>) -> Result<(), i32> {
+        while let Some(frame) = decode_frame(written)? {
+            let result = self.dispatch(&frame);
+            self.status_code = STATUS_OK;
+            self.report_code = REPORT_OK;
+            self.board_status = [0, 0, 0, 1];
+            // 命令错误只记录日志，随后继续解析并让本次 WriteFile 成功
+            // 只有解帧错误才会作为串口写入错误返回给 AM Daemon
+            if let Err(status) = result {
+                if let Some(api) = crate::util::api::API.get() {
+                    api.log_warn(&format!("LED board command failed: {status:#010x}"));
+                }
+            }
         }
         Ok(())
     }
 
-    pub fn drain(&mut self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.tx);
-        self.tx.clear();
+    pub fn take_response(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.tx)
     }
 
     fn dispatch(&mut self, frame: &[u8]) -> Result<(), i32> {
         if frame.len() < 5 {
             return Err(-1);
+        }
+        let destination = frame[1];
+        // 单节点设备处理广播地址和有效节点地址
+        if destination > 8 {
+            return Ok(());
         }
         let cmd = frame[4];
         let payload = &frame[5..];
@@ -138,28 +168,40 @@ impl Led15093Device {
                 self.respond(cmd, &[])
             }
 
-            CMD_SET_ID => {
-                if let Some(id) = payload.first().copied() {
-                    self.board_addr = id;
-                }
-                self.respond_if_enabled(cmd, &[])
-            }
+            CMD_SET_ID => self.set_id(destination, payload),
 
             CMD_CLEAR_ID => {
                 self.board_addr = 0;
-                self.respond_if_enabled(cmd, &[])
+                // CLEAR_ID 不受普通命令回复开关影响
+                self.respond(cmd, &[])
             }
 
-            CMD_UPDATE_LED | CMD_SET_MAX_BRIGHT | CMD_SET_LED | CMD_SET_FADE_LED
-            | CMD_SET_FADE_LEVEL | CMD_SET_FADE_SHIFT => self.respond_if_enabled(cmd, &[]),
+            CMD_UPDATE_LED => self.respond_if_enabled(cmd, &[]),
+            CMD_SET_MAX_BRIGHT => {
+                self.copy_led_data(payload, true)?;
+                self.respond_if_enabled(cmd, &[])
+            }
+            CMD_SET_LED | CMD_SET_FADE_LED => {
+                self.copy_led_data(payload, false)?;
+                self.respond_if_enabled(cmd, &[])
+            }
+            CMD_SET_FADE_LEVEL => {
+                if payload.len() >= 2 {
+                    self.fade_depth = payload[0];
+                    self.fade_cycle = payload[1];
+                }
+                self.respond_if_enabled(cmd, &[])
+            }
+            CMD_SET_FADE_SHIFT => self.respond_if_enabled(cmd, &[]),
 
             CMD_SET_TIMEOUT => {
                 let count = if payload.len() >= 2 {
-                    [payload[0], payload[1]]
+                    [payload[1], payload[0]]
                 } else {
                     [0, 0]
                 };
-                self.respond_if_enabled(cmd, &count)
+                // SET_TIMEOUT 始终返回当前计数
+                self.respond(cmd, &count)
             }
 
             CMD_SET_DISABLE_RESPONSE => {
@@ -171,23 +213,23 @@ impl Led15093Device {
 
             CMD_SET_AUTO_SHIFT => {
                 let count = payload.first().copied().unwrap_or(0);
-                let target = payload.get(1).copied().unwrap_or(0);
-                self.respond_if_enabled(cmd, &[count, target])
+                self.led_count = count;
+                self.respond_if_enabled(cmd, &[count])
             }
 
             CMD_SET_IMM_LED => {
-                self.led.clear();
-                self.led.extend_from_slice(payload);
+                self.copy_led_data(payload, false)?;
                 crate::chuniio::led_set_colors(self.board_index, &mut self.led);
                 self.respond_if_enabled(cmd, &[])
             }
 
             CMD_GET_BOARD_STATUS => {
                 let len = if self.enable_bootloader { 3 } else { 4 };
-                let status = self.board_status[..len].to_vec();
                 if payload.first().copied().unwrap_or(0) != 0 {
                     self.board_status = [0, 0, 0, 1];
                 }
+                // 组装回复前处理 clear 标志
+                let status = self.board_status[..len].to_vec();
                 self.respond(cmd, &status)
             }
             CMD_GET_FW_SUM => self.respond(cmd, &self.config.fw_sum.to_be_bytes()),
@@ -211,10 +253,42 @@ impl Led15093Device {
                 self.respond(cmd, &[1])
             }
 
-            CMD_FW_UPDATE => self.respond_if_enabled(cmd, &[]),
+            // 占位固件更新命令始终返回确认
+            CMD_FW_UPDATE => self.respond(cmd, &[]),
 
-            _ => self.respond_if_enabled(cmd, &[]),
+            _ => {
+                self.report_code = REPORT_ERR2;
+                Ok(())
+            }
         }
+    }
+
+    fn set_id(&mut self, destination: u8, payload: &[u8]) -> Result<(), i32> {
+        let Some(id) = payload.first().copied() else {
+            return Err(iohook::E_FAIL);
+        };
+        if id == 0 || id > 8 {
+            return Err(iohook::hresult_from_win32(20));
+        }
+        // 广播 SET_ID 只分配给尚未编号的节点；定向命令覆盖当前编号
+        if destination != 0 || self.board_addr == 0 {
+            self.board_addr = id;
+        }
+        self.respond(CMD_SET_ID, &[])
+    }
+
+    fn copy_led_data(&mut self, payload: &[u8], brightness: bool) -> Result<(), i32> {
+        let max = usize::from(self.led_count) * 3;
+        if payload.len() > max || payload.len() > LED_DATA_LEN {
+            return Err(iohook::E_FAIL);
+        }
+        let target = if brightness {
+            &mut self.led_bright
+        } else {
+            &mut self.led
+        };
+        target[..payload.len()].copy_from_slice(payload);
+        Ok(())
     }
 
     fn board_info(&self) -> [u8; 18] {
@@ -229,7 +303,10 @@ impl Led15093Device {
         info[9..14].copy_from_slice(chip_number);
         info[14] = 0xFF;
         info[15] = self.config.fw_ver;
-        info[16] = 0xCC;
+        // 设备结构体按默认 C 对齐布局编码，rx_buf 前有一个填充字节
+        // 但编码长度固定为 18 字节，因此线上顺序是填充 0 后跟低字节 0xCC
+        info[16] = 0;
+        info[17] = 0xCC;
         info
     }
 
@@ -262,7 +339,7 @@ impl Led15093Device {
 }
 
 #[applechu_macros::config_section(stage = Device, order = 50)]
-pub fn init(api: &Api, config: &Config, section: &Led15093SectionConfig) {
+pub fn init(_api: &Api, config: &Config, section: &Led15093SectionConfig) {
     let is_sp = crate::system_config::is_sp_mode(config);
     let defaults = if is_sp { [20, 21] } else { [2, 3] };
     let ports = [
@@ -285,16 +362,17 @@ pub fn init(api: &Api, config: &Config, section: &Led15093SectionConfig) {
     if let Ok(mut boards) = LED_BOARDS.lock() {
         *boards = Some([
             Led15093Device::new(0, 2, 1, led_config.clone()),
+            // 每条串口只挂一个节点，因此两块板的节点地址均为 2
+            // COM20/COM21（CVT 为 COM2/COM3）负责区分两块物理板
             Led15093Device::new(1, 2, 1, led_config),
         ]);
+    }
+    if let Ok(mut status) = LED_START_STATUS.lock() {
+        *status = [None, None];
     }
     unsafe {
         iohook::push_handler(led_irp_handler);
     }
-    api.log_info(&format!(
-        "LED 15093 emulator initialized (COM{}, COM{})",
-        ports[0], ports[1]
-    ));
 }
 
 unsafe fn led_irp_handler(irp: &mut Irp) -> i32 {
@@ -303,17 +381,48 @@ unsafe fn led_irp_handler(irp: &mut Irp) -> i32 {
             return iohook::invoke_next(irp);
         };
         let port = led_port(index);
-        uart::uart_init(port);
-        let handle = uart::fake_handle_pub(port);
-        let high_baudrate = LED_BOARDS
-            .lock()
-            .ok()
-            .and_then(|boards| boards.as_ref().map(|boards| boards[index].config.high_baudrate))
-            .unwrap_or(false);
-        uart::set_baud_rate(handle, if high_baudrate { 460_800 } else { 115_200 });
-        irp.fd = crate::util::win32::handle_from_value(handle);
-        LED_FDS[index].store(handle, Ordering::SeqCst);
-        return 1;
+        if LED_FDS[index].load(Ordering::SeqCst) != 0 {
+            return iohook::hresult_from_win32(ERROR_ACCESS_DENIED);
+        }
+        let status = start_led_backend(index);
+        if status < 0 {
+            return status;
+        }
+
+        // 将目标改为 NUL 后继续钩子链，以取得有效的重叠 I/O 句柄
+        irp.open_filename_w = crate::aime::NUL_FILENAME.as_ptr();
+        irp.open_filename_a = ptr::null();
+        irp.open_access = 0xC000_0000; // GENERIC_READ | GENERIC_WRITE
+        irp.open_share = EMULATED_OPEN_SHARE;
+        irp.open_security = ptr::null();
+        irp.open_creation = 3; // OPEN_EXISTING
+        irp.open_flags = EMULATED_OPEN_FLAGS;
+        irp.open_template = ptr::null_mut();
+
+        let result = iohook::invoke_next(irp);
+        if result >= 0 {
+            let handle = crate::util::win32::handle_value(irp.fd);
+            uart::bind_handle(handle, port);
+            let high_baudrate = LED_BOARDS
+                .lock()
+                .ok()
+                .and_then(|boards| {
+                    boards
+                        .as_ref()
+                        .map(|boards| boards[index].config.high_baudrate)
+                })
+                .unwrap_or(false);
+            uart::set_baud_rate(handle, if high_baudrate { 460_800 } else { 115_200 });
+            LED_FDS[index].store(handle, Ordering::SeqCst);
+        } else {
+            if let Some(api) = crate::util::api::API.get() {
+                api.log_error(&format!(
+                    "LED board {} failed to open its serial port: {:#010x}",
+                    index, result
+                ));
+            }
+        }
+        return result;
     }
 
     let Some(index) = fd_board_index(crate::util::win32::handle_value(irp.fd)) else {
@@ -323,9 +432,10 @@ unsafe fn led_irp_handler(irp: &mut Irp) -> i32 {
     match irp.op {
         IrpOp::Close => {
             LED_FDS[index].store(0, Ordering::SeqCst);
-            1
+            uart::unbind_handle(crate::util::win32::handle_value(irp.fd));
+            iohook::invoke_next(irp)
         }
-        IrpOp::Read => read_led(irp, index),
+        IrpOp::Read => uart::uart_handle_irp(irp),
         IrpOp::Write => write_led(irp, index),
         IrpOp::Ioctl => uart::device_io_control(
             crate::util::win32::handle_value(irp.fd),
@@ -336,54 +446,67 @@ unsafe fn led_irp_handler(irp: &mut Irp) -> i32 {
             irp.ioctl_out_nbytes,
             irp.out_nbytes,
         ),
-        IrpOp::Fsync | IrpOp::Seek => 1,
-        IrpOp::Open => 1,
+        IrpOp::Fsync => iohook::S_OK,
+        IrpOp::Seek | IrpOp::Open => iohook::hresult_from_win32(ERROR_INVALID_FUNCTION),
     }
 }
 
-unsafe fn read_led(irp: &mut Irp, index: usize) -> i32 {
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = 0;
-    }
-    if irp.read_buf.is_null() || irp.nbytes == 0 {
-        return 1;
+fn start_led_backend(index: usize) -> i32 {
+    let Ok(mut statuses) = LED_START_STATUS.lock() else {
+        return iohook::E_FAIL;
+    };
+    if let Some(status) = statuses[index] {
+        return status;
     }
 
-    let mut data = Vec::new();
-    if let Ok(mut boards) = LED_BOARDS.lock() {
-        if let Some(devices) = boards.as_mut() {
-            devices[index].drain(&mut data);
+    if let Some(api) = crate::util::api::API.get() {
+        api.log_info(&format!("LED board {index} backend starting"));
+    }
+    let status = crate::chuniio::led_init().map_or_else(|status| status, |()| iohook::S_OK);
+    statuses[index] = Some(status);
+    if let Some(api) = crate::util::api::API.get() {
+        if status < 0 {
+            api.log_error(&format!(
+                "LED board {index} backend failed to start: {status:#010x}"
+            ));
         }
     }
-
-    let count = data.len().min(irp.nbytes as usize);
-    std::ptr::copy_nonoverlapping(data.as_ptr(), irp.read_buf, count);
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = count as u32;
-    }
-    1
+    status
 }
 
 unsafe fn write_led(irp: &mut Irp, index: usize) -> i32 {
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = 0;
+    let hr = uart::uart_handle_irp(irp);
+    if hr < 0 {
+        return hr;
     }
-    if irp.write_buf.is_null() || irp.nbytes == 0 {
-        return 1;
-    }
-
-    let bytes = std::slice::from_raw_parts(irp.write_buf, irp.nbytes as usize);
-    if let Ok(mut boards) = LED_BOARDS.lock() {
+    let handle = crate::util::win32::handle_value(irp.fd);
+    let Some(mut written) = uart::take_written(handle) else {
+        return iohook::E_FAIL;
+    };
+    let mut response = Vec::new();
+    let result = if let Ok(mut boards) = LED_BOARDS.lock() {
         if let Some(devices) = boards.as_mut() {
-            if devices[index].write(bytes).is_err() {
-                return 0;
-            }
+            let result = devices[index].process(&mut written);
+            response = devices[index].take_response();
+            result
+        } else {
+            Err(iohook::E_FAIL)
+        }
+    } else {
+        Err(iohook::E_FAIL)
+    };
+    if !uart::restore_written(handle, written) {
+        return iohook::E_FAIL;
+    }
+    if !response.is_empty() {
+        // 按句柄写入是正常路径；句柄在设备反复开关期间若已解绑，按串口号补投递，避免丢失板卡回复
+        let queued = uart::push_readable(handle, &response)
+            || uart::push_readable_port(led_port(index), &response);
+        if !queued {
+            return iohook::E_FAIL;
         }
     }
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = irp.nbytes;
-    }
-    1
+    result.map_or(iohook::E_FAIL, |()| hr)
 }
 
 unsafe fn open_board_index(irp: &Irp) -> Option<usize> {
@@ -488,4 +611,78 @@ fn encode_frame_into(tx: &mut Vec<u8>, dest: u8, src: u8, payload: &[u8]) -> Res
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> Led15093Config {
+        Led15093Config {
+            board_number: *b"15093-06",
+            chip_number: *b"6710 ",
+            boot_chip_number: *b"6709 ",
+            fw_ver: 0x90,
+            fw_sum: 0xADF7,
+            high_baudrate: false,
+        }
+    }
+
+    #[test]
+    fn two_serial_boards_use_the_same_node_address() {
+        let config = test_config();
+        let board0 = Led15093Device::new(0, 2, 1, config.clone());
+        let board1 = Led15093Device::new(1, 2, 1, config);
+
+        assert_eq!(board0.board_addr, 2);
+        assert_eq!(board1.board_addr, 2);
+    }
+
+    #[test]
+    fn board_info_matches_expected_c_struct_layout() {
+        let mut board = Led15093Device::new(0, 2, 1, test_config());
+
+        assert_eq!(
+            board.board_info(),
+            [
+                b'1', b'5', b'0', b'9', b'3', b'-', b'0', b'6', 0x0A, b'6', b'7', b'1', b'0', b' ',
+                0xFF, 0x90, 0x00, 0xCC,
+            ]
+        );
+
+        board
+            .dispatch(&[SYNC, 2, 1, 1, CMD_GET_BOARD_INFO])
+            .unwrap();
+        assert_eq!(
+            board.take_response(),
+            [
+                SYNC,
+                1,
+                2,
+                0x15,
+                STATUS_OK,
+                CMD_GET_BOARD_INFO,
+                REPORT_OK,
+                b'1',
+                b'5',
+                b'0',
+                b'9',
+                b'3',
+                b'-',
+                b'0',
+                b'6',
+                0x0A,
+                b'6',
+                b'7',
+                b'1',
+                b'0',
+                b' ',
+                0xFF,
+                0x90,
+                0x00,
+                0xCC,
+                0xF2,
+            ]
+        );
+    }
 }

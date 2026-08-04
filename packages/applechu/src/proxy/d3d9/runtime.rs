@@ -62,7 +62,7 @@ unsafe fn recover_device(device: *mut c_void) {
     if device.is_null() || RECOVERING.swap(true, Ordering::SeqCst) {
         return;
     }
-    log_info("d3d9: D3DERR_DEVICELOST detected, waiting for Reset");
+    log_info("D3D9 device lost; waiting for recovery");
 
     let test_addr = ORIGINAL_TEST_COOPERATIVE_LEVEL.load(Ordering::SeqCst);
     let reset_addr = ORIGINAL_RESET.load(Ordering::SeqCst);
@@ -82,9 +82,9 @@ unsafe fn recover_device(device: *mut c_void) {
                 let reset: ResetFn = std::mem::transmute(reset_addr);
                 if reset(device, params) == D3D_OK {
                     run_reset_callbacks(device, 1);
-                    log_info("d3d9: device recovered via Reset");
+                    log_info("D3D9 device recovered");
                 } else {
-                    log_warn("d3d9: Reset called but device not recovered");
+                    log_warn("D3D9 device recovery failed");
                 }
             }
             break;

@@ -6,15 +6,18 @@ use crate::system_config::SystemConfig;
 use crate::util::api::Api;
 
 const SYSFILE_NAME: &str = "sysfile.dat";
+const SYSFILE_SIZE: usize = 0x6000;
+const BLOCK_SIZE: usize = 512;
+const CREDIT_PRIMARY: usize = 0x0000;
+const CREDIT_MIRROR: usize = 0x3000;
+const DIP_PRIMARY: usize = 0x2800;
+const DIP_MIRROR: usize = 0x5800;
+const CREDIT_FREEPLAY_OFFSET: usize = 10;
+const DIP_SWITCH_OFFSET: usize = 8;
 
-#[applechu_macros::config_section(stage = Platform, order = 80)]
-pub fn init(api: &Api, config: &Config) {
-    let Some(system) = config.section::<SystemConfig>() else {
-        return;
-    };
-
-    let Some(mut path) = crate::platform::vfs::resolve_path(&format!("E:\\{}", SYSFILE_NAME))
-    else {
+#[applechu_macros::config_section(stage = Platform, order = 100)]
+pub(crate) fn init(api: &Api, config: &Config, system: &SystemConfig) {
+    let Some(mut path) = crate::platform::vfs::resolve_path(&format!("E:\\{SYSFILE_NAME}")) else {
         return;
     };
     if path.is_dir() {
@@ -22,58 +25,99 @@ pub fn init(api: &Api, config: &Config) {
     }
 
     let Ok(mut data) = fs::read(&path) else {
-        api.log_warn("system: sysfile.dat not found, dipsw patch skipped");
+        api.log_info("sysfile.dat not found; system settings will be written after first run");
         return;
     };
+    if data.len() != SYSFILE_SIZE {
+        return api
+            .log_warn("sysfile.dat has an unexpected size; system settings were not written");
+    }
 
-    let mut changed = false;
     let freeplay = config
         .section::<FreePlayConfig>()
         .is_some_and(|config| config.enabled);
-    if patch_token(&mut data, b"freeplay", u8::from(freeplay)) {
-        changed = true;
+    let dipsw = system.dipsw();
+    let dip_switches = dipsw_bits(dipsw);
+    api.log_info(&format!(
+        "System: Delivery Server: {}",
+        if dipsw[0] { "Server" } else { "Client" },
+    ));
+    api.log_info(&format!(
+        "System: Monitor Type: {}",
+        if dipsw[1] { "60FPS" } else { "120FPS" },
+    ));
+    api.log_info(&format!(
+        "System: Cabinet Type: {}",
+        if dipsw[2] { "CVT" } else { "SP" },
+    ));
+    api.log_info(&format!(
+        "System: DIPSW={}/{}/{} (0x{dip_switches:02X})",
+        u8::from(dipsw[0]),
+        u8::from(dipsw[1]),
+        u8::from(dipsw[2]),
+    ));
+    let mut credit = data[CREDIT_PRIMARY..CREDIT_PRIMARY + BLOCK_SIZE].to_vec();
+    let mut dip = data[DIP_PRIMARY..DIP_PRIMARY + BLOCK_SIZE].to_vec();
+    credit[CREDIT_FREEPLAY_OFFSET] = u8::from(freeplay);
+    dip[DIP_SWITCH_OFFSET] = dip_switches;
+    update_checksum(&mut credit);
+    update_checksum(&mut dip);
+
+    for offset in [CREDIT_PRIMARY, CREDIT_MIRROR] {
+        data[offset..offset + BLOCK_SIZE].copy_from_slice(&credit);
+    }
+    for offset in [DIP_PRIMARY, DIP_MIRROR] {
+        data[offset..offset + BLOCK_SIZE].copy_from_slice(&dip);
     }
 
-    let dipsw = dipsw_bits(system.dipsw());
-    if patch_token(&mut data, b"dip_switches", dipsw) || patch_token(&mut data, b"dipsw", dipsw) {
-        changed = true;
-    }
-
-    if changed {
-        if fs::write(&path, data).is_ok() {
-            api.log_info("system: sysfile.dat freeplay/dipsw updated");
-        } else {
-            api.log_warn("system: failed to write sysfile.dat");
-        }
+    if fs::write(&path, data).is_ok() {
+        api.log_info("Updated free-play and DIP switch settings in sysfile.dat");
+    } else {
+        api.log_warn("Failed to write sysfile.dat");
     }
 }
 
 fn dipsw_bits(switches: [bool; 3]) -> u8 {
-    let mut bits = 0u8;
-    for (index, enabled) in switches.into_iter().enumerate() {
-        if enabled {
-            bits |= 1 << index;
+    switches
+        .into_iter()
+        .enumerate()
+        .fold(0, |bits, (index, enabled)| {
+            bits | (u8::from(enabled) << index)
+        })
+}
+
+fn update_checksum(block: &mut [u8]) {
+    let checksum = crc32(&block[4..]);
+    block[..4].copy_from_slice(&checksum.to_le_bytes());
+}
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
         }
     }
-    bits
+    !crc
 }
 
-fn patch_token(data: &mut [u8], token: &[u8], value: u8) -> bool {
-    let Some(pos) = find_bytes(data, token) else {
-        return false;
-    };
-    let Some(slot) = data.get_mut(pos + token.len()) else {
-        return false;
-    };
-    if *slot == value {
-        return false;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn updates_the_same_crc32_used_by_segtools() {
+        let mut block = vec![0; BLOCK_SIZE];
+        block[CREDIT_FREEPLAY_OFFSET] = 1;
+        update_checksum(&mut block);
+        assert_eq!(
+            u32::from_le_bytes(block[..4].try_into().unwrap()),
+            crc32(&block[4..])
+        );
     }
-    *slot = value;
-    true
-}
-
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
 }

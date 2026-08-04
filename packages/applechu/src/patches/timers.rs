@@ -14,7 +14,7 @@ crate::config_section! {
     pub(crate) struct DisableTimerConfig => DISABLE_TIMER_CONFIG_SECTION {
         section: "DisableTimer",
         order: 140,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "禁用选歌计时器",
@@ -26,7 +26,7 @@ crate::config_section! {
     pub(crate) struct CustomTimersConfig => CUSTOM_TIMERS_CONFIG_SECTION {
         section: "CustomTimers",
         order: 200,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "自定义计时器",
@@ -41,18 +41,6 @@ crate::config_section! {
     }
 }
 
-crate::config_section! {
-    pub(crate) struct AllTimers999Config => ALL_TIMERS_999_CONFIG_SECTION {
-        section: "AllTimers999",
-        order: 910,
-        default_enabled: false,
-        always_enabled: false,
-        hidden: true,
-        comment: "内部计时器诊断补丁",
-        fields: {}
-    }
-}
-
 struct TimerSite {
     name: &'static str,
     pattern: &'static str,
@@ -62,7 +50,6 @@ struct TimerSite {
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     apply_disable_timer(api, config);
     apply_custom_timers(api, config);
-    apply_all_timers(api, config);
 }
 
 fn apply_disable_timer<M: PatchMemory>(api: &M, config: &Config) {
@@ -82,28 +69,6 @@ fn apply_disable_timer<M: PatchMemory>(api: &M, config: &Config) {
                 known_offsets: &[0x9BE10D, 0x9DCEED, 0x9DD9BD],
                 expected: &[0x74],
                 patch: &[0xEB],
-            }],
-        },
-    );
-}
-
-fn apply_all_timers<M: PatchMemory>(api: &M, config: &Config) {
-    if !config
-        .section::<AllTimers999Config>()
-        .is_some_and(|config| config.enabled)
-    {
-        return;
-    }
-    apply_patch(
-        api,
-        &VersionedPatch {
-            name: "all timers 999",
-            variants: &[PatchVariant {
-                pattern: Some("69 44 24 04 E8 03 00 00"),
-                pattern_offset: 0,
-                known_offsets: &[],
-                expected: &[0x69, 0x44, 0x24, 0x04, 0xE8, 0x03, 0x00, 0x00],
-                patch: &[0xB8, 0x58, 0x3E, 0x0F, 0x00, 0x90, 0x90, 0x90],
             }],
         },
     );

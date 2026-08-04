@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct WindowConfig => WINDOW_CONFIG_SECTION {
         section: "Window",
         order: 20,
-        default_enabled: true,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         comment: "显示设置",

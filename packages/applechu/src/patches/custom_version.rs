@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct GeneralConfig => GENERAL_CONFIG_SECTION {
         section: "General",
         order: 290,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "自定义版本号",

@@ -11,7 +11,7 @@ use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 use crate::proxy::api_impl;
 
 use super::dependency::{read_dependencies, sort_mods, PendingMod};
-use super::log::{log_info, write_log_inner, write_log_variadic};
+use super::log::{log_info, log_warn, write_log_inner, write_log_variadic};
 use super::metadata::{read_metadata, should_load_metadata};
 use super::scanner::{ensure_mods_dir, scan_manifest_files, scan_mod_files};
 use super::seh::call_mod_init;
@@ -20,20 +20,20 @@ use super::FreeLibrary;
 
 pub(super) unsafe fn load(base_dir: &str, info: &ChuModInfo, api: *mut ChuModAPI) {
     let mods_dir = ensure_mods_dir(base_dir);
-    log_info(&format!("scan mods dir: {mods_dir}"));
+    log_info(&format!("Scanning external module directory: {mods_dir}"));
     let manifests = scan_manifest_files(base_dir);
     {
         let mut state = STATE.lock().unwrap();
         state.manifest_paths = manifests.clone();
     }
     for manifest in &manifests {
-        log_info(&format!("manifest found: {manifest}"));
+        log_info(&format!("Module manifest found: {manifest}"));
     }
 
     let mut pending_mods = Vec::new();
     for (mod_name, full_path) in scan_mod_files(&mods_dir) {
         if !should_load_external_mod(&mod_name) {
-            log_info("skip bundled mod: AppleChu");
+            log_info("Skipped bundled AppleChu module");
             continue;
         }
         let full_path_c = format!("{full_path}\0");
@@ -62,7 +62,7 @@ pub(super) unsafe fn load(base_dir: &str, info: &ChuModInfo, api: *mut ChuModAPI
             continue;
         }
         if let Some(version) = &metadata.version {
-            log_info(&format!("mod: {display_name} v{version}"));
+            log_info(&format!("External module: {display_name} v{version}"));
         }
 
         let dependencies = read_dependencies(mod_handle);
@@ -125,7 +125,9 @@ pub(super) unsafe fn load(base_dir: &str, info: &ChuModInfo, api: *mut ChuModAPI
 
             if ret != Some(0) {
                 if let Some(ret) = ret {
-                    log_info(&format!("mod init failed (ret={ret}): {display_name}"));
+                    log_warn(&format!(
+                        "External module initialization failed: {display_name}, result={ret}"
+                    ));
                 }
                 FreeLibrary(mod_handle);
                 continue;

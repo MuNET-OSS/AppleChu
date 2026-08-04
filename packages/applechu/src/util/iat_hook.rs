@@ -1,10 +1,12 @@
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
 
 const IMAGE_DOS_SIGNATURE: u16 = 0x5A4D;
 const IMAGE_NT_SIGNATURE: u32 = 0x0000_4550;
+const IMAGE_NT_OPTIONAL_HDR32_MAGIC: u16 = 0x010B;
+const IMAGE_NT_OPTIONAL_HDR64_MAGIC: u16 = 0x020B;
 const IMAGE_DIRECTORY_ENTRY_IMPORT: usize = 1;
-const IMAGE_ORDINAL_FLAG32: usize = 0x8000_0000;
+const IMAGE_ORDINAL_FLAG: usize = 1usize << (usize::BITS - 1);
 const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 
 #[link(name = "kernel32")]
@@ -139,7 +141,7 @@ struct ImageImportByName {
 /// 在指定模块的导入地址表中替换函数指针，返回替换前的原始函数地址。
 ///
 /// # Safety
-/// `module_base` 必须指向已加载的 32 位 PE 模块基址；调用方需保证替换后的函数签名与原函数一致。
+/// `module_base` 必须指向与当前进程同架构的已加载 PE 模块；调用方需保证替换后的函数签名与原函数一致
 pub unsafe fn hook_iat(
     module_base: usize,
     dll_name: &str,
@@ -150,21 +152,7 @@ pub unsafe fn hook_iat(
         return None;
     }
 
-    let dos = (module_base as *const ImageDosHeader).as_ref()?;
-    if dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < 0 {
-        return None;
-    }
-
-    let nt = ((module_base + dos.e_lfanew as usize) as *const ImageNtHeaders32).as_ref()?;
-    if nt.signature != IMAGE_NT_SIGNATURE {
-        return None;
-    }
-
-    if nt.optional_header.number_of_rva_and_sizes <= IMAGE_DIRECTORY_ENTRY_IMPORT as u32 {
-        return None;
-    }
-
-    let import_dir = nt.optional_header.data_directory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    let import_dir = import_directory(module_base)?;
     if import_dir.virtual_address == 0 {
         return None;
     }
@@ -188,6 +176,33 @@ pub unsafe fn hook_iat(
     }
 
     None
+}
+
+unsafe fn import_directory(module_base: usize) -> Option<ImageDataDirectory> {
+    let dos = (module_base as *const ImageDosHeader).as_ref()?;
+    if dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < 0 {
+        return None;
+    }
+    let nt = module_base.checked_add(dos.e_lfanew as usize)?;
+    if ptr::read_unaligned(nt as *const u32) != IMAGE_NT_SIGNATURE {
+        return None;
+    }
+    let optional = nt.checked_add(24)?;
+    let (count_offset, directory_offset) = match ptr::read_unaligned(optional as *const u16) {
+        IMAGE_NT_OPTIONAL_HDR32_MAGIC => (92usize, 96usize),
+        IMAGE_NT_OPTIONAL_HDR64_MAGIC => (108usize, 112usize),
+        _ => return None,
+    };
+    let count = ptr::read_unaligned((optional + count_offset) as *const u32);
+    if count <= IMAGE_DIRECTORY_ENTRY_IMPORT as u32 {
+        return None;
+    }
+    Some(ptr::read_unaligned(
+        (optional
+            + directory_offset
+            + IMAGE_DIRECTORY_ENTRY_IMPORT * std::mem::size_of::<ImageDataDirectory>())
+            as *const ImageDataDirectory,
+    ))
 }
 
 /// 返回 COM 对象指定 vtable 槽位的可写指针。
@@ -262,7 +277,7 @@ unsafe fn hook_import(
         }
 
         // 按序号导入没有函数名，不能用于本工具的名称匹配。
-        if lookup_value & IMAGE_ORDINAL_FLAG32 == 0 {
+        if lookup_value & IMAGE_ORDINAL_FLAG == 0 {
             let import_by_name = (module_base + lookup_value) as *const ImageImportByName;
             let name = CStr::from_ptr(ptr::addr_of!((*import_by_name).name) as *const c_char)
                 .to_string_lossy();

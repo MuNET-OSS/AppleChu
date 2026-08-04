@@ -58,7 +58,7 @@ crate::config_section! {
     pub(crate) struct NationalMatchConfig => NATIONAL_MATCH_CONFIG_SECTION {
         section: "NationalMatch",
         order: 185,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "全国对战 TCP 中继",
@@ -76,13 +76,23 @@ pub fn init(api: &Api, _config: &NationalMatchConfig) {
     });
 
     unsafe {
-        if let Some(orig) = hook_iat(api.game_base(), WS2_32, "WSASendTo", hooked_sendto as *const ()) {
+        if let Some(orig) = hook_iat(
+            api.game_base(),
+            WS2_32,
+            "WSASendTo",
+            hooked_sendto as *const (),
+        ) {
             let _ = ORIG_SENDTO.set(std::mem::transmute::<*const (), WsaSendToFn>(orig));
         } else {
             api.log_warn("national match: WSASendTo import not found");
         }
 
-        if let Some(orig) = hook_iat(api.game_base(), WS2_32, "WSARecvFrom", hooked_recvfrom as *const ()) {
+        if let Some(orig) = hook_iat(
+            api.game_base(),
+            WS2_32,
+            "WSARecvFrom",
+            hooked_recvfrom as *const (),
+        ) {
             let _ = ORIG_RECVFROM.set(std::mem::transmute::<*const (), WsaRecvFromFn>(orig));
         } else {
             api.log_warn("national match: WSARecvFrom import not found");
@@ -168,7 +178,15 @@ unsafe extern "system" fn hooked_sendto(
 ) -> i32 {
     let Some(state) = STATE.get() else {
         return passthrough_sendto(
-            socket, buffers, buffer_count, bytes_sent, flags, to, to_len, overlapped, completion,
+            socket,
+            buffers,
+            buffer_count,
+            bytes_sent,
+            flags,
+            to,
+            to_len,
+            overlapped,
+            completion,
         );
     };
 
@@ -218,7 +236,15 @@ unsafe extern "system" fn hooked_sendto(
     }
 
     passthrough_sendto(
-        socket, buffers, buffer_count, bytes_sent, flags, to, to_len, overlapped, completion,
+        socket,
+        buffers,
+        buffer_count,
+        bytes_sent,
+        flags,
+        to,
+        to_len,
+        overlapped,
+        completion,
     )
 }
 
@@ -241,7 +267,15 @@ unsafe fn passthrough_sendto(
 ) -> i32 {
     if let Some(orig) = ORIG_SENDTO.get() {
         return orig(
-            socket, buffers, buffer_count, bytes_sent, flags, to, to_len, overlapped, completion,
+            socket,
+            buffers,
+            buffer_count,
+            bytes_sent,
+            flags,
+            to,
+            to_len,
+            overlapped,
+            completion,
         );
     }
     0
@@ -260,7 +294,14 @@ unsafe extern "system" fn hooked_recvfrom(
 ) -> i32 {
     let Some(state) = STATE.get() else {
         return passthrough_recvfrom(
-            socket, buffers, buffer_count, bytes_recvd, flags, from, from_len, overlapped,
+            socket,
+            buffers,
+            buffer_count,
+            bytes_recvd,
+            flags,
+            from,
+            from_len,
+            overlapped,
             completion,
         );
     };
@@ -269,7 +310,14 @@ unsafe extern "system" fn hooked_recvfrom(
         Some(f) => f,
         None => {
             return passthrough_recvfrom(
-                socket, buffers, buffer_count, bytes_recvd, flags, from, from_len, overlapped,
+                socket,
+                buffers,
+                buffer_count,
+                bytes_recvd,
+                flags,
+                from,
+                from_len,
+                overlapped,
                 completion,
             );
         }
@@ -366,7 +414,14 @@ unsafe fn passthrough_recvfrom(
 ) -> i32 {
     if let Some(orig) = ORIG_RECVFROM.get() {
         return orig(
-            socket, buffers, buffer_count, bytes_recvd, flags, from, from_len, overlapped,
+            socket,
+            buffers,
+            buffer_count,
+            bytes_recvd,
+            flags,
+            from,
+            from_len,
+            overlapped,
             completion,
         );
     }

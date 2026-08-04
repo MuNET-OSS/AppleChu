@@ -3,17 +3,17 @@ pub mod chusan_io4;
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{fence, Ordering};
-use std::sync::mpsc::{self, Sender};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Condvar, Mutex, Once, OnceLock};
 use std::thread;
 
 use once_cell::sync::Lazy;
-use windows_sys::Win32::System::IO::OVERLAPPED;
 use windows_sys::Win32::System::Threading::SetEvent;
+use windows_sys::Win32::System::IO::OVERLAPPED;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
 };
 
+use crate::config::Config;
 use crate::iohook::{self, Irp, IrpOp};
 use crate::util::api::Api;
 
@@ -21,7 +21,7 @@ crate::config_section! {
     pub(crate) struct Io4Config => IO4_CONFIG_SECTION {
         section: "Io4",
         order: 310,
-        default_enabled: true,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         comment: "IO4 USB HID 模拟",
@@ -37,18 +37,20 @@ pub const BUTTON_SERVICE: u16 = 1 << 6;
 pub const REPORT_LEN: usize = 0x40;
 const OUT_PAYLOAD_LEN: usize = 62;
 const IO4_PATH: &str = "$io4\\vid_0ca3";
-const IOCTL_HID_GET_MANUFACTURER_STRING: u32 = 0xB019_0012;
-const IOCTL_HID_GET_PRODUCT_STRING: u32 = 0xB019_0016;
-const IOCTL_HID_GET_INPUT_REPORT: u32 = 0xB019_0008;
-const IOCTL_HID_SET_OUTPUT_REPORT: u32 = 0xB019_0009;
-const ERROR_IO_PENDING: u32 = 997;
+// Windows hidclass.h：FILE_DEVICE_KEYBOARD(0x0b) 的 HID_OUT/HID_IN 控制码
+const IOCTL_HID_GET_MANUFACTURER_STRING: u32 = 0x000B_01BA;
+const IOCTL_HID_GET_PRODUCT_STRING: u32 = 0x000B_01BE;
+const IOCTL_HID_GET_INPUT_REPORT: u32 = 0x000B_01A2;
+const IOCTL_HID_SET_OUTPUT_REPORT: u32 = 0x000B_0195;
 const STATUS_PENDING: usize = 0x0000_0103;
 const STATUS_SUCCESS: usize = 0;
+const ERROR_INVALID_FUNCTION: u32 = 1;
+const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 
 static IO4_FD: Mutex<usize> = Mutex::new(0);
 static IO4_DEVICE: Lazy<Mutex<Option<Io4Device<chusan_io4::ChusanIo4Ops>>>> =
     Lazy::new(|| Mutex::new(None));
-static IO4_ASYNC: OnceLock<Sender<Io4AsyncRead>> = OnceLock::new();
+static IO4_ASYNC: OnceLock<Io4Async> = OnceLock::new();
 
 #[derive(Clone, Copy, Default)]
 pub struct Io4State {
@@ -81,10 +83,20 @@ pub struct Io4Device<O> {
     previous_state: Io4State,
 }
 
+#[derive(Clone, Copy)]
 struct Io4AsyncRead {
     read_buf: usize,
-    out_nbytes: usize,
     ovl: usize,
+}
+
+/// IO4 同时只保留一个待处理读取
+/// 不能使用无界队列：AM Daemon 会把 OVERLAPPED 所有权视为一次性对象，
+/// 队列积压后继续访问旧指针会导致自检阶段出现非确定性崩溃
+struct Io4Async {
+    pending: Mutex<Option<Io4AsyncRead>>,
+    pending_cv: Condvar,
+    available_cv: Condvar,
+    worker_started: Once,
 }
 
 #[derive(Clone, Copy)]
@@ -137,55 +149,71 @@ impl<O: Io4Ops> Io4Device<O> {
         }
 
         match report[1] {
-            0x01 | 0x02 => {
+            0x01 => {
+                log_io4("IO4 communication timeout configured");
+                self.system_status = 0x30;
+                Ok(())
+            }
+            0x02 => {
+                log_io4("IO4 sampling count configured");
                 self.system_status = 0x30;
                 Ok(())
             }
             0x03 => {
+                log_io4("IO4 board status cleared");
                 self.system_status = 0;
                 Ok(())
             }
             0x04 => self.ops.write_gpio(&report[2..2 + OUT_PAYLOAD_LEN]),
             0x05 => self.ops.write_pwm(&report[2..2 + OUT_PAYLOAD_LEN]),
             0x41 => self.ops.write_unique(&report[2..2 + OUT_PAYLOAD_LEN]),
-            _ => Err(-1),
+            0x85 => {
+                log_io4("IO4 firmware update command is unsupported");
+                Err(-1)
+            }
+            command => {
+                log_io4(&format!("IO4 received unknown command {command:02x}"));
+                Err(-1)
+            }
         }
     }
 }
 
 #[applechu_macros::config_section(stage = Device, order = 20)]
-pub fn init(api: &Api, config: &Io4Config) {
+pub fn init(api: &Api, root: &Config, config: &Io4Config) -> Result<(), String> {
+    api.log_info("IO4 backend starting");
+    if let Err(status) = crate::chuniio::jvs_init(root) {
+        api.log_error(&format!("IO4 backend failed to start: {status:#010x}"));
+        return Err(format!("ChuniIo JVS backend failed ({status:#010x})"));
+    }
+    if !iohook::setupapi::add_phantom_hid(IO4_PATH) {
+        return Err("failed to register SetupAPI HID interface".to_owned());
+    }
     unsafe {
         let Some(fd) = iohook::open_nul_fd() else {
-            api.log_info("IO4 emulator skipped: failed to open NUL handle");
-            return;
+            return Err("failed to open NUL handle".to_owned());
         };
 
         if let Ok(mut io4_fd) = IO4_FD.lock() {
             *io4_fd = crate::util::win32::handle_value(fd);
         }
         if let Ok(mut device) = IO4_DEVICE.lock() {
-            *device = Some(Io4Device::new(
-                chusan_io4::ChusanIo4Ops,
-                config.foreground,
-            ));
+            *device = Some(Io4Device::new(chusan_io4::ChusanIo4Ops, config.foreground));
         }
-        iohook::push_handler(io4_irp_handler);
+        if !iohook::push_handler(io4_irp_handler) {
+            return Err("I/O handler table is full".to_owned());
+        }
     }
-    api.log_info("IO4 emulator initialized");
+    Ok(())
 }
 
 unsafe fn io4_irp_handler(irp: &mut Irp) -> i32 {
     if irp.op == IrpOp::Open {
         let matched = matches_irp_path(irp);
         if matched {
-            if let Some(api) = crate::util::api::API.get() {
-                api.log_info("IO4: OPEN matched $io4\\vid_0ca3");
-            }
-        }
-        if matched {
+            log_io4("IO4 device opened");
             irp.fd = crate::util::win32::handle_from_value(io4_fd());
-            return 1;
+            return iohook::S_OK;
         }
         return iohook::invoke_next(irp);
     }
@@ -195,11 +223,16 @@ unsafe fn io4_irp_handler(irp: &mut Irp) -> i32 {
     }
 
     match irp.op {
-        IrpOp::Close => 1,
+        IrpOp::Close => {
+            log_io4("IO4 device closed");
+            iohook::S_OK
+        }
         IrpOp::Read => read_irp(irp),
         IrpOp::Write => write_irp(irp),
         IrpOp::Ioctl => ioctl_irp(irp),
-        IrpOp::Fsync | IrpOp::Seek | IrpOp::Open => 1,
+        IrpOp::Fsync | IrpOp::Seek | IrpOp::Open => {
+            iohook::hresult_from_win32(ERROR_INVALID_FUNCTION)
+        }
     }
 }
 
@@ -224,21 +257,21 @@ unsafe fn read_irp(irp: &mut Irp) -> i32 {
 
 unsafe fn read_report_target(target: Io4ReadTarget) -> i32 {
     if target.buf.is_null() || target.nbytes < REPORT_LEN as u32 {
-        return 0;
+        return iohook::hresult_from_win32(ERROR_INSUFFICIENT_BUFFER);
     }
     if !target.ovl.is_null() {
         return submit_async_read(target);
     }
     let Ok(mut device) = IO4_DEVICE.lock() else {
-        return 0;
+        return iohook::E_FAIL;
     };
     let Some(device) = device.as_mut() else {
-        return 0;
+        return iohook::E_FAIL;
     };
     let report = device.read_report();
     ptr::copy_nonoverlapping(report.as_ptr(), target.buf, REPORT_LEN);
     set_out_nbytes(target.out_nbytes, REPORT_LEN as u32);
-    1
+    iohook::S_OK
 }
 
 unsafe fn submit_async_read(target: Io4ReadTarget) -> i32 {
@@ -246,28 +279,62 @@ unsafe fn submit_async_read(target: Io4ReadTarget) -> i32 {
     (*ovl).Internal = STATUS_PENDING;
     let task = Io4AsyncRead {
         read_buf: target.buf as usize,
-        out_nbytes: target.out_nbytes as usize,
         ovl: target.ovl as usize,
     };
-    match io4_async_sender().send(task) {
-        Ok(()) => {
-            iohook::set_last_error(ERROR_IO_PENDING);
-            0
+    io4_async().submit(task)
+}
+
+fn io4_async() -> &'static Io4Async {
+    IO4_ASYNC.get_or_init(|| Io4Async {
+        pending: Mutex::new(None),
+        pending_cv: Condvar::new(),
+        available_cv: Condvar::new(),
+        worker_started: Once::new(),
+    })
+}
+
+impl Io4Async {
+    fn submit(&self, task: Io4AsyncRead) -> i32 {
+        self.worker_started.call_once(|| {
+            let worker = self as *const Io4Async as usize;
+            thread::spawn(move || unsafe { io4_async_worker(worker as *const Io4Async) });
+        });
+        let Ok(mut pending) = self.pending.lock() else {
+            return iohook::E_FAIL;
+        };
+        while pending.is_some() {
+            pending = match self.available_cv.wait(pending) {
+                Ok(pending) => pending,
+                Err(_) => return iohook::E_FAIL,
+            };
         }
-        Err(_) => 0,
+        *pending = Some(task);
+        self.pending_cv.notify_one();
+        iohook::hresult_from_win32(iohook::ERROR_IO_PENDING)
     }
 }
 
-fn io4_async_sender() -> &'static Sender<Io4AsyncRead> {
-    IO4_ASYNC.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<Io4AsyncRead>();
-        thread::spawn(move || {
-            while let Ok(task) = rx.recv() {
-                unsafe { complete_async_read(task) };
+unsafe fn io4_async_worker(async_read: *const Io4Async) {
+    // `IO4_ASYNC` 永久持有该对象，工作线程只在进程退出时结束
+    let async_read = &*async_read;
+    loop {
+        let task = {
+            let Ok(mut pending) = async_read.pending.lock() else {
+                return;
+            };
+            while pending.is_none() {
+                pending = match async_read.pending_cv.wait(pending) {
+                    Ok(pending) => pending,
+                    Err(_) => return,
+                };
             }
-        });
-        tx
-    })
+            // 工作线程复制任务后立即释放提交槽位，再执行设备轮询
+            let task = pending.take().expect("pending IO4 task disappeared");
+            async_read.available_cv.notify_one();
+            task
+        };
+        complete_async_read(task);
+    }
 }
 
 unsafe fn complete_async_read(task: Io4AsyncRead) {
@@ -277,9 +344,6 @@ unsafe fn complete_async_read(task: Io4AsyncRead) {
         .and_then(|mut device| device.as_mut().map(Io4Device::read_report))
         .unwrap_or([0; REPORT_LEN]);
     ptr::copy_nonoverlapping(report.as_ptr(), task.read_buf as *mut u8, REPORT_LEN);
-    if task.out_nbytes != 0 {
-        *(task.out_nbytes as *mut u32) = REPORT_LEN as u32;
-    }
     let ovl = task.ovl as *mut OVERLAPPED;
     (*ovl).InternalHigh = REPORT_LEN;
     let event = (*ovl).hEvent;
@@ -292,39 +356,63 @@ unsafe fn complete_async_read(task: Io4AsyncRead) {
 
 unsafe fn write_irp(irp: &mut Irp) -> i32 {
     if irp.write_buf.is_null() || irp.nbytes < REPORT_LEN as u32 {
-        return 0;
+        return iohook::hresult_from_win32(ERROR_INSUFFICIENT_BUFFER);
     }
     let Ok(mut device) = IO4_DEVICE.lock() else {
-        return 0;
+        return iohook::E_FAIL;
     };
     let Some(device) = device.as_mut() else {
-        return 0;
+        return iohook::E_FAIL;
     };
     let report = std::slice::from_raw_parts(irp.write_buf, REPORT_LEN);
     if device.write_report(report).is_err() {
-        return 0;
+        return iohook::E_FAIL;
     }
     set_out_nbytes(irp.out_nbytes, REPORT_LEN as u32);
-    1
+    iohook::S_OK
 }
 
 unsafe fn ioctl_irp(irp: &mut Irp) -> i32 {
     match irp.ioctl {
-        IOCTL_HID_GET_MANUFACTURER_STRING => copy_utf16(
-            &manufacturer_string_utf16(),
-            irp.ioctl_out,
-            irp.ioctl_out_nbytes,
-            irp.out_nbytes,
-        ),
-        IOCTL_HID_GET_PRODUCT_STRING => copy_utf16(
-            &product_string_utf16(),
-            irp.ioctl_out,
-            irp.ioctl_out_nbytes,
-            irp.out_nbytes,
-        ),
-        IOCTL_HID_GET_INPUT_REPORT => read_ioctl_report(irp),
-        IOCTL_HID_SET_OUTPUT_REPORT => write_ioctl_report(irp),
-        _ => 1,
+        IOCTL_HID_GET_MANUFACTURER_STRING => {
+            log_io4("IO4 manufacturer string requested");
+            copy_utf16(
+                &manufacturer_string_utf16(),
+                irp.ioctl_out,
+                irp.ioctl_out_nbytes,
+                irp.out_nbytes,
+            )
+        }
+        IOCTL_HID_GET_PRODUCT_STRING => {
+            log_io4("IO4 product string requested");
+            copy_utf16(
+                &product_string_utf16(),
+                irp.ioctl_out,
+                irp.ioctl_out_nbytes,
+                irp.out_nbytes,
+            )
+        }
+        IOCTL_HID_GET_INPUT_REPORT => {
+            log_io4("IO4 control read requested");
+            read_ioctl_report(irp)
+        }
+        IOCTL_HID_SET_OUTPUT_REPORT => {
+            log_io4("IO4 control write requested");
+            write_ioctl_report(irp)
+        }
+        code => {
+            log_io4(&format!(
+                "IO4 received unknown IOCTL {code:#08x}: input={} bytes, output={} bytes",
+                irp.ioctl_in_nbytes, irp.ioctl_out_nbytes
+            ));
+            iohook::hresult_from_win32(ERROR_INVALID_FUNCTION)
+        }
+    }
+}
+
+fn log_io4(message: &str) {
+    if let Some(api) = crate::util::api::API.get() {
+        api.log_info(message);
     }
 }
 
@@ -339,30 +427,30 @@ unsafe fn read_ioctl_report(irp: &mut Irp) -> i32 {
 
 unsafe fn write_ioctl_report(irp: &mut Irp) -> i32 {
     if irp.ioctl_in.is_null() || irp.ioctl_in_nbytes < REPORT_LEN as u32 {
-        return 0;
+        return iohook::hresult_from_win32(ERROR_INSUFFICIENT_BUFFER);
     }
     let Ok(mut device) = IO4_DEVICE.lock() else {
-        return 0;
+        return iohook::E_FAIL;
     };
     let Some(device) = device.as_mut() else {
-        return 0;
+        return iohook::E_FAIL;
     };
     let report = std::slice::from_raw_parts(irp.ioctl_in.cast::<u8>(), REPORT_LEN);
     if device.write_report(report).is_err() {
-        return 0;
+        return iohook::E_FAIL;
     }
     set_out_nbytes(irp.out_nbytes, REPORT_LEN as u32);
-    1
+    iohook::S_OK
 }
 
 unsafe fn copy_utf16(text: &[u16], out: *mut c_void, out_size: u32, out_nbytes: *mut u32) -> i32 {
     let bytes = std::slice::from_raw_parts(text.as_ptr().cast::<u8>(), text.len() * 2);
     if out.is_null() || out_size < bytes.len() as u32 {
-        return 0;
+        return iohook::hresult_from_win32(ERROR_INSUFFICIENT_BUFFER);
     }
     ptr::copy_nonoverlapping(bytes.as_ptr(), out.cast::<u8>(), bytes.len());
     set_out_nbytes(out_nbytes, bytes.len() as u32);
-    1
+    iohook::S_OK
 }
 
 fn foreground_matches(expected: &str) -> bool {

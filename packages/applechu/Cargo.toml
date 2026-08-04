@@ -7,10 +7,11 @@ readme = "../../README.md"
 
 [lib]
 name = "winhttp"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 applechu-macros.workspace = true
+applechu-schema.workspace = true
 chu-abi.workspace = true
 linkme.workspace = true
 once_cell.workspace = true
@@ -19,4 +20,5 @@ toml.workspace = true
 windows-sys.workspace = true
 
 [build-dependencies]
+applechu-schema.workspace = true
 forward-dll.workspace = true

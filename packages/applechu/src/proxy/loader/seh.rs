@@ -4,7 +4,7 @@ use chu_abi::{
     ChuModAPI, ChuModFrameFunc, ChuModInfo, ChuModInitFunc, ChuModReadyFunc, ChuModShutdownFunc,
 };
 
-use super::log::log_info;
+use super::log::{log_info, log_warn};
 
 pub unsafe fn call_mod_init(
     name: &str,
@@ -16,7 +16,9 @@ pub unsafe fn call_mod_init(
         Ok(ret) => Some(ret),
         Err(_) => {
             super::crash_dump::log_panic_context("chumod_init", name);
-            log_info(&format!("mod init panic caught, skip mod: {}", name));
+            log_warn(&format!(
+                "External module initialization panicked and was skipped: {name}"
+            ));
             None
         }
     }
@@ -25,7 +27,7 @@ pub unsafe fn call_mod_init(
 pub unsafe fn call_mod_shutdown(name: &str, shutdown: ChuModShutdownFunc) {
     if catch_unwind(AssertUnwindSafe(|| shutdown())).is_err() {
         super::crash_dump::log_panic_context("chumod_shutdown", name);
-        log_info(&format!("mod shutdown panic caught: {}", name));
+        log_warn(&format!("External module shutdown panicked: {name}"));
     }
 }
 

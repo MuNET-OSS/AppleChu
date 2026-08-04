@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use once_cell::sync::Lazy;
 use windows_sys::Win32::Devices::Communication::{
-    COMMTIMEOUTS, DCB, GetCommState, NOPARITY, ONESTOPBIT, SetCommState, SetCommTimeouts,
+    GetCommState, SetCommState, SetCommTimeouts, COMMTIMEOUTS, DCB, NOPARITY, ONESTOPBIT,
 };
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
@@ -30,8 +30,8 @@ crate::config_section! {
     pub(crate) struct LedOutputConfig => LED_OUTPUT_CONFIG_SECTION {
         section: "Led",
         order: 313,
-        default_enabled: true,
-        always_enabled: true,
+        default_on: true,
+        always_enabled: false,
         hidden: false,
         comment: "灯光输出",
         fields: {

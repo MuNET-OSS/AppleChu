@@ -17,7 +17,7 @@ const BANNER: &str = r#"
 - 井号 # 开头的行为注释，被注释掉的内容不会生效
     - 被注释的配置内容使用一个井号 #，说明文字使用两个井号 ##
 - 将默认关闭的栏目取消注释即可启用
-- 若要禁用默认开启的栏目，请在栏目下添加 Disabled = true
+- 栏目存在时启用，注释栏目时关闭
 - 配置文件会在启动时按当前程序中的声明重新生成
 "#;
 
@@ -31,7 +31,7 @@ pub enum ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Parse(error) => write!(formatter, "TOML 解析失败: {error}"),
+            Self::Parse(error) => write!(formatter, "Failed to parse TOML: {error}"),
         }
     }
 }
@@ -41,6 +41,7 @@ impl std::error::Error for ConfigError {}
 pub struct Config {
     base_dir: PathBuf,
     sections: HashMap<TypeId, LoadedSection>,
+    preserved_sections: Vec<(String, toml::Table)>,
     diagnostics: Vec<ConfigDiagnostic>,
     valid: bool,
 }
@@ -98,12 +99,12 @@ impl Config {
             let Some(loaded) = self.sections.get(&(descriptor.type_id)()) else {
                 continue;
             };
-            if descriptor.hidden && !loaded.explicit {
+            if descriptor.builtin() {
                 continue;
             }
             output.push('\n');
-            append_comment(&mut output, descriptor.comment);
-            if !loaded.explicit && !descriptor.default_enabled {
+            append_comment(&mut output, descriptor.comment());
+            if !loaded.explicit {
                 output.push_str("#[");
             } else {
                 output.push('[');
@@ -111,14 +112,16 @@ impl Config {
             output.push_str(descriptor.name);
             output.push_str("]\n");
 
-            if !descriptor.always_enabled {
-                if loaded.explicit && !loaded.enabled {
-                    output.push_str("Disabled = true\n");
-                } else if descriptor.default_enabled {
-                    output.push_str("#Disabled = false\n");
-                }
-            }
             (descriptor.serialize_fields)(loaded, &mut output);
+        }
+        for (name, table) in &self.preserved_sections {
+            output.push('\n');
+            output.push('[');
+            output.push_str(name);
+            output.push_str("]\n");
+            if let Ok(fields) = toml::to_string(table) {
+                output.push_str(&fields);
+            }
         }
         output
     }
@@ -131,9 +134,11 @@ impl Config {
                 Err(error) => Self::invalid(base_dir, error.to_string()),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Self::from_table(Path::new(base_dir), &toml::Table::new())
+                let defaults = applechu_schema::SCHEMA.default_config_toml();
+                Self::parse(base_dir, &defaults)
+                    .unwrap_or_else(|error| Self::invalid(base_dir, error.to_string()))
             }
-            Err(error) => Self::invalid(base_dir, format!("读取 AppleChu.toml 失败: {error}")),
+            Err(error) => Self::invalid(base_dir, format!("Failed to read AppleChu.toml: {error}")),
         }
     }
 
@@ -152,10 +157,23 @@ impl Config {
         warn_unknown_sections(root, &descriptors, &mut diagnostics);
 
         let mut sections = HashMap::new();
-        for descriptor in descriptors {
+        for descriptor in &descriptors {
             let loaded = (descriptor.parse)(find_section(root, descriptor.name), &mut diagnostics);
             sections.insert((descriptor.type_id)(), loaded);
         }
+
+        let preserved_sections = root
+            .iter()
+            .filter(|(name, value)| {
+                let schema = applechu_schema::section(name);
+                schema.is_some()
+                    && value.is_table()
+                    && !descriptors
+                        .iter()
+                        .any(|descriptor| descriptor.name.eq_ignore_ascii_case(name))
+            })
+            .filter_map(|(name, value)| value.as_table().map(|table| (name.clone(), table.clone())))
+            .collect();
 
         let valid = !diagnostics
             .iter()
@@ -163,6 +181,7 @@ impl Config {
         Self {
             base_dir: base_dir.to_owned(),
             sections,
+            preserved_sections,
             diagnostics,
             valid,
         }
@@ -179,7 +198,7 @@ fn validate_document(
         let normalized = key.to_ascii_lowercase();
         if !root_keys.insert(normalized) {
             diagnostics.push(ConfigDiagnostic::error(format!(
-                "配置栏目大小写重复: {key}"
+                "Duplicate config section with different casing: {key}"
             )));
             continue;
         }
@@ -187,19 +206,20 @@ fn validate_document(
         if key.eq_ignore_ascii_case("Version") {
             if value.as_str() != Some(CONFIG_VERSION) {
                 diagnostics.push(ConfigDiagnostic::error(format!(
-                    "不支持的配置版本，当前版本必须为 {CONFIG_VERSION}"
+                    "Unsupported config version; expected {CONFIG_VERSION}"
                 )));
             }
             continue;
         }
 
-        if descriptors
+        if (descriptors
             .iter()
             .any(|descriptor| key.eq_ignore_ascii_case(descriptor.name))
+            || applechu_schema::section(key).is_some())
             && !value.is_table()
         {
             diagnostics.push(ConfigDiagnostic::error(format!(
-                "配置栏目 {key} 必须是 TOML 表"
+                "Config section {key} must be a TOML table"
             )));
         }
     }
@@ -214,15 +234,60 @@ fn validate_registry(
     for descriptor in descriptors {
         if !names.insert(descriptor.name.to_ascii_lowercase()) {
             diagnostics.push(ConfigDiagnostic::error(format!(
-                "配置栏目重复注册: {}",
+                "Duplicate config section registration: {}",
                 descriptor.name
             )));
         }
         if !types.insert((descriptor.type_id)()) {
             diagnostics.push(ConfigDiagnostic::error(format!(
-                "配置类型重复注册: {}",
+                "Duplicate config type registration: {}",
                 descriptor.name
             )));
+        }
+        if let Some(schema) = applechu_schema::section(descriptor.name) {
+            if schema.default_on != descriptor.default_on
+                || schema.always_enabled != descriptor.always_enabled
+                || schema.hidden != descriptor.hidden
+            {
+                diagnostics.push(ConfigDiagnostic::warning(format!(
+                    "Runtime fallback metadata for section {} differs from the schema; using the schema",
+                    descriptor.name
+                )));
+            }
+
+            let schema_keys = schema
+                .entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>();
+            let missing = descriptor
+                .field_keys
+                .iter()
+                .copied()
+                .filter(|key| {
+                    !schema_keys
+                        .iter()
+                        .any(|schema_key| schema_key.eq_ignore_ascii_case(key))
+                })
+                .collect::<Vec<_>>();
+            let extra = schema_keys
+                .iter()
+                .copied()
+                .filter(|key| {
+                    !descriptor
+                        .field_keys
+                        .iter()
+                        .any(|runtime_key| runtime_key.eq_ignore_ascii_case(key))
+                })
+                .collect::<Vec<_>>();
+            if !missing.is_empty() || !extra.is_empty() {
+                diagnostics.push(ConfigDiagnostic::warning(format!(
+                    "Runtime fields for section {} differ from the schema; runtime missing [{}], schema extra [{}]",
+                    descriptor.name,
+                    missing.join(", "),
+                    extra.join(", "),
+                )));
+            }
         }
     }
 }
@@ -237,11 +302,12 @@ fn warn_unknown_sections(
             || descriptors
                 .iter()
                 .any(|descriptor| key.eq_ignore_ascii_case(descriptor.name))
+            || applechu_schema::section(key).is_some()
         {
             continue;
         }
         diagnostics.push(ConfigDiagnostic::warning(format!(
-            "无法识别配置栏目 {key}，规范化时将删除"
+            "Unknown config section {key}; it will be removed during normalization"
         )));
     }
 }

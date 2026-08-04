@@ -22,15 +22,15 @@ pub fn install(module: HMODULE) {
     };
     if let Some(original) = original {
         ORIGINAL_OUTPUT_DEBUG_STRING_A.store(original as usize, Ordering::SeqCst);
-        log_info("ChuniIo: DLL debug output capture installed");
+        log_info("External ChuniIO debug output capture enabled");
     } else {
-        log_info("ChuniIo: DLL debug output capture unavailable");
+        log_info("External ChuniIO debug output capture unavailable");
     }
 }
 
 pub fn log_init_status(component: &str, status: i32) {
     let code = u32::from_ne_bytes(status.to_ne_bytes());
-    let message = format!("ChuniIo: external {component} init returned 0x{code:08X}");
+    let message = format!("External ChuniIO {component} initialization returned 0x{code:08X}");
     if status < 0 {
         if let Some(api) = API.get() {
             api.log_warn(&message);
@@ -45,7 +45,7 @@ unsafe extern "system" fn hooked_output_debug_string_a(message: *const c_char) {
         // SAFETY: [Category 8 - FFI boundary] OutputDebugStringA 要求参数是有效的 NUL 结尾字符串。
         let message = unsafe { CStr::from_ptr(message) }.to_string_lossy();
         for line in message.lines().filter(|line| !line.trim().is_empty()) {
-            log_info(&format!("ChuniIo DLL: {}", line.trim()));
+            log_info(&format!("External ChuniIO: {}", line.trim()));
         }
     }
 

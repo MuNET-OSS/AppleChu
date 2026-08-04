@@ -1,7 +1,6 @@
 mod debug_output;
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
@@ -33,9 +32,6 @@ pub struct ExternalChuniIo {
     slider_set_leds: Option<SliderSetLedsFn>,
     led_init: Option<LedInitFn>,
     led_set_colors: Option<LedSetColorsFn>,
-    jvs_started: AtomicBool,
-    slider_started: AtomicBool,
-    led_started: AtomicBool,
 }
 
 unsafe impl Send for ExternalChuniIo {}
@@ -182,41 +178,33 @@ impl ExternalChuniIo {
             slider_set_leds,
             led_init,
             led_set_colors,
-            jvs_started: AtomicBool::new(false),
-            slider_started: AtomicBool::new(false),
-            led_started: AtomicBool::new(false),
         })
     }
 
-    unsafe fn ensure_jvs_init(&self) {
-        if let Some(status) = call_init_once(&self.jvs_started, || (self.jvs_init)()) {
-            debug_output::log_init_status("JVS", status);
-        }
+    pub unsafe fn jvs_init(&self) -> i32 {
+        let status = (self.jvs_init)();
+        debug_output::log_init_status("JVS", status);
+        status
     }
 
-    unsafe fn ensure_slider_init(&self) {
-        if let Some(status) = call_init_once(&self.slider_started, || (self.slider_init)()) {
-            debug_output::log_init_status("slider", status);
-        }
+    pub unsafe fn slider_init(&self) -> i32 {
+        let status = (self.slider_init)();
+        debug_output::log_init_status("slider", status);
+        status
     }
 
-    pub unsafe fn ensure_led_init(&self) {
-        let Some(func) = self.led_init else {
-            return;
-        };
-        if let Some(status) = call_init_once(&self.led_started, || func()) {
-            debug_output::log_init_status("LED", status);
-        }
+    pub unsafe fn led_init(&self) -> i32 {
+        let status = self.led_init.map_or(0, |func| func());
+        debug_output::log_init_status("LED", status);
+        status
     }
 
     pub unsafe fn jvs_poll(&self, opbtn: &mut u8, beams: &mut u8) {
-        self.ensure_jvs_init();
         (self.jvs_poll)(opbtn, beams);
     }
 
-    /// Snapshot the raw JVS function pointers for use by the chu2to3 producer
-    /// thread. The thread polls the DLL directly, matching segatools' x86
-    /// jvs_poll_thread_proc behaviour.
+    /// 获取原始 JVS 函数指针供 chu2to3 发布线程使用
+    /// 发布线程直接轮询外部 DLL
     pub fn jvs_raw_fns(&self) -> JvsRawFns {
         JvsRawFns {
             api_version: self.api_version,
@@ -227,14 +215,12 @@ impl ExternalChuniIo {
     }
 
     pub unsafe fn jvs_read_coin(&self) -> u16 {
-        self.ensure_jvs_init();
         let mut total = 0u16;
         (self.jvs_read_coin)(&mut total);
         total
     }
 
     pub unsafe fn slider_start(&self, callback: SliderCallbackRaw) {
-        self.ensure_slider_init();
         (self.slider_start)(callback);
     }
 
@@ -249,13 +235,8 @@ impl ExternalChuniIo {
     }
 
     pub unsafe fn led_set_colors(&self, board: u8, rgb: *mut u8) {
-        self.ensure_led_init();
         if let Some(func) = self.led_set_colors {
             func(board, rgb);
         }
     }
-}
-
-fn call_init_once(started: &AtomicBool, init: impl FnOnce() -> i32) -> Option<i32> {
-    (!started.swap(true, Ordering::SeqCst)).then(init)
 }

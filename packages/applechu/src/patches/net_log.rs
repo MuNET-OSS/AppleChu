@@ -36,7 +36,7 @@ crate::config_section! {
     pub(crate) struct NetLogConfig => NET_LOG_CONFIG_SECTION {
         section: "NetLog",
         order: 175,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "网络请求日志",

@@ -12,10 +12,14 @@ use crate::iohook::proc_addr;
 use crate::platform::winapi::{self, RegQueryValueExAFn, RegQueryValueExWFn};
 use crate::util::api::Api;
 
-pub const HKEY_CLASSES_ROOT: usize = 0x8000_0000;
-pub const HKEY_CURRENT_USER: usize = 0x8000_0001;
-pub const HKEY_LOCAL_MACHINE: usize = 0x8000_0002;
-pub const HKEY_USERS: usize = 0x8000_0003;
+const fn predefined_hkey(value: u32) -> usize {
+    value as i32 as isize as usize
+}
+
+pub const HKEY_CLASSES_ROOT: usize = predefined_hkey(0x8000_0000);
+pub const HKEY_CURRENT_USER: usize = predefined_hkey(0x8000_0001);
+pub const HKEY_LOCAL_MACHINE: usize = predefined_hkey(0x8000_0002);
+pub const HKEY_USERS: usize = predefined_hkey(0x8000_0003);
 
 const ERROR_INVALID_PARAMETER: u32 = 87;
 const ERROR_MORE_DATA: u32 = 234;
@@ -47,6 +51,8 @@ type RegCreateKeyExWFn = unsafe extern "system" fn(
     *mut u32,
 ) -> u32;
 type RegCloseKeyFn = unsafe extern "system" fn(usize) -> u32;
+type RegSetValueExWFn =
+    unsafe extern "system" fn(usize, *const u16, u32, u32, *const u8, u32) -> u32;
 type RegGetValueWFn = unsafe extern "system" fn(
     usize,
     *const u16,
@@ -90,6 +96,7 @@ static ORIG_CREATE_KEY_EX_W: AtomicUsize = AtomicUsize::new(0);
 static ORIG_CLOSE_KEY: AtomicUsize = AtomicUsize::new(0);
 static ORIG_QUERY_VALUE_EX_A: AtomicUsize = AtomicUsize::new(0);
 static ORIG_QUERY_VALUE_EX_W: AtomicUsize = AtomicUsize::new(0);
+static ORIG_SET_VALUE_EX_W: AtomicUsize = AtomicUsize::new(0);
 static ORIG_GET_VALUE_W: AtomicUsize = AtomicUsize::new(0);
 static ORIG_QUERY_INFO_KEY_W: AtomicUsize = AtomicUsize::new(0);
 static ORIG_ENUM_VALUE_W: AtomicUsize = AtomicUsize::new(0);
@@ -99,6 +106,7 @@ static mut ORIG_CREATE_KEY_EX_W_PTR: *const () = ptr::null();
 static mut ORIG_CLOSE_KEY_PTR: *const () = ptr::null();
 static mut ORIG_QUERY_VALUE_EX_A_PTR: *const () = ptr::null();
 static mut ORIG_QUERY_VALUE_EX_W_PTR: *const () = ptr::null();
+static mut ORIG_SET_VALUE_EX_W_PTR: *const () = ptr::null();
 static mut ORIG_GET_VALUE_W_PTR: *const () = ptr::null();
 static mut ORIG_QUERY_INFO_KEY_W_PTR: *const () = ptr::null();
 static mut ORIG_ENUM_VALUE_W_PTR: *const () = ptr::null();
@@ -108,6 +116,7 @@ pub struct RegValue {
     name: String,
     ty: u32,
     bytes: Vec<u8>,
+    ansi_bytes: Option<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -123,6 +132,7 @@ impl RegValue {
             name: name.to_owned(),
             ty: winapi::REG_BINARY,
             bytes: bytes.into(),
+            ansi_bytes: None,
         }
     }
 
@@ -131,6 +141,7 @@ impl RegValue {
             name: name.to_owned(),
             ty: winapi::REG_DWORD,
             bytes: value.to_le_bytes().to_vec(),
+            ansi_bytes: None,
         }
     }
 
@@ -143,11 +154,19 @@ impl RegValue {
             name: name.to_owned(),
             ty: winapi::REG_SZ,
             bytes,
+            ansi_bytes: Some(
+                value
+                    .as_bytes()
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(0))
+                    .collect(),
+            ),
         }
     }
 }
 
-#[applechu_macros::config_section(stage = Platform, order = 10)]
+#[applechu_macros::config_section(stage = PlatformCore, order = 20)]
 pub fn init(api: &Api, _config: &Config) {
     let _ = API.set(*api);
     install_hooks(api);
@@ -165,7 +184,6 @@ pub fn push_key(root: usize, path: &str, values: Vec<RegValue>) {
         path: canonical_path(path),
         values,
     };
-    let value_count = key.values.len();
     if let Ok(mut keys) = KEYS.lock() {
         if let Some(existing) = keys.iter_mut().find(|existing| {
             existing.root == key.root && existing.path.eq_ignore_ascii_case(&key.path)
@@ -174,12 +192,6 @@ pub fn push_key(root: usize, path: &str, values: Vec<RegValue>) {
         } else {
             keys.push(key.clone());
         }
-    }
-    if let Some(api) = API.get() {
-        api.log_info(&format!(
-            "reg_hook: registered HKLM\\{} ({value_count} values)",
-            key.path
-        ));
     }
 }
 
@@ -212,6 +224,11 @@ fn install_hooks(api: &Api) {
                 original: ptr::addr_of_mut!(ORIG_QUERY_VALUE_EX_W_PTR),
             },
             HookSymbol {
+                name: "RegSetValueExW",
+                patch: hooked_reg_set_value_ex_w as *const (),
+                original: ptr::addr_of_mut!(ORIG_SET_VALUE_EX_W_PTR),
+            },
+            HookSymbol {
                 name: "RegGetValueW",
                 patch: hooked_reg_get_value_w as *const (),
                 original: ptr::addr_of_mut!(ORIG_GET_VALUE_W_PTR),
@@ -230,9 +247,9 @@ fn install_hooks(api: &Api) {
         proc_addr::push("advapi32.dll", &symbols, sync_originals);
         let patched = hook_table_apply(null_module(), "advapi32.dll", &symbols);
         sync_originals();
-        if patched > 0 {
-            api.log_info(&format!("reg_hook: advapi32 hooks installed ({patched})"));
-        }
+        api.log_info(&format!(
+            "Registry compatibility ready with {patched} patched entries"
+        ));
     }
 }
 
@@ -244,6 +261,7 @@ fn sync_originals() {
         ORIG_CLOSE_KEY.store(ORIG_CLOSE_KEY_PTR as usize, Ordering::SeqCst);
         ORIG_QUERY_VALUE_EX_A.store(ORIG_QUERY_VALUE_EX_A_PTR as usize, Ordering::SeqCst);
         ORIG_QUERY_VALUE_EX_W.store(ORIG_QUERY_VALUE_EX_W_PTR as usize, Ordering::SeqCst);
+        ORIG_SET_VALUE_EX_W.store(ORIG_SET_VALUE_EX_W_PTR as usize, Ordering::SeqCst);
         ORIG_GET_VALUE_W.store(ORIG_GET_VALUE_W_PTR as usize, Ordering::SeqCst);
         ORIG_QUERY_INFO_KEY_W.store(ORIG_QUERY_INFO_KEY_W_PTR as usize, Ordering::SeqCst);
         ORIG_ENUM_VALUE_W.store(ORIG_ENUM_VALUE_W_PTR as usize, Ordering::SeqCst);
@@ -317,7 +335,7 @@ unsafe extern "system" fn hooked_reg_query_value_ex_a(
 ) -> u32 {
     if let Some(key) = key_for_handle(handle) {
         let name = winapi::cstr_to_string(name).unwrap_or_default();
-        return query_value(&key, &name, data_type, data, data_len);
+        return query_value_ansi(&key, &name, data_type, data, data_len);
     }
     original_query_value_ex_a(handle, name, reserved, data_type, data, data_len)
 }
@@ -335,6 +353,26 @@ unsafe extern "system" fn hooked_reg_query_value_ex_w(
         return query_value(&key, &name, data_type, data, data_len);
     }
     original_query_value_ex_w(handle, name, reserved, data_type, data, data_len)
+}
+
+unsafe extern "system" fn hooked_reg_set_value_ex_w(
+    handle: usize,
+    name: *const u16,
+    reserved: u32,
+    data_type: u32,
+    data: *const u8,
+    data_len: u32,
+) -> u32 {
+    if let Some(key) = key_for_handle(handle) {
+        let name = winapi::wide_to_string(name).unwrap_or_default();
+        return key
+            .values
+            .iter()
+            .any(|value| value.name.eq_ignore_ascii_case(&name))
+            .then_some(winapi::ERROR_SUCCESS)
+            .unwrap_or(winapi::ERROR_FILE_NOT_FOUND);
+    }
+    original_set_value_ex_w(handle, name, reserved, data_type, data, data_len)
 }
 
 unsafe extern "system" fn hooked_reg_get_value_w(
@@ -485,26 +523,56 @@ unsafe fn query_value(
     write_value(value, data_type, data, data_len)
 }
 
+unsafe fn query_value_ansi(
+    key: &VirtualKey,
+    name: &str,
+    data_type: *mut u32,
+    data: *mut u8,
+    data_len: *mut u32,
+) -> u32 {
+    let Some(value) = key
+        .values
+        .iter()
+        .find(|value| value.name.eq_ignore_ascii_case(name))
+    else {
+        return winapi::ERROR_FILE_NOT_FOUND;
+    };
+    let Some(bytes) = value.ansi_bytes.as_ref() else {
+        return write_value(value, data_type, data, data_len);
+    };
+    write_raw_value(value.ty, bytes, data_type, data, data_len)
+}
+
 unsafe fn write_value(
     value: &RegValue,
     data_type: *mut u32,
     data: *mut u8,
     data_len: *mut u32,
 ) -> u32 {
+    write_raw_value(value.ty, &value.bytes, data_type, data, data_len)
+}
+
+unsafe fn write_raw_value(
+    value_type: u32,
+    bytes: &[u8],
+    data_type: *mut u32,
+    data: *mut u8,
+    data_len: *mut u32,
+) -> u32 {
     if !data_type.is_null() {
-        *data_type = value.ty;
+        *data_type = value_type;
     }
     if !data_len.is_null() {
         let capacity = *data_len as usize;
-        *data_len = value.bytes.len() as u32;
-        if !data.is_null() && capacity < value.bytes.len() {
+        *data_len = bytes.len() as u32;
+        if !data.is_null() && capacity < bytes.len() {
             return ERROR_MORE_DATA;
         }
     } else if !data.is_null() {
         return ERROR_INVALID_PARAMETER;
     }
-    if !data.is_null() && !value.bytes.is_empty() {
-        ptr::copy_nonoverlapping(value.bytes.as_ptr(), data, value.bytes.len());
+    if !data.is_null() && !bytes.is_empty() {
+        ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len());
     }
     winapi::ERROR_SUCCESS
 }
@@ -552,6 +620,31 @@ fn is_predefined_root(handle: usize) -> bool {
         handle,
         HKEY_CLASSES_ROOT | HKEY_CURRENT_USER | HKEY_LOCAL_MACHINE | HKEY_USERS
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn predefined_hkeys_match_windows_pointer_values() {
+        assert_eq!(HKEY_CLASSES_ROOT, 0x8000_0000_u32 as i32 as isize as usize);
+        assert_eq!(HKEY_CURRENT_USER, 0x8000_0001_u32 as i32 as isize as usize);
+        assert_eq!(HKEY_LOCAL_MACHINE, 0x8000_0002_u32 as i32 as isize as usize);
+        assert_eq!(HKEY_USERS, 0x8000_0003_u32 as i32 as isize as usize);
+        assert!(is_predefined_root(HKEY_LOCAL_MACHINE));
+    }
+
+    #[test]
+    fn predefined_root_resolves_virtual_registry_path() {
+        assert_eq!(
+            resolve_candidate(HKEY_LOCAL_MACHINE, r"SYSTEM/SEGA/SystemProperty/static"),
+            Some((
+                HKEY_LOCAL_MACHINE,
+                r"SYSTEM\SEGA\SystemProperty\static".to_owned()
+            ))
+        );
+    }
 }
 
 unsafe fn original_open_key_ex_w(
@@ -636,6 +729,22 @@ unsafe fn original_query_value_ex_w(
         return winapi::ERROR_FILE_NOT_FOUND;
     }
     let original: RegQueryValueExWFn = std::mem::transmute(original_addr);
+    original(handle, name, reserved, data_type, data, data_len)
+}
+
+unsafe fn original_set_value_ex_w(
+    handle: usize,
+    name: *const u16,
+    reserved: u32,
+    data_type: u32,
+    data: *const u8,
+    data_len: u32,
+) -> u32 {
+    let original_addr = ORIG_SET_VALUE_EX_W.load(Ordering::SeqCst);
+    if original_addr == 0 {
+        return winapi::ERROR_FILE_NOT_FOUND;
+    }
+    let original: RegSetValueExWFn = std::mem::transmute(original_addr);
     original(handle, name, reserved, data_type, data, data_len)
 }
 

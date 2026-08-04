@@ -54,14 +54,14 @@ pub fn start_if_needed() {
         if handle.is_null() {
             FRAME_THREAD_RUNNING.store(false, Ordering::SeqCst);
             FRAME_THREAD_STARTED.store(false, Ordering::SeqCst);
-            log_warn("failed to start chumod_on_frame fallback thread");
+            log_warn("Failed to start the module frame callback fallback thread");
             return;
         }
         if let Ok(mut h) = FRAME_THREAD_HANDLE.lock() {
             *h = Some(SendHandle(handle));
         }
     }
-    log_info("chumod_on_frame fallback thread started (16ms interval)");
+    log_info("Module frame callback fallback thread started with a 16 ms interval");
 }
 
 pub fn stop() {

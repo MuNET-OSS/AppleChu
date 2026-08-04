@@ -6,11 +6,12 @@ use windows_sys::Win32::System::Console::{
 };
 
 use super::log::{write_banner_line, ANSI_CYAN};
+use super::pe;
 use super::state::{LoaderState, OutputSink};
-use super::{hash, pe};
+use crate::util::hash;
+use crate::util::logging::{os_version, ANSI_GRAY};
 
 const CP_UTF8: u32 = 65001;
-const ANSI_GRAY: &str = "\x1b[37m";
 
 // TODO: 控制台图标（SetConsoleIcon / 嵌入 RT_ICON 资源）
 // TODO: 控制台字体大小/窗口尺寸调整
@@ -84,37 +85,4 @@ fn print_banner(state: &mut LoaderState) {
     write_banner_line(state, ANSI_GRAY, "Game: CHUNITHM (SDHD)");
     write_banner_line(state, ANSI_GRAY, &format!("Game Arch: {arch}"));
     write_banner_line(state, ANSI_CYAN, sep);
-}
-
-fn os_version() -> String {
-    #[repr(C)]
-    struct OsVersionInfoW {
-        dw_osversion_info_size: u32,
-        dw_major_version: u32,
-        dw_minor_version: u32,
-        dw_build_number: u32,
-        dw_platform_id: u32,
-        sz_csd_version: [u16; 128],
-    }
-
-    #[link(name = "ntdll")]
-    extern "system" {
-        fn RtlGetVersion(info: *mut OsVersionInfoW) -> i32;
-    }
-
-    unsafe {
-        let mut info: OsVersionInfoW = std::mem::zeroed();
-        info.dw_osversion_info_size = std::mem::size_of::<OsVersionInfoW>() as u32;
-        if RtlGetVersion(&mut info) != 0 {
-            return "Windows (unknown)".to_string();
-        }
-        let name = if info.dw_major_version == 10 && info.dw_build_number >= 22000 {
-            "Windows 11"
-        } else if info.dw_major_version == 10 {
-            "Windows 10"
-        } else {
-            "Windows"
-        };
-        format!("{} (build {})", name, info.dw_build_number)
-    }
 }

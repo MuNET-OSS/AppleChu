@@ -14,18 +14,13 @@ pub fn build(base_dir: &str, crash_dir: &str, stamp: &str, crash_log: &str) -> O
     add_file(&mut zip, crash_log, "crash.log");
     add_file(
         &mut zip,
-        &format!("{base_dir}\\chumod_loader.log"),
-        "chumod_loader.log",
+        &format!("{base_dir}\\applechu.log"),
+        "applechu.log",
     );
     add_file(
         &mut zip,
         &format!("{base_dir}\\AppleChu.toml"),
         "AppleChu.toml",
-    );
-    add_file(
-        &mut zip,
-        &format!("{base_dir}\\segatools.ini"),
-        "segatools.ini",
     );
     add_file(&mut zip, &format!("{base_dir}\\start.bat"), "start.bat");
     add_file(
@@ -42,7 +37,7 @@ pub fn build(base_dir: &str, crash_dir: &str, stamp: &str, crash_log: &str) -> O
     let bytes = zip.finish();
     match fs::write(&zip_path, &bytes) {
         Ok(_) => {
-            log_info(&format!("crash report zipped: {zip_path}"));
+            log_info(&format!("Crash report created: {zip_path}"));
             Some(zip_path)
         }
         Err(_) => None,

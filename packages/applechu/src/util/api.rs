@@ -1,13 +1,16 @@
 use std::ffi::{c_char, c_void, CString};
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use once_cell::sync::OnceCell;
+
+use super::logging::LogLevel;
 
 pub use chu_abi::{ChuModAPI, ChuModInfo};
 
 #[derive(Clone, Copy)]
 pub struct Api {
-    raw: NonNull<ChuModAPI>,
+    raw: Option<NonNull<ChuModAPI>>,
     info: RuntimeInfo,
 }
 
@@ -23,13 +26,16 @@ unsafe impl Send for Api {}
 unsafe impl Sync for Api {}
 
 pub static API: OnceCell<Api> = OnceCell::new();
+static STANDALONE_LOGGER: AtomicUsize = AtomicUsize::new(0);
+
+pub type StandaloneLogger = unsafe extern "C" fn(LogLevel, *const c_char);
 
 impl Api {
     pub fn new(raw: *const ChuModAPI, info: *const ChuModInfo) -> Option<Self> {
         let raw = NonNull::new(raw.cast_mut())?;
         let info = unsafe { info.as_ref() }?;
         Some(Self {
-            raw,
+            raw: Some(raw),
             info: RuntimeInfo {
                 game_base: info.game_base,
                 game_size: info.game_size,
@@ -39,16 +45,48 @@ impl Api {
         })
     }
 
+    /// 为独立的 64 位 AM Daemon 构造 API 句柄
+    pub unsafe fn standalone(logger: StandaloneLogger) -> Option<Self> {
+        let game_base =
+            windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null()) as usize;
+        if game_base == 0 {
+            return None;
+        }
+        let nt_offset = std::ptr::read_unaligned((game_base + 0x3c) as *const u32) as usize;
+        let nt = game_base.checked_add(nt_offset)?;
+        if std::ptr::read_unaligned(nt as *const u32) != 0x0000_4550 {
+            return None;
+        }
+        let game_size = std::ptr::read_unaligned((nt + 0x50) as *const u32);
+        if game_size == 0 {
+            return None;
+        }
+        STANDALONE_LOGGER.store(logger as usize, Ordering::Release);
+        Some(Self {
+            raw: None,
+            info: RuntimeInfo {
+                game_base,
+                game_size,
+                text_base: 0,
+                text_size: 0,
+            },
+        })
+    }
+
+    pub fn install(self) -> bool {
+        API.set(self).is_ok()
+    }
+
     pub fn log_info(&self, msg: &str) {
-        self.log(msg, |api| api.log_info);
+        self.log(LogLevel::Info, msg, |api| api.log_info);
     }
 
     pub fn log_warn(&self, msg: &str) {
-        self.log(msg, |api| api.log_warn);
+        self.log(LogLevel::Warn, msg, |api| api.log_warn);
     }
 
     pub fn log_error(&self, msg: &str) {
-        self.log(msg, |api| api.log_error);
+        self.log(LogLevel::Error, msg, |api| api.log_error);
     }
 
     pub fn aob_scan(&self, start: usize, size: u32, pattern: &[u8], mask: &str) -> usize {
@@ -156,22 +194,27 @@ impl Api {
     }
 
     fn raw(&self) -> Option<&ChuModAPI> {
-        Some(unsafe { self.raw.as_ref() })
+        self.raw.map(|raw| unsafe { raw.as_ref() })
     }
 
     fn log(
         &self,
+        level: LogLevel,
         msg: &str,
         select: impl FnOnce(&ChuModAPI) -> Option<unsafe extern "C" fn(*const c_char)>,
     ) {
-        let Some(api) = self.raw() else {
+        if let Some(api) = self.raw() {
+            if let Some(func) = select(api) {
+                if let Ok(msg) = CString::new(msg) {
+                    unsafe { func(msg.as_ptr()) };
+                }
+            }
             return;
-        };
-        let Some(func) = select(api) else {
-            return;
-        };
-        if let Ok(msg) = CString::new(msg) {
-            unsafe { func(msg.as_ptr()) };
+        }
+        let Ok(msg) = CString::new(msg) else { return };
+        let logger = STANDALONE_LOGGER.load(Ordering::Acquire);
+        if logger != 0 {
+            unsafe { std::mem::transmute::<usize, StandaloneLogger>(logger)(level, msg.as_ptr()) };
         }
     }
 }

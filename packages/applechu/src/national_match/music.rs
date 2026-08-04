@@ -318,7 +318,8 @@ fn resolve_thunk(api: &Api, addr: usize) -> usize {
 
 fn read_i32(api: &Api, addr: usize) -> Option<i32> {
     let mut buf = [0u8; 4];
-    api.mem_read(addr, &mut buf).then(|| i32::from_le_bytes(buf))
+    api.mem_read(addr, &mut buf)
+        .then(|| i32::from_le_bytes(buf))
 }
 
 fn read_usize(api: &Api, addr: usize) -> Option<usize> {
@@ -329,7 +330,8 @@ fn read_usize(api: &Api, addr: usize) -> Option<usize> {
 
 fn read_u16(api: &Api, addr: usize) -> Option<u16> {
     let mut buf = [0u8; 2];
-    api.mem_read(addr, &mut buf).then(|| u16::from_le_bytes(buf))
+    api.mem_read(addr, &mut buf)
+        .then(|| u16::from_le_bytes(buf))
 }
 
 fn read_u8(api: &Api, addr: usize) -> Option<u8> {

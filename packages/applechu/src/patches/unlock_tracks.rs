@@ -11,7 +11,7 @@ crate::config_section! {
     pub(crate) struct UnlockTracksConfig => UNLOCK_TRACKS_CONFIG_SECTION {
         section: "UnlockTracks",
         order: 225,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "解锁曲数上限",

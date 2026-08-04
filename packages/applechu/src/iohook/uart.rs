@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::Mutex;
@@ -6,27 +6,40 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
 use crate::config::Config;
+use crate::iohook;
 use crate::util::api::Api;
 
-const FAKE_HANDLE_BASE: usize = 0x434F_0000;
+const ERROR_ACCESS_DENIED: u32 = 5;
+const ERROR_INVALID_FUNCTION: u32 = 1;
+const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 
 pub const IOCTL_SERIAL_SET_BAUD_RATE: u32 = 0x001B_0004;
-pub const IOCTL_SERIAL_GET_BAUD_RATE: u32 = 0x001B_0008;
-pub const IOCTL_SERIAL_SET_QUEUE_SIZE: u32 = 0x001B_000C;
-pub const IOCTL_SERIAL_SET_LINE_CONTROL: u32 = 0x001B_001C;
-pub const IOCTL_SERIAL_GET_LINE_CONTROL: u32 = 0x001B_0020;
-pub const IOCTL_SERIAL_SET_TIMEOUTS: u32 = 0x001B_0024;
-pub const IOCTL_SERIAL_GET_TIMEOUTS: u32 = 0x001B_0028;
-pub const IOCTL_SERIAL_SET_DTR: u32 = 0x001B_002C;
-pub const IOCTL_SERIAL_CLR_DTR: u32 = 0x001B_0030;
-pub const IOCTL_SERIAL_RESET_DEVICE: u32 = 0x001B_0034;
-pub const IOCTL_SERIAL_SET_RTS: u32 = 0x001B_0038;
-pub const IOCTL_SERIAL_CLR_RTS: u32 = 0x001B_003C;
-pub const IOCTL_SERIAL_SET_CHARS: u32 = 0x001B_005C;
-pub const IOCTL_SERIAL_GET_CHARS: u32 = 0x001B_0060;
-pub const IOCTL_SERIAL_SET_HANDFLOW: u32 = 0x001B_0064;
-pub const IOCTL_SERIAL_GET_HANDFLOW: u32 = 0x001B_0068;
+pub const IOCTL_SERIAL_SET_QUEUE_SIZE: u32 = 0x001B_0008;
+pub const IOCTL_SERIAL_SET_LINE_CONTROL: u32 = 0x001B_000C;
+pub const IOCTL_SERIAL_SET_BREAK_ON: u32 = 0x001B_0010;
+pub const IOCTL_SERIAL_SET_BREAK_OFF: u32 = 0x001B_0014;
+pub const IOCTL_SERIAL_SET_TIMEOUTS: u32 = 0x001B_001C;
+pub const IOCTL_SERIAL_GET_TIMEOUTS: u32 = 0x001B_0020;
+pub const IOCTL_SERIAL_SET_DTR: u32 = 0x001B_0024;
+pub const IOCTL_SERIAL_CLR_DTR: u32 = 0x001B_0028;
+pub const IOCTL_SERIAL_RESET_DEVICE: u32 = 0x001B_002C;
+pub const IOCTL_SERIAL_SET_RTS: u32 = 0x001B_0030;
+pub const IOCTL_SERIAL_CLR_RTS: u32 = 0x001B_0034;
+pub const IOCTL_SERIAL_SET_XOFF: u32 = 0x001B_0038;
+pub const IOCTL_SERIAL_SET_XON: u32 = 0x001B_003C;
+pub const IOCTL_SERIAL_GET_WAIT_MASK: u32 = 0x001B_0040;
+pub const IOCTL_SERIAL_SET_WAIT_MASK: u32 = 0x001B_0044;
 pub const IOCTL_SERIAL_PURGE: u32 = 0x001B_004C;
+pub const IOCTL_SERIAL_GET_BAUD_RATE: u32 = 0x001B_0050;
+pub const IOCTL_SERIAL_GET_LINE_CONTROL: u32 = 0x001B_0054;
+pub const IOCTL_SERIAL_GET_CHARS: u32 = 0x001B_0058;
+pub const IOCTL_SERIAL_SET_CHARS: u32 = 0x001B_005C;
+pub const IOCTL_SERIAL_GET_HANDFLOW: u32 = 0x001B_0060;
+pub const IOCTL_SERIAL_SET_HANDFLOW: u32 = 0x001B_0064;
+pub const IOCTL_SERIAL_GET_MODEMSTATUS: u32 = 0x001B_0068;
+pub const IOCTL_SERIAL_GET_COMMSTATUS: u32 = 0x001B_006C;
+pub const IOCTL_SERIAL_GET_MODEM_CONTROL: u32 = 0x001B_0094;
+pub const IOCTL_SERIAL_SET_MODEM_CONTROL: u32 = 0x001B_0098;
 
 static PORTS: Lazy<Mutex<HashMap<u32, UartPort>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static HANDLE_PORTS: Lazy<Mutex<HashMap<usize, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -64,21 +77,69 @@ pub struct SerialHandflow {
     pub xoff_limit: i32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SerialChars {
+    pub eof_char: u8,
+    pub error_char: u8,
+    pub break_char: u8,
+    pub event_char: u8,
+    pub xon_char: u8,
+    pub xoff_char: u8,
+}
+
+impl Default for SerialChars {
+    fn default() -> Self {
+        Self {
+            eof_char: 0,
+            error_char: 0,
+            break_char: 0,
+            event_char: 0,
+            xon_char: 0x11,
+            xoff_char: 0x13,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SerialStatus {
+    pub errors: u32,
+    pub hold_reasons: u32,
+    pub amount_in_in_queue: u32,
+    pub amount_in_out_queue: u32,
+    pub eof_received: u8,
+    pub wait_for_immediate: u8,
+}
+
 #[derive(Clone)]
 pub struct UartSnapshot {
     pub baud_rate: u32,
     pub line_control: SerialLineControl,
     pub timeouts: SerialTimeouts,
     pub handflow: SerialHandflow,
+    pub chars: SerialChars,
+    pub wait_mask: u32,
+    pub modem_control: u32,
+    pub modem_status: u32,
+    pub input_queue: u32,
+    pub output_queue: u32,
 }
 
 struct UartPort {
-    rx: VecDeque<u8>,
-    tx: Vec<u8>,
+    readable: Vec<u8>,
+    written: Vec<u8>,
     baud_rate: u32,
     line_control: SerialLineControl,
     timeouts: SerialTimeouts,
     handflow: SerialHandflow,
+    chars: SerialChars,
+    wait_mask: u32,
+    modem_control: u32,
+    cts: bool,
+    dsr: bool,
+    ring: bool,
+    rlsd: bool,
     dtr: bool,
     rts: bool,
 }
@@ -86,8 +147,8 @@ struct UartPort {
 impl Default for UartPort {
     fn default() -> Self {
         Self {
-            rx: VecDeque::new(),
-            tx: Vec::new(),
+            readable: Vec::new(),
+            written: Vec::new(),
             baud_rate: 115_200,
             line_control: SerialLineControl {
                 stop_bits: 0,
@@ -96,6 +157,13 @@ impl Default for UartPort {
             },
             timeouts: SerialTimeouts::default(),
             handflow: SerialHandflow::default(),
+            chars: SerialChars::default(),
+            wait_mask: 0,
+            modem_control: 0,
+            cts: false,
+            dsr: false,
+            ring: false,
+            rlsd: false,
             dtr: false,
             rts: false,
         }
@@ -112,9 +180,6 @@ pub fn uart_init(port_no: u32) {
 }
 
 pub fn is_uart_handle(handle: usize) -> bool {
-    if (FAKE_HANDLE_BASE..FAKE_HANDLE_BASE + 0x10000).contains(&handle) {
-        return true;
-    }
     HANDLE_PORTS
         .lock()
         .is_ok_and(|handles| handles.contains_key(&handle))
@@ -139,46 +204,57 @@ pub unsafe fn uart_handle_irp(irp: &mut crate::iohook::Irp) -> i32 {
             let port_no =
                 parse_com_a(irp.open_filename_a).or_else(|| parse_com_w(irp.open_filename_w));
             if let Some(port_no) = port_no.filter(|port_no| port_registered(*port_no)) {
-                irp.fd = crate::util::win32::handle_from_value(fake_handle(port_no));
-                1
+                let Some(fd) = crate::iohook::open_nul_fd() else {
+                    return iohook::E_FAIL;
+                };
+                let handle = crate::util::win32::handle_value(fd);
+                bind_handle(handle, port_no);
+                irp.fd = fd;
+                iohook::S_OK
             } else {
-                -1
+                iohook::invoke_next(irp)
             }
         }
         crate::iohook::IrpOp::Close => {
-            is_uart_handle(crate::util::win32::handle_value(irp.fd)) as i32 * 2 - 1
+            let handle = crate::util::win32::handle_value(irp.fd);
+            if is_uart_handle(handle) {
+                unbind_handle(handle);
+                // 清理本地串口状态后继续钩子链
+                crate::iohook::invoke_next(irp)
+            } else {
+                crate::iohook::invoke_next(irp)
+            }
         }
         crate::iohook::IrpOp::Read => {
             if !is_uart_handle(crate::util::win32::handle_value(irp.fd)) {
-                return -1;
+                return iohook::invoke_next(irp);
             }
             if !irp.out_nbytes.is_null() {
                 *irp.out_nbytes = 0;
             }
             if irp.read_buf.is_null() || irp.nbytes == 0 {
-                return 1;
+                return iohook::S_OK;
             }
             let read = with_port(crate::util::win32::handle_value(irp.fd), |port| {
                 let out = std::slice::from_raw_parts_mut(irp.read_buf, irp.nbytes as usize);
-                let mut count = 0usize;
-                while count < out.len() {
-                    let Some(value) = port.rx.pop_front() else {
-                        break;
-                    };
-                    out[count] = value;
-                    count += 1;
-                }
+                let count = out.len().min(port.readable.len());
+                out[..count].copy_from_slice(&port.readable[..count]);
+                port.readable.drain(..count);
                 count as u32
             })
             .unwrap_or(0);
             if !irp.out_nbytes.is_null() {
                 *irp.out_nbytes = read;
             }
-            1
+            if read == 0 && irp.nbytes != 0 {
+                iohook::E_PENDING
+            } else {
+                iohook::S_OK
+            }
         }
         crate::iohook::IrpOp::Write => {
             if !is_uart_handle(crate::util::win32::handle_value(irp.fd)) {
-                return -1;
+                return iohook::invoke_next(irp);
             }
             if !irp.out_nbytes.is_null() {
                 *irp.out_nbytes = irp.nbytes;
@@ -186,10 +262,10 @@ pub unsafe fn uart_handle_irp(irp: &mut crate::iohook::Irp) -> i32 {
             if !irp.write_buf.is_null() && irp.nbytes != 0 {
                 let data = std::slice::from_raw_parts(irp.write_buf, irp.nbytes as usize);
                 let _ = with_port(crate::util::win32::handle_value(irp.fd), |port| {
-                    port.tx.extend_from_slice(data)
+                    port.written.extend_from_slice(data)
                 });
             }
-            1
+            iohook::S_OK
         }
         crate::iohook::IrpOp::Ioctl => {
             if is_uart_handle(crate::util::win32::handle_value(irp.fd)) {
@@ -203,16 +279,17 @@ pub unsafe fn uart_handle_irp(irp: &mut crate::iohook::Irp) -> i32 {
                     irp.out_nbytes,
                 )
             } else {
-                -1
+                iohook::invoke_next(irp)
             }
         }
-        crate::iohook::IrpOp::Fsync | crate::iohook::IrpOp::Seek => {
+        crate::iohook::IrpOp::Fsync => {
             if is_uart_handle(crate::util::win32::handle_value(irp.fd)) {
-                1
+                iohook::S_OK
             } else {
-                -1
+                iohook::invoke_next(irp)
             }
         }
+        crate::iohook::IrpOp::Seek => iohook::hresult_from_win32(ERROR_INVALID_FUNCTION),
     }
 }
 
@@ -222,6 +299,15 @@ pub fn snapshot(handle: usize) -> Option<UartSnapshot> {
         line_control: port.line_control,
         timeouts: port.timeouts,
         handflow: port.handflow,
+        chars: port.chars,
+        wait_mask: port.wait_mask,
+        modem_control: port.modem_control,
+        modem_status: (u32::from(port.cts) << 4)
+            | (u32::from(port.dsr) << 5)
+            | (u32::from(port.ring) << 6)
+            | (u32::from(port.rlsd) << 7),
+        input_queue: port.readable.len() as u32,
+        output_queue: port.written.len() as u32,
     })
 }
 
@@ -241,6 +327,18 @@ pub fn set_handflow(handle: usize, handflow: SerialHandflow) -> bool {
     with_port(handle, |port| port.handflow = handflow).is_some()
 }
 
+pub fn set_chars(handle: usize, chars: SerialChars) -> bool {
+    with_port(handle, |port| port.chars = chars).is_some()
+}
+
+pub fn set_wait_mask(handle: usize, mask: u32) -> bool {
+    with_port(handle, |port| port.wait_mask = mask).is_some()
+}
+
+pub fn set_modem_control(handle: usize, control: u32) -> bool {
+    with_port(handle, |port| port.modem_control = control).is_some()
+}
+
 pub fn set_escape(handle: usize, function: u32) -> bool {
     with_port(handle, |port| match function {
         5 => port.rts = true,
@@ -254,10 +352,41 @@ pub fn set_escape(handle: usize, function: u32) -> bool {
 
 pub fn purge(handle: usize) -> bool {
     with_port(handle, |port| {
-        port.rx.clear();
-        port.tx.clear();
+        port.readable.clear();
+        port.written.clear();
     })
     .is_some()
+}
+
+/// 取出设备尚未解析的请求字节。解析完成后必须调用 `restore_written` 放回残帧
+pub fn take_written(handle: usize) -> Option<Vec<u8>> {
+    with_port(handle, |port| std::mem::take(&mut port.written))
+}
+
+/// 将未解析的残帧放回请求队列头部，并保留处理期间新到达的字节
+pub fn restore_written(handle: usize, mut pending: Vec<u8>) -> bool {
+    with_port(handle, |port| {
+        pending.append(&mut port.written);
+        port.written = pending;
+    })
+    .is_some()
+}
+
+/// 将设备回复写入公共 UART 可读队列
+pub fn push_readable(handle: usize, bytes: &[u8]) -> bool {
+    with_port(handle, |port| port.readable.extend_from_slice(bytes)).is_some()
+}
+
+/// 异步设备回调没有文件句柄时，按端口写入公共 UART 可读队列
+pub fn push_readable_port(port_no: u32, bytes: &[u8]) -> bool {
+    let Ok(mut ports) = PORTS.lock() else {
+        return false;
+    };
+    let Some(port) = ports.get_mut(&port_no) else {
+        return false;
+    };
+    port.readable.extend_from_slice(bytes);
+    true
 }
 
 pub unsafe fn device_io_control(
@@ -270,55 +399,103 @@ pub unsafe fn device_io_control(
     bytes_returned: *mut u32,
 ) -> i32 {
     if !is_uart_handle(handle) {
-        return 0;
+        return iohook::hresult_from_win32(ERROR_INVALID_FUNCTION);
     }
     if !bytes_returned.is_null() {
         *bytes_returned = 0;
     }
 
     match code {
-        IOCTL_SERIAL_SET_BAUD_RATE => read_input::<SerialBaudRate>(in_buffer, in_size)
-            .is_some_and(|value| set_baud_rate(handle, value.baud_rate))
-            as i32,
-        IOCTL_SERIAL_GET_BAUD_RATE => write_output(
+        IOCTL_SERIAL_SET_BAUD_RATE => {
+            update_from_input(in_buffer, in_size, |value: SerialBaudRate| {
+                set_baud_rate(handle, value.baud_rate)
+            })
+        }
+        IOCTL_SERIAL_GET_BAUD_RATE => write_output_hresult(
             out_buffer,
             out_size,
             bytes_returned,
             &SerialBaudRate {
                 baud_rate: snapshot(handle).map_or(115_200, |state| state.baud_rate),
             },
-        ) as i32,
-        IOCTL_SERIAL_SET_LINE_CONTROL => read_input::<SerialLineControl>(in_buffer, in_size)
-            .is_some_and(|value| set_line_control(handle, value))
-            as i32,
-        IOCTL_SERIAL_GET_LINE_CONTROL => snapshot(handle).is_some_and(|state| {
-            write_output(out_buffer, out_size, bytes_returned, &state.line_control)
-        }) as i32,
-        IOCTL_SERIAL_SET_TIMEOUTS => read_input::<SerialTimeouts>(in_buffer, in_size)
-            .is_some_and(|value| set_timeouts(handle, value))
-            as i32,
-        IOCTL_SERIAL_GET_TIMEOUTS => snapshot(handle).is_some_and(|state| {
-            write_output(out_buffer, out_size, bytes_returned, &state.timeouts)
-        }) as i32,
-        IOCTL_SERIAL_SET_HANDFLOW => read_input::<SerialHandflow>(in_buffer, in_size)
-            .is_some_and(|value| set_handflow(handle, value))
-            as i32,
-        IOCTL_SERIAL_GET_HANDFLOW => snapshot(handle).is_some_and(|state| {
-            write_output(out_buffer, out_size, bytes_returned, &state.handflow)
-        }) as i32,
-        IOCTL_SERIAL_SET_DTR => set_escape(handle, 6) as i32,
-        IOCTL_SERIAL_CLR_DTR => set_escape(handle, 7) as i32,
-        IOCTL_SERIAL_SET_RTS => set_escape(handle, 5) as i32,
-        IOCTL_SERIAL_CLR_RTS => set_escape(handle, 4) as i32,
-        IOCTL_SERIAL_PURGE
-        | IOCTL_SERIAL_RESET_DEVICE
-        | IOCTL_SERIAL_SET_QUEUE_SIZE
-        | IOCTL_SERIAL_SET_CHARS => 1,
-        IOCTL_SERIAL_GET_CHARS => {
-            let chars = [0u8; 6];
-            write_output(out_buffer, out_size, bytes_returned, &chars) as i32
+        ),
+        IOCTL_SERIAL_SET_LINE_CONTROL => {
+            update_from_input(in_buffer, in_size, |value| set_line_control(handle, value))
         }
-        _ => 1,
+        IOCTL_SERIAL_GET_LINE_CONTROL => snapshot(handle).map_or(iohook::E_FAIL, |state| {
+            write_output_hresult(out_buffer, out_size, bytes_returned, &state.line_control)
+        }),
+        IOCTL_SERIAL_SET_TIMEOUTS => {
+            update_from_input(in_buffer, in_size, |value| set_timeouts(handle, value))
+        }
+        IOCTL_SERIAL_GET_TIMEOUTS => snapshot(handle).map_or(iohook::E_FAIL, |state| {
+            write_output_hresult(out_buffer, out_size, bytes_returned, &state.timeouts)
+        }),
+        IOCTL_SERIAL_SET_HANDFLOW => {
+            update_from_input(in_buffer, in_size, |value| set_handflow(handle, value))
+        }
+        IOCTL_SERIAL_GET_HANDFLOW => snapshot(handle).map_or(iohook::E_FAIL, |state| {
+            write_output_hresult(out_buffer, out_size, bytes_returned, &state.handflow)
+        }),
+        IOCTL_SERIAL_GET_CHARS => snapshot(handle).map_or(iohook::E_FAIL, |state| {
+            write_output_hresult(out_buffer, out_size, bytes_returned, &state.chars)
+        }),
+        IOCTL_SERIAL_SET_CHARS => {
+            update_from_input(in_buffer, in_size, |value| set_chars(handle, value))
+        }
+        IOCTL_SERIAL_GET_WAIT_MASK => snapshot(handle).map_or(iohook::E_FAIL, |state| {
+            write_output_hresult(out_buffer, out_size, bytes_returned, &state.wait_mask)
+        }),
+        IOCTL_SERIAL_SET_WAIT_MASK => {
+            update_from_input(in_buffer, in_size, |value| set_wait_mask(handle, value))
+        }
+        IOCTL_SERIAL_GET_MODEM_CONTROL => snapshot(handle).map_or(iohook::E_FAIL, |state| {
+            write_output_hresult(out_buffer, out_size, bytes_returned, &state.modem_control)
+        }),
+        IOCTL_SERIAL_SET_MODEM_CONTROL => {
+            update_from_input(in_buffer, in_size, |value| set_modem_control(handle, value))
+        }
+        IOCTL_SERIAL_GET_MODEMSTATUS => snapshot(handle).map_or(iohook::E_FAIL, |state| {
+            write_output_hresult(out_buffer, out_size, bytes_returned, &state.modem_status)
+        }),
+        IOCTL_SERIAL_GET_COMMSTATUS => snapshot(handle).map_or(iohook::E_FAIL, |state| {
+            let status = SerialStatus {
+                amount_in_in_queue: state.input_queue,
+                amount_in_out_queue: state.output_queue,
+                ..SerialStatus::default()
+            };
+            write_output_hresult(out_buffer, out_size, bytes_returned, &status)
+        }),
+        IOCTL_SERIAL_SET_DTR => bool_hresult(set_escape(handle, 6)),
+        IOCTL_SERIAL_CLR_DTR => bool_hresult(set_escape(handle, 7)),
+        IOCTL_SERIAL_SET_RTS => bool_hresult(set_escape(handle, 5)),
+        IOCTL_SERIAL_CLR_RTS => bool_hresult(set_escape(handle, 4)),
+        IOCTL_SERIAL_PURGE
+        | IOCTL_SERIAL_SET_QUEUE_SIZE
+        | IOCTL_SERIAL_SET_BREAK_ON
+        | IOCTL_SERIAL_SET_BREAK_OFF
+        | IOCTL_SERIAL_SET_XOFF
+        | IOCTL_SERIAL_SET_XON => iohook::S_OK,
+        _ => iohook::hresult_from_win32(ERROR_INVALID_FUNCTION),
+    }
+}
+
+unsafe fn update_from_input<T: Copy>(
+    buffer: *mut c_void,
+    size: u32,
+    update: impl FnOnce(T) -> bool,
+) -> i32 {
+    let Some(value) = read_input::<T>(buffer, size) else {
+        return iohook::hresult_from_win32(ERROR_INSUFFICIENT_BUFFER);
+    };
+    bool_hresult(update(value))
+}
+
+fn bool_hresult(ok: bool) -> i32 {
+    if ok {
+        iohook::S_OK
+    } else {
+        iohook::E_FAIL
     }
 }
 
@@ -330,18 +507,7 @@ fn with_port<T>(handle: usize, action: impl FnOnce(&mut UartPort) -> T) -> Optio
     ports.get_mut(&port_no).map(action)
 }
 
-pub fn fake_handle_pub(port_no: u32) -> usize {
-    fake_handle(port_no)
-}
-
-fn fake_handle(port_no: u32) -> usize {
-    FAKE_HANDLE_BASE | port_no as usize
-}
-
 fn port_from_handle(handle: usize) -> Option<u32> {
-    if (FAKE_HANDLE_BASE..FAKE_HANDLE_BASE + 0x10000).contains(&handle) {
-        return Some((handle & 0xFFFF) as u32);
-    }
     HANDLE_PORTS.lock().ok()?.get(&handle).copied()
 }
 
@@ -418,3 +584,23 @@ unsafe fn write_output<T: Copy>(
     }
     true
 }
+
+unsafe fn write_output_hresult<T: Copy>(
+    buffer: *mut c_void,
+    size: u32,
+    bytes_returned: *mut u32,
+    value: &T,
+) -> i32 {
+    if write_output(buffer, size, bytes_returned, value) {
+        iohook::S_OK
+    } else {
+        iohook::hresult_from_win32(ERROR_INSUFFICIENT_BUFFER)
+    }
+}
+
+const _: () = assert!(std::mem::size_of::<SerialBaudRate>() == 4);
+const _: () = assert!(std::mem::size_of::<SerialLineControl>() == 3);
+const _: () = assert!(std::mem::size_of::<SerialChars>() == 6);
+const _: () = assert!(std::mem::size_of::<SerialHandflow>() == 16);
+const _: () = assert!(std::mem::size_of::<SerialTimeouts>() == 20);
+const _: () = assert!(std::mem::size_of::<SerialStatus>() == 20);

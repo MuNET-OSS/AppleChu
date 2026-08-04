@@ -54,8 +54,8 @@ crate::config_section! {
     pub(crate) struct SystemConfig => SYSTEM_CONFIG_SECTION {
         section: "System",
         order: 10,
-        default_enabled: true,
-        always_enabled: true,
+        default_on: true,
+        always_enabled: false,
         hidden: false,
         comment: "系统设置",
         fields: {
@@ -77,15 +77,35 @@ crate::config_section! {
 
 impl SystemConfig {
     pub fn is_sp_mode(&self) -> bool {
-        matches!(self.mode, CabinetMode::Sp)
+        !self.dipsw()[2]
     }
 
     pub fn dipsw(&self) -> [bool; 3] {
         [
             !self.lan_slave,
             matches!(self.refresh_rate, RefreshRate::Hz60),
-            matches!(self.refresh_rate, RefreshRate::Hz60),
+            // 第三位拨码开关选择机台模式：ON 为 CVT，OFF 为 SP
+            matches!(self.mode, CabinetMode::Cvt),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dipsw_encodes_lan_refresh_and_cabinet_mode_independently() {
+        let sp_60 = SystemConfig::default();
+        assert_eq!(sp_60.dipsw(), [true, true, false]);
+
+        let cvt_120 = SystemConfig {
+            lan_slave: true,
+            mode: CabinetMode::Cvt,
+            refresh_rate: RefreshRate::Hz120,
+            ..SystemConfig::default()
+        };
+        assert_eq!(cvt_120.dipsw(), [false, false, true]);
     }
 }
 
@@ -99,8 +119,8 @@ crate::config_section! {
     pub(crate) struct HookModeConfig => HOOK_MODE_CONFIG_SECTION {
         section: "HookMode",
         order: 900,
-        default_enabled: true,
-        always_enabled: true,
+        default_on: true,
+        always_enabled: false,
         hidden: true,
         comment: "内部 Hook 诊断开关",
         fields: {

@@ -4,6 +4,12 @@ use std::io::Write;
 use windows_sys::Win32::Storage::FileSystem::WriteFile;
 use windows_sys::Win32::System::Console::WriteConsoleW;
 
+use crate::util::logging::{
+    format_ansi_lines, format_ansi_lines_with_body, format_lines, LogLevel,
+};
+
+pub use crate::util::logging::ANSI_CYAN;
+
 use super::state::{LoaderState, OutputSink, STATE};
 
 extern "system" {
@@ -22,51 +28,12 @@ struct SYSTEMTIME {
     w_milliseconds: u16,
 }
 
-#[derive(Clone, Copy)]
-pub enum LogLevel {
-    Info,
-    Warn,
-    Error,
-}
-
-impl LogLevel {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Info => "INFO",
-            Self::Warn => "WARN",
-            Self::Error => "ERROR",
-        }
-    }
-
-    fn body_ansi(self) -> &'static str {
-        match self {
-            Self::Info => ANSI_GRAY,
-            Self::Warn => ANSI_YELLOW,
-            Self::Error => ANSI_RED,
-        }
-    }
-}
-
-const ANSI_RESET: &str = "\x1b[0m";
-const ANSI_TIME: &str = "\x1b[92m";
-const ANSI_TAG: &str = "\x1b[96m";
-const ANSI_GRAY: &str = "\x1b[37m";
-const ANSI_YELLOW: &str = "\x1b[93m";
-const ANSI_RED: &str = "\x1b[91m";
-
-pub const ANSI_CYAN: &str = "\x1b[96m";
-
 /// 打印一行 banner（无 [级别] 标签，正文用指定 ANSI 色；文件输出去色）
 pub fn write_banner_line(state: &mut LoaderState, ansi: &str, msg: &str) {
     unsafe {
         let mut st: SYSTEMTIME = std::mem::zeroed();
         GetLocalTime(&mut st);
-        let time = format!(
-            "{:02}:{:02}:{:02}.{:03}",
-            st.w_hour, st.w_minute, st.w_second, st.w_milliseconds
-        );
-
-        let plain = format!("[{}] {}\n", time, msg);
+        let plain = format_lines(st.w_hour, st.w_minute, st.w_second, LogLevel::Info, msg);
         if let Some(ref mut f) = state.log_file {
             let _ = f.write_all(plain.as_bytes());
             let _ = f.flush();
@@ -76,7 +43,14 @@ pub fn write_banner_line(state: &mut LoaderState, ansi: &str, msg: &str) {
             let _ = f.flush();
         }
 
-        let colored = format!("{ANSI_TIME}[{time}]{ANSI_RESET} {ansi}{msg}{ANSI_RESET}\n");
+        let colored = format_ansi_lines_with_body(
+            st.w_hour,
+            st.w_minute,
+            st.w_second,
+            LogLevel::Info,
+            msg,
+            ansi,
+        );
         write_output(state.output, &plain, &colored);
     }
 }
@@ -90,12 +64,7 @@ pub fn write_log_inner_level(state: &mut LoaderState, level: LogLevel, msg: &str
         let mut st: SYSTEMTIME = std::mem::zeroed();
         GetLocalTime(&mut st);
 
-        let time = format!(
-            "{:02}:{:02}:{:02}.{:03}",
-            st.w_hour, st.w_minute, st.w_second, st.w_milliseconds
-        );
-
-        let plain = format!("[{}] [loader] [{}] {}\n", time, level.label(), msg);
+        let plain = format_lines(st.w_hour, st.w_minute, st.w_second, level, msg);
 
         if let Some(ref mut f) = state.log_file {
             let _ = f.write_all(plain.as_bytes());
@@ -106,11 +75,7 @@ pub fn write_log_inner_level(state: &mut LoaderState, level: LogLevel, msg: &str
             let _ = f.flush();
         }
 
-        let colored = format!(
-            "{ANSI_TIME}[{time}]{ANSI_RESET} {ANSI_TAG}[loader]{ANSI_RESET} {body}[{label}] {msg}{ANSI_RESET}\n",
-            body = level.body_ansi(),
-            label = level.label(),
-        );
+        let colored = format_ansi_lines(st.w_hour, st.w_minute, st.w_second, level, msg);
         write_output(state.output, &plain, &colored);
     }
 }

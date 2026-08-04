@@ -66,11 +66,11 @@ fn classify_known_offset_result(
 
 fn log_result<M: PatchMemory>(api: &M, def: &VersionedPatch, result: PatchResult) -> PatchResult {
     match result {
-        PatchResult::Applied => api.log_info(&format!("patch applied: {}", def.name)),
+        PatchResult::Applied => api.log_info(&format!("Patch applied: {}", def.name)),
         PatchResult::AlreadyPatched => {
-            api.log_info(&format!("patch already applied: {}", def.name))
+            api.log_info(&format!("Patch already applied: {}", def.name))
         }
-        PatchResult::Mismatch => api.log_warn(&format!("patch bytes mismatch: {}", def.name)),
+        PatchResult::Mismatch => api.log_warn(&format!("Patch signature mismatch: {}", def.name)),
     }
     result
 }

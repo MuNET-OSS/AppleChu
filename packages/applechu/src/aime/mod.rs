@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -17,35 +18,49 @@ mod sg_nfc;
 use self::external::{AimeIoVfdState, ExternalAimeIo};
 use self::sg_nfc::{SgNfcConfig, SgNfcDevice};
 
+const ERROR_ACCESS_DENIED: u32 = 5;
+const ERROR_INVALID_FUNCTION: u32 = 1;
+
+pub(crate) static NUL_FILENAME: [u16; 4] = [b'N' as u16, b'U' as u16, b'L' as u16, 0];
+
+// 所有架构都把串口重定向到以共享、重叠方式打开的 NUL 句柄
+const EMULATED_OPEN_SHARE: u32 = 3; // FILE_SHARE_READ | FILE_SHARE_WRITE
+const EMULATED_OPEN_FLAGS: u32 = 0x4000_0000; // FILE_FLAG_OVERLAPPED
+
 static AIME_PORT: Mutex<u32> = Mutex::new(4);
 
 static AIME_READER: Mutex<Option<AimeReader>> = Mutex::new(None);
 static AIME_DEVICE: Mutex<Option<SgNfcDevice>> = Mutex::new(None);
+// 同一串口上的 UART、NFC 和 RGB LED 状态必须在一次 IRP 处理期间保持一致
+static SG_READER_LOCK: Mutex<()> = Mutex::new(());
 static AIME_FD: AtomicUsize = AtomicUsize::new(0);
+// 外部 Aime IO 只初始化一次，串口句柄可反复开关
+static AIME_START_STATUS: Mutex<Option<i32>> = Mutex::new(None);
 static EXTERNAL: Lazy<Mutex<Option<ExternalAimeIo>>> = Lazy::new(|| Mutex::new(None));
 
 crate::config_section! {
     pub(crate) struct AimeSectionConfig => AIME_CONFIG_SECTION {
         section: "Aime",
         order: 300,
-        default_enabled: true,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         comment: "Aime 读卡器模拟",
         fields: {
-            pub cvt_port: u32 = 2,
+            // 两种机台默认使用 COM4，同时保留分模式覆盖项
+            pub cvt_port: u32 = 4,
             key: "cvtPort",
             comment: "CVT 模式串口号";
-            pub sp_port: u32 = 3,
+            pub sp_port: u32 = 4,
             key: "spPort",
             comment: "SP 模式串口号";
-            pub high_baudrate: bool = false,
+            pub high_baudrate: bool = true,
             key: "highBaud",
-            comment: "使用高波特率";
-            pub aime_path: String = String::from("aime.txt"),
+            comment: "使用 115200 高波特率（Chunithm 默认需要）";
+            pub aime_path: String = String::from("DEVICE\\aime.txt"),
             key: "aimePath",
             comment: "Aime 卡号文件";
-            pub felica_path: String = String::from("felica.txt"),
+            pub felica_path: String = String::from("DEVICE\\felica.txt"),
             key: "felicaPath",
             comment: "FeliCa 卡号文件";
             pub authdata_path: String = String::from("DEVICE\\authdata.bin"),
@@ -59,7 +74,8 @@ crate::config_section! {
             comment: "缺少 FeliCa 卡号时自动生成";
             pub scan: i32 = 0x0D,
             comment: "读卡按键的虚拟键码";
-            pub gen: u8 = 3,
+            // 0 表示按机台模式选择：CVT=Gen2，SP=Gen3
+            pub gen: u8 = 0,
             comment: "读卡器代数";
             pub proxy_flag: u8 = 2,
             key: "proxyFlag",
@@ -72,8 +88,8 @@ crate::config_section! {
     pub(crate) struct AimeIoConfig => AIME_IO_CONFIG_SECTION {
         section: "AimeIo",
         order: 301,
-        default_enabled: true,
-        always_enabled: true,
+        default_on: true,
+        always_enabled: false,
         hidden: false,
         comment: "外部 Aime IO DLL",
         fields: {
@@ -104,52 +120,93 @@ pub struct AimeConfig {
 
 pub struct AimeReader {
     config: AimeConfig,
+    aime_id: Option<[u8; 10]>,
+    felica_id: Option<u64>,
+    radio_on: bool,
+    update_mode: bool,
 }
 
 impl AimeReader {
     pub fn new(config: AimeConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            aime_id: None,
+            felica_id: None,
+            radio_on: true,
+            update_mode: false,
+        }
     }
 
-    pub fn read_aime_id(&self) -> Option<[u8; 10]> {
-        if !is_scan_key_down(self.config.scan_key) {
-            return None;
+    /// 刷新一次卡片存在状态
+    pub fn poll(&mut self) -> i32 {
+        self.aime_id = None;
+        self.felica_id = None;
+        if !self.radio_on || !is_scan_key_down(self.config.scan_key) {
+            return iohook::S_OK;
         }
-        if let Ok(guard) = EXTERNAL.lock() {
-            if let Some(external) = guard.as_ref() {
-                return unsafe { external.read_aime_id() };
+
+        if let Some(status) = external_call(|external| unsafe { external.poll() }) {
+            if status < 0 {
+                return status;
             }
-        }
-        read_or_generate_id(&self.config.aime_path, 10, self.config.aime_gen)
-            .and_then(|bytes| bytes.try_into().ok())
-    }
-
-    pub fn ports(&self, is_sp: bool) -> u32 {
-        if is_sp {
-            self.config.sp_port
-        } else {
-            self.config.cvt_port
-        }
-    }
-
-    pub fn read_felica_id(&self) -> Option<u64> {
-        if !is_scan_key_down(self.config.scan_key) {
-            return None;
-        }
-        if let Ok(guard) = EXTERNAL.lock() {
-            if let Some(external) = guard.as_ref() {
-                return unsafe { external.read_felica_id() };
+            if let Ok(guard) = EXTERNAL.lock() {
+                if let Some(external) = guard.as_ref() {
+                    // 先尝试 Aime，再尝试 FeliCa，getter 不应再次 poll
+                    self.aime_id = unsafe { external.get_aime_id() };
+                    if self.aime_id.is_none() {
+                        self.felica_id = unsafe { external.get_felica_id() };
+                    }
+                }
             }
+            return iohook::S_OK;
         }
-        let bytes = read_or_generate_id(&self.config.felica_path, 8, self.config.felica_gen)?;
-        Some(
-            bytes
-                .into_iter()
-                .fold(0u64, |acc, byte| (acc << 8) | u64::from(byte)),
-        )
+
+        self.aime_id = read_or_generate_id(&self.config.aime_path, 10, self.config.aime_gen)
+            .and_then(|bytes| bytes.try_into().ok());
+        if self.aime_id.is_none() {
+            self.felica_id =
+                read_or_generate_id(&self.config.felica_path, 8, self.config.felica_gen).and_then(
+                    |bytes| {
+                        let bytes: [u8; 8] = bytes.try_into().ok()?;
+                        Some(
+                            bytes
+                                .into_iter()
+                                .fold(0u64, |acc, byte| (acc << 8) | u64::from(byte)),
+                        )
+                    },
+                );
+        }
+        iohook::S_OK
+    }
+
+    pub fn aime_id(&self) -> Option<[u8; 10]> {
+        self.aime_id
+    }
+
+    pub fn felica_id(&self) -> Option<u64> {
+        self.felica_id
+    }
+
+    pub fn radio_on(&mut self) -> i32 {
+        self.radio_on = true;
+        self.update_mode = false;
+        external_call(|external| unsafe { external.radio_on() }).unwrap_or(iohook::S_OK)
+    }
+
+    pub fn radio_off(&mut self) -> i32 {
+        self.radio_on = false;
+        external_call(|external| unsafe { external.radio_off() }).unwrap_or(iohook::S_OK)
+    }
+
+    pub fn to_update_mode(&mut self) -> i32 {
+        self.update_mode = true;
+        external_call(|external| unsafe { external.to_update_mode() }).unwrap_or(iohook::S_OK)
     }
 
     pub fn read_mifare_uid(&self) -> Option<[u8; 4]> {
+        if self.aime_id.is_none() {
+            return None;
+        }
         if let Ok(guard) = EXTERNAL.lock() {
             if let Some(external) = guard.as_ref() {
                 return unsafe { external.get_mifare_uid() };
@@ -182,6 +239,7 @@ pub fn init(api: &Api, config: &Config, section: &AimeSectionConfig) {
     let cfg = load_config(section, config.base_dir());
     let is_sp = crate::system_config::is_sp_mode(config);
     let port = if is_sp { cfg.sp_port } else { cfg.cvt_port };
+    let gen = reader_generation(cfg.gen, is_sp);
 
     let path = config
         .section::<AimeIoConfig>()
@@ -194,12 +252,12 @@ pub fn init(api: &Api, config: &Config, section: &AimeSectionConfig) {
                     *guard = Some(external);
                 }
                 api.log_info(&format!(
-                    "AimeIo: external IO DLL loaded: {path} (API {version:#06x})"
+                    "External Aime IO loaded: {path}, API {version:#06x}"
                 ));
             }
             Err(err) => {
                 api.log_warn(&format!(
-                    "AimeIo: external IO DLL failed ({err}), falling back to built-in"
+                    "External Aime IO failed to load; using built-in emulation: {err}"
                 ));
             }
         }
@@ -211,9 +269,12 @@ pub fn init(api: &Api, config: &Config, section: &AimeSectionConfig) {
     if let Ok(mut reader) = AIME_READER.lock() {
         *reader = Some(AimeReader::new(cfg.clone()));
     }
+    if let Ok(mut status) = AIME_START_STATUS.lock() {
+        *status = None;
+    }
     if let Ok(mut device) = AIME_DEVICE.lock() {
         *device = Some(SgNfcDevice::new(SgNfcConfig {
-            gen: cfg.gen,
+            gen,
             proxy_flag: cfg.proxy_flag,
             authdata_path: cfg.authdata_path.clone(),
         }));
@@ -221,28 +282,58 @@ pub fn init(api: &Api, config: &Config, section: &AimeSectionConfig) {
     unsafe {
         iohook::push_handler(aime_irp_handler);
     }
-    api.log_info(&format!("Aime reader emulator initialized (COM{})", port));
+    api.log_info(&format!(
+        "Aime reader emulation enabled on COM{port}, generation {gen}"
+    ));
 }
 
 unsafe fn aime_irp_handler(irp: &mut Irp) -> i32 {
+    let Ok(_reader_guard) = SG_READER_LOCK.lock() else {
+        return iohook::E_FAIL;
+    };
     let port = aime_port();
     if irp.op == IrpOp::Open {
         if !matches_com_port(irp, port) {
             return iohook::invoke_next(irp);
         }
-        uart::uart_init(port);
-        let handle = uart::fake_handle_pub(port);
-        let high_baudrate = AIME_READER
-            .lock()
-            .ok()
-            .and_then(|reader| reader.as_ref().map(|reader| reader.config.high_baudrate))
-            .unwrap_or(false);
-        if !high_baudrate {
-            uart::set_baud_rate(handle, 38_400);
+        if AIME_FD.load(Ordering::SeqCst) != 0 {
+            return iohook::hresult_from_win32(ERROR_ACCESS_DENIED);
         }
-        irp.fd = crate::util::win32::handle_from_value(handle);
-        AIME_FD.store(handle, Ordering::SeqCst);
-        return 1;
+        let status = start_backend_once();
+        if status < 0 {
+            return status;
+        }
+
+        // 将目标改为 NUL 后继续钩子链，以取得有效的重叠 I/O 句柄
+        irp.open_filename_w = NUL_FILENAME.as_ptr();
+        irp.open_filename_a = ptr::null();
+        irp.open_access = 0xC000_0000; // GENERIC_READ | GENERIC_WRITE
+        irp.open_share = EMULATED_OPEN_SHARE;
+        irp.open_security = ptr::null();
+        irp.open_creation = 3; // OPEN_EXISTING
+        irp.open_flags = EMULATED_OPEN_FLAGS;
+        irp.open_template = ptr::null_mut();
+
+        let result = iohook::invoke_next(irp);
+        if result >= 0 {
+            let handle = crate::util::win32::handle_value(irp.fd);
+            uart::bind_handle(handle, port);
+            let high_baudrate = AIME_READER
+                .lock()
+                .ok()
+                .and_then(|reader| reader.as_ref().map(|reader| reader.config.high_baudrate))
+                .unwrap_or(true);
+            // 默认启用 115200，显式关闭时使用 38400
+            uart::set_baud_rate(handle, if high_baudrate { 115_200 } else { 38_400 });
+            AIME_FD.store(handle, Ordering::SeqCst);
+        } else {
+            if let Some(api) = crate::util::api::API.get() {
+                api.log_error(&format!(
+                    "Aime reader failed to open COM{port}: {result:#010x}"
+                ));
+            }
+        }
+        return result;
     }
 
     let my_fd = AIME_FD.load(Ordering::SeqCst);
@@ -250,12 +341,14 @@ unsafe fn aime_irp_handler(irp: &mut Irp) -> i32 {
         return iohook::invoke_next(irp);
     }
 
+    if irp.op == IrpOp::Close {
+        AIME_FD.store(0, Ordering::SeqCst);
+        uart::unbind_handle(my_fd);
+        return iohook::invoke_next(irp);
+    }
+
     match irp.op {
-        IrpOp::Close => {
-            AIME_FD.store(0, Ordering::SeqCst);
-            1
-        }
-        IrpOp::Read => read_aime(irp),
+        IrpOp::Read => uart::uart_handle_irp(irp),
         IrpOp::Write => write_aime(irp),
         IrpOp::Ioctl => uart::device_io_control(
             crate::util::win32::handle_value(irp.fd),
@@ -266,47 +359,63 @@ unsafe fn aime_irp_handler(irp: &mut Irp) -> i32 {
             irp.ioctl_out_nbytes,
             irp.out_nbytes,
         ),
-        IrpOp::Fsync | IrpOp::Seek => 1,
-        IrpOp::Open => 1,
+        IrpOp::Fsync => iohook::S_OK,
+        IrpOp::Seek | IrpOp::Open | IrpOp::Close => {
+            iohook::hresult_from_win32(ERROR_INVALID_FUNCTION)
+        }
     }
 }
 
-unsafe fn read_aime(irp: &mut Irp) -> i32 {
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = 0;
+fn start_backend_once() -> i32 {
+    let Ok(mut started) = AIME_START_STATUS.lock() else {
+        return iohook::E_FAIL;
+    };
+    if let Some(status) = *started {
+        return status;
     }
-    if irp.read_buf.is_null() || irp.nbytes == 0 {
-        return 1;
+    if let Some(api) = crate::util::api::API.get() {
+        api.log_info("Aime reader backend starting");
     }
-    let out = std::slice::from_raw_parts_mut(irp.read_buf, irp.nbytes as usize);
-    let count = AIME_DEVICE
+    let status = EXTERNAL
         .lock()
         .ok()
-        .and_then(|mut device| device.as_mut().map(|device| device.read(out)))
-        .unwrap_or(0);
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = count as u32;
+        .and_then(|guard| guard.as_ref().map(|external| unsafe { external.init() }))
+        .unwrap_or(iohook::S_OK);
+    *started = Some(status);
+    if status < 0 {
+        if let Some(api) = crate::util::api::API.get() {
+            api.log_error(&format!(
+                "Aime reader backend failed to start: {status:#010x}"
+            ));
+        }
     }
-    1
+    status
 }
 
 unsafe fn write_aime(irp: &mut Irp) -> i32 {
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = 0;
+    let hr = uart::uart_handle_irp(irp);
+    if hr < 0 {
+        return hr;
     }
-    if irp.write_buf.is_null() || irp.nbytes == 0 {
-        return 1;
-    }
-    let bytes = std::slice::from_raw_parts(irp.write_buf, irp.nbytes as usize);
-    if let (Ok(mut device), Ok(reader)) = (AIME_DEVICE.lock(), AIME_READER.lock()) {
-        if let (Some(device), Some(reader)) = (device.as_mut(), reader.as_ref()) {
-            device.write(reader, bytes);
+    let handle = crate::util::win32::handle_value(irp.fd);
+    let Some(mut written) = uart::take_written(handle) else {
+        return iohook::E_FAIL;
+    };
+    let mut readable = Vec::new();
+    if let (Ok(mut device), Ok(mut reader)) = (AIME_DEVICE.lock(), AIME_READER.lock()) {
+        if let (Some(device), Some(reader)) = (device.as_mut(), reader.as_mut()) {
+            device.process(reader, &mut written, &mut readable);
         }
+    } else {
+        return iohook::E_FAIL;
     }
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = irp.nbytes;
+    if !uart::restore_written(handle, written) {
+        return iohook::E_FAIL;
     }
-    1
+    if !readable.is_empty() && !uart::push_readable(handle, &readable) {
+        return iohook::E_FAIL;
+    }
+    hr
 }
 
 unsafe fn matches_com_port(irp: &Irp, port_no: u32) -> bool {
@@ -331,6 +440,18 @@ fn load_config(config: &AimeSectionConfig, base_dir: impl AsRef<Path>) -> AimeCo
         scan_key: config.scan,
         gen: config.gen,
         proxy_flag: config.proxy_flag,
+    }
+}
+
+fn reader_generation(configured: u8, is_sp: bool) -> u8 {
+    if configured == 0 {
+        if is_sp {
+            3
+        } else {
+            2
+        }
+    } else {
+        configured.clamp(1, 3)
     }
 }
 
@@ -441,4 +562,29 @@ fn is_scan_key_down(vk: i32) -> bool {
 #[cfg(not(windows))]
 fn is_scan_key_down(_vk: i32) -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{reader_generation, AimeSectionConfig};
+
+    #[test]
+    fn default_card_files_use_device_directory() {
+        let config = AimeSectionConfig::default();
+        assert_eq!(config.aime_path, r"DEVICE\aime.txt");
+        assert_eq!(config.felica_path, r"DEVICE\felica.txt");
+    }
+
+    #[test]
+    fn default_reader_generation_follows_cabinet_mode() {
+        assert_eq!(reader_generation(0, true), 3);
+        assert_eq!(reader_generation(0, false), 2);
+    }
+
+    #[test]
+    fn explicit_reader_generation_overrides_cabinet_mode() {
+        assert_eq!(reader_generation(1, true), 1);
+        assert_eq!(reader_generation(2, true), 2);
+        assert_eq!(reader_generation(3, false), 3);
+    }
 }

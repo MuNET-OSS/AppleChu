@@ -22,6 +22,7 @@ const D3D9_DLL_NAME: &str = "d3d9.dll";
 const DIRECT3D_CREATE9_NAME: &str = "Direct3DCreate9";
 
 const D3D9_CREATE_DEVICE_INDEX: usize = 16;
+const D3D9_GET_ADAPTER_COUNT_INDEX: usize = 4;
 const DEVICE_TEST_COOPERATIVE_LEVEL_INDEX: usize = 3;
 const DEVICE_RESET_INDEX: usize = 16;
 const DEVICE_PRESENT_INDEX: usize = 17;
@@ -37,6 +38,7 @@ const MAX_PRESENT_CALLBACKS: usize = 8;
 const MAX_RESET_CALLBACKS: usize = 8;
 
 type Direct3DCreate9Fn = unsafe extern "system" fn(u32) -> *mut c_void;
+type GetAdapterCountFn = unsafe extern "system" fn(*mut c_void) -> u32;
 type CreateDeviceFn = unsafe extern "system" fn(
     *mut c_void,
     u32,

@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct BypassAppUserConfig => BYPASS_APPUSER_CONFIG_SECTION {
         section: "BypassAppUser",
         order: 250,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "绕过 AppUser 检测",
@@ -18,7 +18,7 @@ crate::config_section! {
     pub(crate) struct Bypass120hzConfig => BYPASS_120HZ_CONFIG_SECTION {
         section: "Bypass120hz",
         order: 240,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "绕过 120Hz 检测",
@@ -30,7 +30,7 @@ crate::config_section! {
     pub(crate) struct Bypass1080pConfig => BYPASS_1080P_CONFIG_SECTION {
         section: "Bypass1080p",
         order: 230,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "绕过 1080P 检测",

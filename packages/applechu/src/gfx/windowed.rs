@@ -2,6 +2,7 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::gfx::WindowConfig;
+#[cfg(target_arch = "x86")]
 use crate::proxy::set_windowed_mode;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat_all_modules;
@@ -51,6 +52,7 @@ extern "system" {
 
 #[applechu_macros::config_section(stage = Graphics, order = 10)]
 pub fn init(api: &Api, config: &WindowConfig) {
+    #[cfg(target_arch = "x86")]
     set_windowed_mode(config.windowed);
     if !config.windowed {
         return;
@@ -79,11 +81,11 @@ pub fn init(api: &Api, config: &WindowConfig) {
 
     if installed {
         api.log_info(&format!(
-            "gfx: window hook installed (framed={})",
+            "Window mode compatibility ready: framed={}",
             FRAMED.load(Ordering::SeqCst)
         ));
     } else {
-        api.log_warn("gfx: CreateWindowExA import not found");
+        api.log_warn("Window mode compatibility could not find the game window entry");
     }
 }
 
@@ -101,6 +103,9 @@ unsafe extern "system" fn hooked_create_window_ex_a(
     instance: usize,
     param: *const c_void,
 ) -> usize {
+    if let Some(api) = crate::util::api::API.get() {
+        api.log_info("Game window created");
+    }
     let original_addr = ORIG_CREATE_WINDOW.load(Ordering::SeqCst);
     if original_addr == 0 {
         return 0;
@@ -151,6 +156,9 @@ unsafe extern "system" fn hooked_create_window_ex_a(
 }
 
 unsafe extern "system" fn hooked_show_window(hwnd: usize, mut cmd_show: i32) -> i32 {
+    if let Some(api) = crate::util::api::API.get() {
+        api.log_info("Game window shown");
+    }
     let original_addr = ORIG_SHOW_WINDOW.load(Ordering::SeqCst);
     if original_addr == 0 {
         return 0;

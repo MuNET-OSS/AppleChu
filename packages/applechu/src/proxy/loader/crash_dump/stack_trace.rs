@@ -1,18 +1,51 @@
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
-use std::ptr::{null, null_mut};
+#[cfg(target_arch = "x86")]
+use std::ptr::null;
+use std::ptr::null_mut;
 
-use windows_sys::Win32::Foundation::{HANDLE, MAX_PATH};
+#[cfg(target_arch = "x86")]
+use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::Foundation::MAX_PATH;
+#[cfg(target_arch = "x86")]
 use windows_sys::Win32::System::Diagnostics::Debug::{
-    AddrModeFlat, StackWalk, SymCleanup, SymFromAddr, SymFunctionTableAccess, SymGetModuleBase,
-    SymInitialize, STACKFRAME, SYMBOL_INFO,
+    AddrModeFlat, RtlCaptureStackBackTrace, StackWalk, SymCleanup, SymFromAddr,
+    SymFunctionTableAccess, SymGetModuleBase, SymInitialize, STACKFRAME, SYMBOL_INFO,
 };
 use windows_sys::Win32::System::ProcessStatus::{
     GetModuleBaseNameA, GetModuleInformation, MODULEINFO,
 };
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread};
+use windows_sys::Win32::System::Threading::GetCurrentProcess;
+#[cfg(target_arch = "x86")]
+use windows_sys::Win32::System::Threading::GetCurrentThread;
 
 const IMAGE_FILE_MACHINE_I386: u32 = 0x014c;
+
+/// 捕获当前线程的返回地址，并转换为便于静态分析的模块名与偏移
+#[cfg(target_arch = "x86")]
+pub(in crate::proxy::loader) unsafe fn append_current_stack_trace(
+    out: &mut String,
+    frames_to_skip: u32,
+) {
+    use std::fmt::Write as _;
+
+    let mut frames = [null_mut(); 48];
+    let count = RtlCaptureStackBackTrace(
+        frames_to_skip.saturating_add(1),
+        frames.len() as u32,
+        frames.as_mut_ptr(),
+        null_mut(),
+    ) as usize;
+
+    let _ = writeln!(out, "exit_stack:");
+    for (index, &frame) in frames[..count].iter().enumerate() {
+        let address = frame as usize;
+        let location = module_offset(address)
+            .map(|(module, offset)| format!("{module}+0x{offset:X}"))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let _ = writeln!(out, "  #{index:02} 0x{address:08X} {location}");
+    }
+}
 
 #[cfg(target_arch = "x86")]
 pub(super) type NativeContext = windows_sys::Win32::System::Diagnostics::Debug::CONTEXT;

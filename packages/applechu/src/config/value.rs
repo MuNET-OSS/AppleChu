@@ -3,6 +3,18 @@ pub trait ConfigValue: Clone + Send + Sync + 'static {
     fn to_toml(&self) -> toml::Value;
 }
 
+impl<T: ConfigValue> ConfigValue for Option<T> {
+    fn parse(value: &toml::Value) -> Option<Self> {
+        T::parse(value).map(Some)
+    }
+
+    fn to_toml(&self) -> toml::Value {
+        self.as_ref()
+            .map(ConfigValue::to_toml)
+            .unwrap_or(toml::Value::Boolean(false))
+    }
+}
+
 impl ConfigValue for bool {
     fn parse(value: &toml::Value) -> Option<Self> {
         match value {
@@ -60,5 +72,23 @@ impl ConfigValue for String {
 
     fn to_toml(&self) -> toml::Value {
         toml::Value::String(self.clone())
+    }
+}
+
+impl ConfigValue for Vec<String> {
+    fn parse(value: &toml::Value) -> Option<Self> {
+        value
+            .as_array()?
+            .iter()
+            .map(|entry| entry.as_str().map(ToOwned::to_owned))
+            .collect()
+    }
+
+    fn to_toml(&self) -> toml::Value {
+        toml::Value::Array(
+            self.iter()
+                .map(|value| toml::Value::String(value.clone()))
+                .collect(),
+        )
     }
 }

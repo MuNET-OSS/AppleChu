@@ -37,13 +37,41 @@ impl ConfigDiagnostic {
 pub struct SectionDescriptor {
     pub name: &'static str,
     pub order: u16,
-    pub default_enabled: bool,
+    pub default_on: bool,
     pub always_enabled: bool,
     pub hidden: bool,
     pub comment: &'static str,
     pub type_id: fn() -> TypeId,
     pub parse: fn(Option<&toml::Table>, &mut Vec<ConfigDiagnostic>) -> LoadedSection,
     pub serialize_fields: fn(&LoadedSection, &mut String),
+    /// 运行时强类型配置实际读取的 TOML 键。用于和统一 schema 做一致性校验
+    pub field_keys: &'static [&'static str],
+}
+
+impl SectionDescriptor {
+    pub fn default_on(&self) -> bool {
+        applechu_schema::section(self.name).map_or(self.default_on, |section| section.default_on)
+    }
+
+    pub fn always_enabled(&self) -> bool {
+        applechu_schema::section(self.name)
+            .map_or(self.always_enabled, |section| section.always_enabled)
+    }
+
+    pub fn hidden(&self) -> bool {
+        applechu_schema::section(self.name).map_or(self.hidden, |section| section.hidden)
+    }
+
+    /// schema 中没有声明的运行时栏目属于内置实现，不写入玩家配置
+    pub fn builtin(&self) -> bool {
+        applechu_schema::section(self.name).is_none()
+    }
+
+    pub fn comment(&self) -> &str {
+        applechu_schema::section(self.name)
+            .and_then(|section| section.label.zh_or_en())
+            .unwrap_or(self.comment)
+    }
 }
 
 #[distributed_slice]
@@ -61,14 +89,11 @@ pub struct LoadedSection {
 impl LoadedSection {
     pub fn new<T: ConfigSection>(
         table: Option<&toml::Table>,
-        default_enabled: bool,
-        always_enabled: bool,
         value: T,
         explicit_fields: Vec<bool>,
-        diagnostics: &mut Vec<ConfigDiagnostic>,
-        section: &str,
     ) -> Self {
-        let enabled = section_enabled(table, default_enabled, always_enabled, diagnostics, section);
+        let descriptor = T::descriptor();
+        let enabled = section_enabled(table, descriptor.default_on(), descriptor.hidden());
         Self {
             descriptor: T::descriptor(),
             enabled,
@@ -131,34 +156,8 @@ pub fn find_section<'a>(root: &'a toml::Table, name: &str) -> Option<&'a toml::T
         .and_then(toml::Value::as_table)
 }
 
-fn section_enabled(
-    table: Option<&toml::Table>,
-    default_enabled: bool,
-    always_enabled: bool,
-    diagnostics: &mut Vec<ConfigDiagnostic>,
-    section: &str,
-) -> bool {
-    if always_enabled {
-        if find_key(table, "Disabled").is_some() {
-            diagnostics.push(ConfigDiagnostic::warning(format!(
-                "配置栏目 {section} 不支持 Disabled，已忽略"
-            )));
-        }
-        return true;
-    }
-    let Some(table) = table else {
-        return default_enabled;
-    };
-    let Some(disabled) = find_key(Some(table), "Disabled") else {
-        return true;
-    };
-    let Some(disabled) = bool::parse(disabled) else {
-        diagnostics.push(ConfigDiagnostic::warning(format!(
-            "配置项 {section}.Disabled 类型错误，已按 false 处理"
-        )));
-        return true;
-    };
-    !disabled
+fn section_enabled(table: Option<&toml::Table>, default_on: bool, hidden: bool) -> bool {
+    table.is_some() || (hidden && default_on)
 }
 
 pub fn warn_unknown_keys(
@@ -171,13 +170,11 @@ pub fn warn_unknown_keys(
         return;
     };
     for key in table.keys() {
-        if key.eq_ignore_ascii_case("Disabled")
-            || known.iter().any(|known| key.eq_ignore_ascii_case(known))
-        {
+        if known.iter().any(|known| key.eq_ignore_ascii_case(known)) {
             continue;
         }
         diagnostics.push(ConfigDiagnostic::warning(format!(
-            "无法识别配置项 {section}.{key}，规范化时将删除"
+            "Unknown config entry {section}.{key}; it will be removed during normalization"
         )));
     }
 }
@@ -192,6 +189,15 @@ pub fn append_comment(output: &mut String, comment: &str) {
         output.push_str(line.trim());
         output.push('\n');
     }
+}
+
+pub fn append_field_comment(output: &mut String, section: &str, key: &str, fallback: &str) {
+    let comment = applechu_schema::SCHEMA
+        .entry(section, key)
+        .and_then(|entry| entry.comment.as_ref())
+        .and_then(|comment| comment.zh_or_en())
+        .unwrap_or(fallback);
+    append_comment(output, comment);
 }
 
 pub fn append_entry<T: ConfigValue>(output: &mut String, key: &str, value: &T, explicit: bool) {

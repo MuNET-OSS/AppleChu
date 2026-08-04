@@ -1,6 +1,5 @@
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use once_cell::sync::OnceCell;
 
@@ -11,7 +10,6 @@ use crate::platform::{path_hook, winapi};
 use crate::util::api::Api;
 
 static CONFIG: OnceCell<VfsConfig> = OnceCell::new();
-static OPTION_PATH_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
 
 const VFS_NTHOME: &str = "c:\\documents and settings\\appuser";
 const VFS_W10HOME: &str = "c:\\users\\appuser";
@@ -32,7 +30,7 @@ crate::config_section! {
     pub(crate) struct VfsSectionConfig => VFS_CONFIG_SECTION {
         section: "VFS",
         order: 970,
-        default_enabled: true,
+        default_on: true,
         always_enabled: false,
         hidden: true,
         comment: "虚拟文件系统",
@@ -50,8 +48,8 @@ crate::config_section! {
     }
 }
 
-#[applechu_macros::config_section(stage = Platform, order = 20)]
-pub fn init(api: &Api, config: &Config, section: &VfsSectionConfig) {
+#[applechu_macros::config_section(stage = Platform, order = 90)]
+pub(crate) fn init(api: &Api, config: &Config, section: &VfsSectionConfig) {
     let amfs = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.amfs));
     let appdata = winapi::fixup_path(&winapi::absolutize(config.base_dir(), &section.appdata));
     let configured_option = winapi::absolutize(config.base_dir(), &section.option);
@@ -72,24 +70,42 @@ pub fn init(api: &Api, config: &Config, section: &VfsSectionConfig) {
     path_hook::push(vfs_path_transform);
     push_registry_key();
 
-    let wide: Vec<u16> = option.encode_utf16().chain(std::iter::once(0)).collect();
-    let _ = OPTION_PATH_WIDE.set(wide);
     proc_addr::push_get_proc_override("amdaemon_api.dll", option_proc_override);
 
-    api.log_info("VFS hook initialized");
+    api.log_info("Virtual file system ready");
 }
 
 fn option_proc_override(_module: usize, name: &str) -> Option<*const ()> {
-    if name == "AppImage_getOptionMountRootPath" {
-        return Some(hooked_get_option_mount_root_path as *const ());
+    match name {
+        "System_getAppRootPath" => Some(hooked_get_app_root_path as *const ()),
+        "AppImage_getOptionMountRootPath" => Some(hooked_get_option_mount_root_path as *const ()),
+        _ => None,
     }
-    None
 }
 
-unsafe extern "system" fn hooked_get_option_mount_root_path() -> *const u16 {
-    OPTION_PATH_WIDE
-        .get()
-        .map_or(std::ptr::null(), |path| path.as_ptr())
+unsafe extern "system" fn hooked_get_app_root_path() -> *mut u16 {
+    let Some(config) = CONFIG.get() else {
+        return std::ptr::null_mut();
+    };
+    owned_wide_path(&format!("{}SDHD\\", config.appdata))
+}
+
+unsafe extern "system" fn hooked_get_option_mount_root_path() -> *mut u16 {
+    CONFIG.get().map_or(std::ptr::null_mut(), |config| {
+        owned_wide_path(&config.option)
+    })
+}
+
+fn owned_wide_path(path: &str) -> *mut u16 {
+    // amdaemon_api 要求返回可写路径指针，因此让每次响应存活到进程结束，
+    // 避免把 Rust 临时缓冲区交给原生代码
+    Box::leak(
+        path.encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    )
+    .as_mut_ptr()
 }
 
 pub fn resolve_path(path: &str) -> Option<PathBuf> {

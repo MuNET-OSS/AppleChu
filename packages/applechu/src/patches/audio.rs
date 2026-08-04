@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct ForceSharedAudioConfig => FORCE_SHARED_AUDIO_CONFIG_SECTION {
         section: "ForceSharedAudio",
         order: 270,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "强制共享音频，采样率必须为 48000Hz",
@@ -18,7 +18,7 @@ crate::config_section! {
     pub(crate) struct Force2chAudioConfig => FORCE_2CH_AUDIO_CONFIG_SECTION {
         section: "Force2chAudio",
         order: 280,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "强制双声道",

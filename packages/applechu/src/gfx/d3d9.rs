@@ -14,7 +14,7 @@ crate::config_section! {
     pub(crate) struct D3D9ExConfig => D3D9EX_CONFIG_SECTION {
         section: "D3D9Ex",
         order: 110,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "D3D9Ex 透明升级、设备丢失恢复与快速重启",
@@ -32,9 +32,6 @@ const D3DERR_DEVICENOTRESET: i32 = 0x8876_0869u32 as i32;
 const D3DERR_DEVICEHUNG: i32 = 0x8876_086cu32 as i32;
 
 const D3D_SDK_VERSION: u32 = 32;
-const D3DCREATE_FPU_PRESERVE: u32 = 0x0000_0002;
-const D3DCREATE_MULTITHREADED: u32 = 0x0000_0004;
-
 const DEVICE_PRESENT_INDEX: usize = 17;
 const DEVICE_PRESENT_EX_INDEX: usize = 121;
 
@@ -123,23 +120,23 @@ pub fn init(api: &Api, config: &Config) {
     if let Some(original) = original {
         ORIG_DIRECT3D_CREATE9.store(fptr!(original), Ordering::SeqCst);
         api.log_info(&format!(
-            "gfx: D3D9 hook installed (d3d9ex={d3d9ex}, windowed={windowed}, monitor={monitor})"
+            "D3D9 display compatibility ready: D3D9Ex={d3d9ex}, windowed={windowed}, monitor={monitor}"
         ));
     } else {
-        api.log_warn("gfx: Direct3DCreate9 import not found");
+        api.log_warn("D3D9 display compatibility could not find Direct3DCreate9");
     }
 }
 
 fn resolve_direct3d_create9_ex(api: &Api) {
     let module = unsafe { LoadLibraryA(c"d3d9.dll".as_ptr()) };
     if module == 0 {
-        api.log_warn("gfx: failed to load d3d9.dll for Direct3DCreate9Ex");
+        api.log_warn("Failed to load d3d9.dll; D3D9Ex is disabled");
         return;
     }
 
     let proc = unsafe { GetProcAddress(module, c"Direct3DCreate9Ex".as_ptr()) };
     if proc.is_null() {
-        api.log_warn("gfx: Direct3DCreate9Ex unavailable; falling back to D3D9");
+        api.log_warn("Direct3DCreate9Ex is unavailable; falling back to D3D9");
         return;
     }
 
@@ -478,7 +475,7 @@ unsafe extern "system" fn d3d9_get_adapter_monitor(this: *mut D3d9ExProxy, adapt
 
 unsafe extern "system" fn d3d9_create_device(
     this: *mut D3d9ExProxy,
-    adapter: u32,
+    _adapter: u32,
     device_type: u32,
     focus_window: usize,
     behavior_flags: u32,
@@ -490,12 +487,20 @@ unsafe extern "system" fn d3d9_create_device(
     }
     *returned_device_interface = ptr::null_mut();
 
-    let selected_adapter = MONITOR_INDEX.load(Ordering::SeqCst);
     if WINDOWED.load(Ordering::SeqCst) && !presentation_parameters.is_null() {
         (*presentation_parameters).force_windowed();
     }
 
     let real = (*this).real;
+    let get_adapter_count: unsafe extern "system" fn(*mut c_void) -> u32 =
+        std::mem::transmute(vtable_entry(real, 4));
+    let adapter_count = get_adapter_count(real);
+    let configured_adapter = MONITOR_INDEX.load(Ordering::SeqCst);
+    let selected_adapter = if configured_adapter < adapter_count {
+        configured_adapter
+    } else {
+        0
+    };
     let func: unsafe extern "system" fn(
         *mut c_void,
         u32,
@@ -509,14 +514,10 @@ unsafe extern "system" fn d3d9_create_device(
     let mut real_device = ptr::null_mut();
     let result = func(
         real,
-        if selected_adapter == 0 {
-            adapter
-        } else {
-            selected_adapter
-        },
+        selected_adapter,
         device_type,
         focus_window,
-        behavior_flags | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED,
+        behavior_flags,
         presentation_parameters,
         &mut real_device,
     );

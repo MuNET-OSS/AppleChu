@@ -3,9 +3,9 @@ pub mod crash_dump;
 pub mod crash_ui;
 pub mod crash_zip;
 pub mod dependency;
+pub mod exit_trace;
 mod external;
 pub mod frame_hook;
-pub mod hash;
 pub mod hot_reload;
 pub mod log;
 pub mod metadata;
@@ -24,7 +24,7 @@ use chu_abi::{ChuModInfo, CHUMOD_API_VERSION};
 use crate::config::Config;
 use crate::proxy::api_impl;
 
-use self::log::{log_info, write_log_inner};
+use self::log::{log_error, log_info, write_log_inner};
 use self::pe::{get_self_base_dir, parse_game_info};
 use self::seh::{call_mod_on_ready, call_mod_shutdown};
 use self::state::STATE;
@@ -51,8 +51,15 @@ pub unsafe fn load_mods() {
     console::init(&mut state, enable_console);
 
     state.base_dir = base_dir.clone();
-    state.log_file = File::create(format!("{}\\chumod_loader.log", base_dir)).ok();
-    write_log_inner(&mut state, &format!("loader start: base={}", base_dir));
+    // 日志更名后清理旧文件，避免用户把上一次运行的内容当成当前日志
+    let _ = std::fs::remove_file(format!("{}\\chumod_loader.log", base_dir));
+    let _ = std::fs::remove_file(format!("{}\\hijack_diag.log", base_dir));
+    let _ = std::fs::remove_file(format!("{}\\bootstrap_diag.log", base_dir));
+    state.log_file = File::create(format!("{}\\applechu.log", base_dir)).ok();
+    write_log_inner(
+        &mut state,
+        &format!("Game-side initialization: directory={base_dir}"),
+    );
     drop(state);
 
     api_impl::init();
@@ -88,16 +95,16 @@ pub unsafe fn load_mods() {
         state.builtin_loaded = builtin_loaded;
     }
     if builtin_loaded {
-        log_info("loaded builtin mod: AppleChu");
+        log_info("AppleChu game module loaded");
     } else {
-        log_info("builtin mod init failed: AppleChu");
+        log_error("AppleChu game module initialization failed");
     }
 
     external::load(&base_dir, &info, api);
 
     let mut state = STATE.lock().unwrap();
     let count = state.mods.len();
-    write_log_inner(&mut state, &format!("mods loaded: {}", count));
+    write_log_inner(&mut state, &format!("External modules loaded: {count}"));
     let ready_mods: Vec<_> = state
         .mods
         .iter()
@@ -118,7 +125,10 @@ pub unsafe fn unload_mods() {
     frame_hook::stop();
     let mut state = STATE.lock().unwrap();
     while let Some(m) = state.mods.pop() {
-        write_log_inner(&mut state, &format!("unloading mod: {}", m.name));
+        write_log_inner(
+            &mut state,
+            &format!("Unloading external module: {}", m.name),
+        );
         if let Some(shutdown) = m.shutdown {
             call_mod_shutdown(&m.name, shutdown);
         }
@@ -138,6 +148,6 @@ pub unsafe fn unload_mods() {
     api_impl::shutdown();
 
     let mut state = STATE.lock().unwrap();
-    write_log_inner(&mut state, "loader shutdown");
+    write_log_inner(&mut state, "Game side stopped");
     state.log_file = None;
 }

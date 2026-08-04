@@ -2,8 +2,13 @@ use std::ffi::c_char;
 
 use once_cell::sync::OnceCell;
 
-use crate::platform::winapi::{self, GetComputerNameAFn};
+use crate::iohook::hook_table::{hook_table_apply, null_module, HookSymbol};
+use crate::platform::winapi::GetComputerNameAFn;
 use crate::util::api::Api;
+
+const ERROR_SUCCESS: u32 = 0;
+const ERROR_INVALID_PARAMETER: u32 = 87;
+const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 
 static mut ORIG_GET_COMPUTER_NAME_A: Option<GetComputerNameAFn> = None;
 static SERIAL_NO: OnceCell<String> = OnceCell::new();
@@ -12,49 +17,65 @@ crate::config_section! {
     pub(crate) struct PcbIdConfig => PCBID_CONFIG_SECTION {
         section: "PCBID",
         order: 960,
-        default_enabled: true,
+        default_on: true,
         always_enabled: false,
         hidden: true,
         comment: "机台序列号模拟",
         fields: {
-            pub serial_no: String = String::from("A69E01A8888"),
+            pub serial_no: String = String::from("ACAE01A99999999"),
             key: "serialNo",
             comment: "机台序列号";
         }
     }
 }
 
-#[applechu_macros::config_section(stage = Platform, order = 60)]
-pub fn init(api: &Api, config: &PcbIdConfig) {
-    unsafe {
-        let _ = SERIAL_NO.set(config.serial_no.clone());
-        ORIG_GET_COMPUTER_NAME_A = winapi::hook_import(
-            api,
-            "kernel32.dll",
-            "GetComputerNameA",
-            hooked_get_computer_name_a as *const (),
-        );
+#[applechu_macros::config_section(stage = Platform, order = 80)]
+pub(crate) fn init(api: &Api, config: &PcbIdConfig) -> Result<(), String> {
+    if config.serial_no.len() != 15 || !config.serial_no.is_ascii() {
+        return Err("PCBID serialNo must contain exactly 15 ASCII characters".to_owned());
     }
-
-    api.log_info("PCBID hook initialized");
+    let _ = SERIAL_NO.set(config.serial_no.clone());
+    unsafe {
+        let mut original = std::ptr::null();
+        let symbols = [HookSymbol {
+            name: "GetComputerNameA",
+            patch: hooked_get_computer_name_a as *const (),
+            original: &mut original,
+        }];
+        let patched = hook_table_apply(null_module(), "kernel32.dll", &symbols);
+        if !original.is_null() {
+            ORIG_GET_COMPUTER_NAME_A = Some(std::mem::transmute::<*const (), GetComputerNameAFn>(
+                original,
+            ));
+        }
+        api.log_info(&format!(
+            "Cabinet serial emulation ready with {patched} patched entries"
+        ));
+    }
+    Ok(())
 }
 
 unsafe extern "system" fn hooked_get_computer_name_a(buffer: *mut c_char, size: *mut u32) -> i32 {
+    if let Some(api) = crate::util::api::API.get() {
+        api.log_info("Cabinet serial requested");
+    }
+    if buffer.is_null() || size.is_null() {
+        crate::iohook::set_last_error(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
     let Some(serial) = SERIAL_NO.get() else {
         return ORIG_GET_COMPUTER_NAME_A.map_or(0, |orig| orig(buffer, size));
     };
 
-    let required = serial.len() as u32;
-    if size.is_null() {
-        return 0;
-    }
-    if buffer.is_null() || *size <= required {
-        *size = required + 1;
+    let required = serial.len() as u32 + 1;
+    if required > *size {
+        crate::iohook::set_last_error(ERROR_INSUFFICIENT_BUFFER);
         return 0;
     }
 
     std::ptr::copy_nonoverlapping(serial.as_ptr().cast::<c_char>(), buffer, serial.len());
     *buffer.add(serial.len()) = 0;
-    *size = required;
+    *size = required - 1;
+    crate::iohook::set_last_error(ERROR_SUCCESS);
     1
 }

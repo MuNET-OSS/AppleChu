@@ -1,6 +1,6 @@
 mod document;
-pub(crate) mod schema;
-pub(crate) mod value;
+pub mod schema;
+pub mod value;
 
 pub use document::Config;
 pub use schema::{ConfigDiagnostic, ConfigSection, DiagnosticLevel};
@@ -16,6 +16,17 @@ macro_rules! __config_key {
     };
 }
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __config_emit_default {
+    () => {
+        false
+    };
+    ($value:expr) => {
+        $value
+    };
+}
+
 #[macro_export]
 macro_rules! config_section {
     (
@@ -23,7 +34,7 @@ macro_rules! config_section {
         $vis:vis struct $name:ident => $registration:ident {
             section: $section:literal,
             order: $order:expr,
-            default_enabled: $default_enabled:expr,
+            default_on: $default_on:expr,
             always_enabled: $always_enabled:expr,
             hidden: $hidden:expr,
             comment: $comment:literal,
@@ -32,6 +43,7 @@ macro_rules! config_section {
                     $(#[$field_meta:meta])*
                     $field_vis:vis $field:ident : $ty:ty = $default:expr,
                     $(key: $key:literal,)?
+                    $(emit_default: $emit_default:expr,)?
                     comment: $field_comment:literal;
                 )*
             }
@@ -74,7 +86,7 @@ macro_rules! config_section {
                             value.$field = parsed;
                         } else {
                             diagnostics.push($crate::config::ConfigDiagnostic::warning(format!(
-                                "配置项 {}.{} 值无效或类型错误，已使用默认值",
+                                "Invalid value or type for {}.{}; using the default",
                                 $section, $crate::__config_key!($field $(, $key)?)
                             )));
                         }
@@ -88,12 +100,8 @@ macro_rules! config_section {
                 );
                 $crate::config::schema::LoadedSection::new::<Self>(
                     table,
-                    $default_enabled,
-                    $always_enabled,
                     value,
                     explicit_fields,
-                    diagnostics,
-                    $section,
                 )
             }
 
@@ -107,12 +115,18 @@ macro_rules! config_section {
                 let mut explicit_fields = loaded.explicit_fields().iter();
                 let _ = (&value, &mut explicit_fields, &mut *output);
                 $(
-                    $crate::config::schema::append_comment(output, $field_comment);
+                    $crate::config::schema::append_field_comment(
+                        output,
+                        $section,
+                        $crate::__config_key!($field $(, $key)?),
+                        $field_comment,
+                    );
                     $crate::config::schema::append_entry(
                         output,
                         $crate::__config_key!($field $(, $key)?),
                         &value.$field,
-                        explicit_fields.next().copied().unwrap_or(false),
+                        explicit_fields.next().copied().unwrap_or(false)
+                            || $crate::__config_emit_default!($($emit_default)?),
                     );
                 )*
             }
@@ -123,13 +137,14 @@ macro_rules! config_section {
             $crate::config::schema::SectionDescriptor {
                 name: $section,
                 order: $order,
-                default_enabled: $default_enabled,
+                default_on: $default_on,
                 always_enabled: $always_enabled,
                 hidden: $hidden,
                 comment: $comment,
                 type_id: std::any::TypeId::of::<$name>,
                 parse: $name::parse_config_section,
                 serialize_fields: $name::serialize_config_fields,
+                field_keys: &[$($crate::__config_key!($field $(, $key)?),)*],
             };
 
         impl $crate::config::ConfigSection for $name {

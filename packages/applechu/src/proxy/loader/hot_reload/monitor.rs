@@ -47,14 +47,14 @@ pub fn start_monitor() {
         if handle.is_null() {
             MONITOR_RUNNING.store(false, Ordering::SeqCst);
             MONITOR_STARTED.store(false, Ordering::SeqCst);
-            log_warn("failed to start reload.flag monitor thread");
+            log_warn("Failed to start the external module reload monitor");
             return;
         }
         if let Ok(mut thread) = MONITOR_THREAD_HANDLE.lock() {
             *thread = Some(SendHandle(handle));
         }
     }
-    log_info("reload.flag monitor thread started");
+    log_info("External module reload monitor started");
 }
 
 pub fn stop_monitor() {
@@ -94,9 +94,9 @@ pub(super) unsafe fn poll_reload_flag() {
         return;
     }
 
-    log_info("reload.flag detected; reloading all mods");
+    log_info("reload.flag detected; reloading all external modules");
     let _ = reload_all_mods();
     if let Err(err) = std::fs::remove_file(&flag_path) {
-        log_warn(&format!("failed to remove reload.flag: {err}"));
+        log_warn(&format!("Failed to remove reload.flag: {err}"));
     }
 }

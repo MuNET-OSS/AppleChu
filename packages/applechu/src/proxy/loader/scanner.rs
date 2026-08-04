@@ -18,7 +18,7 @@ pub fn ensure_mods_dir(base_dir: &str) -> String {
         let mods_dir_c = format!("{}\0", mods_dir);
         if GetFileAttributesA(mods_dir_c.as_ptr()) == INVALID_FILE_ATTRIBUTES {
             CreateDirectoryA(mods_dir_c.as_ptr(), std::ptr::null());
-            log_info(&format!("created mods dir: {}", mods_dir));
+            log_info(&format!("Created external module directory: {}", mods_dir));
         }
         mods_dir
     }
@@ -30,7 +30,7 @@ pub fn scan_mod_files(mods_dir: &str) -> Vec<(String, String)> {
         let mut find_data: WIN32_FIND_DATAA = std::mem::zeroed();
         let find_handle = FindFirstFileA(pattern.as_ptr(), &mut find_data);
         if find_handle == INVALID_HANDLE_VALUE {
-            log_info("no mods found or cannot open directory");
+            log_info("No external modules found");
             return Vec::new();
         }
 

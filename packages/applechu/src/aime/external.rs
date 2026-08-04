@@ -1,4 +1,5 @@
 use std::ffi::c_void;
+use std::sync::OnceLock;
 
 use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
@@ -65,7 +66,7 @@ pub struct ExternalAimeIo {
     led_set_color: Option<LedSetColorFn>,
     vfd_set_text: Option<VfdSetTextFn>,
     vfd_set_state: Option<VfdSetStateFn>,
-    started: std::sync::atomic::AtomicBool,
+    start_status: OnceLock<i32>,
 }
 
 unsafe impl Send for ExternalAimeIo {}
@@ -147,19 +148,26 @@ impl ExternalAimeIo {
             led_set_color,
             vfd_set_text,
             vfd_set_state,
-            started: std::sync::atomic::AtomicBool::new(false),
+            start_status: OnceLock::new(),
         })
     }
 
+    pub unsafe fn init(&self) -> i32 {
+        *self.start_status.get_or_init(|| (self.init)())
+    }
+
     unsafe fn ensure_init(&self) {
-        if !self.started.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            (self.init)();
-        }
+        let _ = self.init();
     }
 
     pub unsafe fn read_aime_id(&self) -> Option<[u8; 10]> {
         self.ensure_init();
         (self.nfc_poll)(0);
+        self.get_aime_id()
+    }
+
+    pub unsafe fn get_aime_id(&self) -> Option<[u8; 10]> {
+        self.ensure_init();
         let mut luid = [0u8; 10];
         if (self.nfc_get_aime_id)(0, luid.as_mut_ptr(), luid.len()) == S_OK {
             return Some(luid);
@@ -168,6 +176,12 @@ impl ExternalAimeIo {
     }
 
     pub unsafe fn read_felica_id(&self) -> Option<u64> {
+        self.ensure_init();
+        (self.nfc_poll)(0);
+        self.get_felica_id()
+    }
+
+    pub unsafe fn get_felica_id(&self) -> Option<u64> {
         self.ensure_init();
         let func = self.nfc_get_felica_id?;
         let mut idm = 0u64;
@@ -195,19 +209,19 @@ impl ExternalAimeIo {
     pub unsafe fn mifare_select(&self, uid: &[u8]) -> i32 {
         self.ensure_init();
         self.nfc_mifare_select
-            .map_or(1, |func| func(0, uid.as_ptr(), uid.len()))
+            .map_or(0, |func| func(0, uid.as_ptr(), uid.len()))
     }
 
     pub unsafe fn mifare_set_key(&self, key_type: u8, key: &[u8]) -> i32 {
         self.ensure_init();
         self.nfc_mifare_set_key
-            .map_or(1, |func| func(0, key_type, key.as_ptr(), key.len()))
+            .map_or(0, |func| func(0, key_type, key.as_ptr(), key.len()))
     }
 
     pub unsafe fn mifare_authenticate(&self, key_type: u8, payload: &[u8]) -> i32 {
         self.ensure_init();
         self.nfc_mifare_authenticate
-            .map_or(1, |func| func(0, key_type, payload.as_ptr(), payload.len()))
+            .map_or(0, |func| func(0, key_type, payload.as_ptr(), payload.len()))
     }
 
     pub unsafe fn felica_transact(&self, req: &[u8], res: &mut [u8]) -> Option<usize> {
@@ -230,7 +244,7 @@ impl ExternalAimeIo {
 
     pub unsafe fn to_update_mode(&self) -> i32 {
         self.ensure_init();
-        self.nfc_to_update_mode.map_or(1, |func| func(0))
+        self.nfc_to_update_mode.map_or(0, |func| func(0))
     }
 
     pub unsafe fn led_set_color(&self, r: u8, g: u8, b: u8) {
@@ -241,17 +255,17 @@ impl ExternalAimeIo {
 
     pub unsafe fn radio_on(&self) -> i32 {
         self.ensure_init();
-        self.nfc_radio_on.map_or(1, |func| func(0))
+        self.nfc_radio_on.map_or(0, |func| func(0))
     }
 
     pub unsafe fn radio_off(&self) -> i32 {
         self.ensure_init();
-        self.nfc_radio_off.map_or(1, |func| func(0))
+        self.nfc_radio_off.map_or(0, |func| func(0))
     }
 
     pub unsafe fn send_hex_data(&self, payload: &[u8], status_out: *mut u8) -> i32 {
         self.ensure_init();
-        self.nfc_send_hex_data.map_or(1, |func| {
+        self.nfc_send_hex_data.map_or(0, |func| {
             func(0, payload.as_ptr(), payload.len(), status_out)
         })
     }

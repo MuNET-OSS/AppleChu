@@ -76,7 +76,7 @@ pub fn sort_mods(mods: Vec<PendingMod>) -> Vec<PendingMod> {
                 continue;
             };
             if dep_index == index {
-                log_info(&format!("self dependency ignored: {}", m.display_name));
+                log_info(&format!("Ignored self dependency: {}", m.display_name));
                 continue;
             }
             if seen_edges.insert((dep_index, index)) {

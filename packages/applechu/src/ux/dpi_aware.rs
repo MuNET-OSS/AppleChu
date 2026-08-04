@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct DpiAwareConfig => DPI_AWARE_CONFIG_SECTION {
         section: "DpiAware",
         order: 180,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "启用 Per-Monitor V2 DPI 感知",

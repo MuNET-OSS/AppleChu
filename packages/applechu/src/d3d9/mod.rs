@@ -39,7 +39,7 @@ crate::config_section! {
     pub(crate) struct FpsDisplayConfig => FPS_DISPLAY_CONFIG_SECTION {
         section: "FpsDisplay",
         order: 210,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "FPS 显示",
@@ -51,7 +51,7 @@ crate::config_section! {
     pub(crate) struct FrameLockConfig => FRAME_LOCK_CONFIG_SECTION {
         section: "FrameLock",
         order: 220,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "帧率锁定",
@@ -71,9 +71,9 @@ pub fn init_all(api: &Api, config: &Config) {
     osd::set_fps_visible(fps_enabled);
     if fps_enabled || crate::autoplay::is_config_enabled(config) {
         if api.register_present_callback(on_present) {
-            api.log_info("in-game OSD registered (loader d3d9 callback)");
+            api.log_info("In-game overlay attached to the D3D9 frame callback");
         } else {
-            api.log_warn("in-game OSD registration failed: loader d3d9 callback unavailable");
+            api.log_warn("In-game overlay could not attach to the D3D9 frame callback");
         }
     }
 
@@ -84,9 +84,9 @@ pub fn init_all(api: &Api, config: &Config) {
         let fps = config.fps;
         if fps > 0 {
             if api.set_frame_lock(fps) {
-                api.log_info(&format!("frame lock: {}fps (loader d3d9)", fps));
+                api.log_info(&format!("Frame limit set to {fps} FPS"));
             } else {
-                api.log_warn("frame lock failed: loader d3d9 API unavailable");
+                api.log_warn("Frame limit unavailable because the D3D9 interface is missing");
             }
         }
     }

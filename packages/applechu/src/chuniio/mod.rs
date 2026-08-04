@@ -21,8 +21,8 @@ crate::config_section! {
     pub(crate) struct ExternalChuniIoConfig => CHUNI_IO_CONFIG_SECTION {
         section: "ChuniIo",
         order: 309,
-        default_enabled: true,
-        always_enabled: true,
+        default_on: true,
+        always_enabled: false,
         hidden: false,
         comment: "外部 ChuniIO DLL",
         fields: {
@@ -59,21 +59,30 @@ struct ChuniIoBackend {
 static BACKEND: Lazy<Mutex<Option<ChuniIoBackend>>> = Lazy::new(|| Mutex::new(None));
 
 #[applechu_macros::config_section(stage = Device, order = 10)]
-pub fn init(api: &Api, config: &Config) {
+pub fn init(api: &Api, config: &Config, _section: &ExternalChuniIoConfig) {
     let led_config = config
         .section::<LedOutputConfig>()
         .map_or_else(LedOutputConfig::default, |value| (*value).clone());
     led_output::init(led_config);
     let (path, single_dll) = chuniio_path(config);
     if !path.is_empty() {
+        #[cfg(all(windows, target_pointer_width = "64"))]
+        if single_dll {
+            match chu2to3::connect() {
+                Ok(version) => api.log_info(&format!(
+                    "ChuniIO connected to chu2to3 shared memory, API {version:#06x}"
+                )),
+                Err(error) => api.log_warn(&format!(
+                    "ChuniIO failed to connect to chu2to3 shared memory: {error}"
+                )),
+            }
+            return;
+        }
+
         match unsafe { ExternalChuniIo::load(&path) } {
             Ok(external) => {
                 let version = external.api_version;
-                // Single-DLL `path` mode mirrors segatools' chu2to3 engine: the
-                // 32-bit chusanApp side must publish JVS state into the
-                // `Local\\Chu2to3Shmem` shared memory so the chusanhook_x64
-                // injected into amdaemon can read it. Without this, amdaemon's
-                // OpenFileMapping fails and no JVS input reaches the game.
+                // 单 DLL 模式由 32 位游戏侧发布 JVS 状态供 64 位 AM Daemon 读取
                 if single_dll {
                     let fns = external.jvs_raw_fns();
                     chu2to3::start(api, fns);
@@ -82,21 +91,19 @@ pub fn init(api: &Api, config: &Config) {
                     *guard = Some(external);
                 }
                 api.log_info(&format!(
-                    "ChuniIo: external IO DLL loaded: {path} (API {version:#06x})"
+                    "External ChuniIO loaded: {path}, API {version:#06x}"
                 ));
                 return;
             }
             Err(err) => {
                 api.log_warn(&format!(
-                    "ChuniIo: external IO DLL failed ({err}), falling back to keyboard"
+                    "External ChuniIO failed to load; using keyboard input: {err}"
                 ));
             }
         }
     }
 
-    if jvs_init(config).is_ok() {
-        api.log_info("ChuniIo keyboard backend initialized");
-    }
+    api.log_info("Keyboard input backend enabled");
 }
 
 fn external_active() -> bool {
@@ -107,6 +114,23 @@ fn external_active() -> bool {
 }
 
 pub fn jvs_init(config: &Config) -> Result<(), i32> {
+    #[cfg(all(windows, target_pointer_width = "32"))]
+    if chu2to3::producer_active() {
+        return hresult(chu2to3::producer_jvs_init());
+    }
+
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if chu2to3::active() {
+        return Ok(());
+    }
+
+    if let Ok(guard) = EXTERNAL.lock() {
+        if let Some(external) = guard.as_ref() {
+            let status = unsafe { external.jvs_init() };
+            return hresult(status);
+        }
+    }
+
     let backend = ChuniIoBackend {
         config: ChuniIoConfig::load(config),
         hand_pos: 0,
@@ -121,6 +145,13 @@ pub fn jvs_init(config: &Config) -> Result<(), i32> {
 }
 
 pub fn jvs_poll(opbtn: &mut u8, beams: &mut u8) {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if let Some(state) = chu2to3::read() {
+        *opbtn = state.opbtn;
+        *beams = state.beams;
+        return;
+    }
+
     if let Ok(guard) = EXTERNAL.lock() {
         if let Some(external) = guard.as_ref() {
             unsafe { external.jvs_poll(opbtn, beams) };
@@ -166,6 +197,11 @@ pub fn jvs_poll(opbtn: &mut u8, beams: &mut u8) {
 }
 
 pub fn jvs_read_coin_counter() -> u16 {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if let Some(state) = chu2to3::read() {
+        return state.coin_counter;
+    }
+
     if let Ok(guard) = EXTERNAL.lock() {
         if let Some(external) = guard.as_ref() {
             return unsafe { external.jvs_read_coin() };
@@ -186,6 +222,11 @@ pub fn jvs_read_coin_counter() -> u16 {
 }
 
 pub fn effective_api_version() -> u16 {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if let Some(version) = chu2to3::api_version() {
+        return version;
+    }
+
     if let Ok(guard) = EXTERNAL.lock() {
         if let Some(external) = guard.as_ref() {
             return external.api_version;
@@ -195,10 +236,39 @@ pub fn effective_api_version() -> u16 {
 }
 
 pub fn slider_init() -> Result<(), i32> {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if chu2to3::active() {
+        return Ok(());
+    }
+
+    if let Ok(guard) = EXTERNAL.lock() {
+        if let Some(external) = guard.as_ref() {
+            return hresult(unsafe { external.slider_init() });
+        }
+    }
+    Ok(())
+}
+
+pub fn led_init() -> Result<(), i32> {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if chu2to3::active() {
+        return Ok(());
+    }
+
+    if let Ok(guard) = EXTERNAL.lock() {
+        if let Some(external) = guard.as_ref() {
+            return hresult(unsafe { external.led_init() });
+        }
+    }
     Ok(())
 }
 
 pub fn slider_start(callback: SliderCallback) {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if chu2to3::active() {
+        return;
+    }
+
     if external_active() {
         if let Ok(mut cb) = EXTERNAL_SLIDER_CB.lock() {
             *cb = Some(callback);
@@ -239,6 +309,11 @@ pub fn slider_start(callback: SliderCallback) {
 }
 
 pub fn slider_stop() {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if chu2to3::active() {
+        return;
+    }
+
     if external_active() {
         if let Ok(guard) = EXTERNAL.lock() {
             if let Some(external) = guard.as_ref() {
@@ -277,6 +352,11 @@ unsafe extern "C" fn external_slider_trampoline(state: *const u8) {
 }
 
 pub fn slider_set_leds(rgb: &[u8]) {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if chu2to3::active() {
+        return;
+    }
+
     if let Ok(guard) = EXTERNAL.lock() {
         if let Some(external) = guard.as_ref() {
             unsafe { external.slider_set_leds(rgb.as_ptr()) };
@@ -287,6 +367,11 @@ pub fn slider_set_leds(rgb: &[u8]) {
 }
 
 pub fn led_set_colors(board: u8, rgb: &mut [u8]) {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    if chu2to3::active() {
+        return;
+    }
+
     if let Ok(guard) = EXTERNAL.lock() {
         if let Some(external) = guard.as_ref() {
             unsafe { external.led_set_colors(board, rgb.as_mut_ptr()) };
@@ -296,13 +381,7 @@ pub fn led_set_colors(board: u8, rgb: &mut [u8]) {
     led_output::update(board, rgb);
 }
 
-/// Resolve the external chuniio DLL path.
-///
-/// Returns `(path, single_dll)`. `single_dll` is true when the single-DLL
-/// `path` setting is used, which triggers the chu2to3 shared-memory bridge so
-/// the amdaemon-side chusanhook_x64 can consume JVS state. The split
-/// `path32`/`path64` form is the dual-DLL mode (each process loads its own
-/// matching DLL) and does not use chu2to3.
+/// 返回外部 ChuniIO 路径以及是否需要 chu2to3 单 DLL 桥接
 fn chuniio_path(config: &Config) -> (String, bool) {
     let config = config
         .section::<ExternalChuniIoConfig>()
@@ -317,6 +396,14 @@ fn chuniio_path(config: &Config) -> (String, bool) {
         config.path32
     };
     (split, false)
+}
+
+fn hresult(status: i32) -> Result<(), i32> {
+    if status < 0 {
+        Err(status)
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(windows)]

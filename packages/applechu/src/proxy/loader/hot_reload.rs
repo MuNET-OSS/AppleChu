@@ -9,9 +9,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows_sys::Win32::Foundation::GetLastError;
-use windows_sys::Win32::System::LibraryLoader::{
-    GetModuleHandleA, GetProcAddress, LoadLibraryA,
-};
+use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress, LoadLibraryA};
 
 use chu_abi::{
     ChuModFrameFunc, ChuModInfo, ChuModInitFunc, ChuModNameFunc, ChuModReadyFunc,
@@ -45,7 +43,7 @@ pub unsafe extern "C" fn api_reload_mod(mod_name: *const c_char) -> i32 {
     match catch_unwind(AssertUnwindSafe(|| unsafe { reload_mod_by_name(&name) })) {
         Ok(ret) => ret,
         Err(_) => {
-            log_error(&format!("reload_mod panic caught: {}", name));
+            log_error(&format!("Module reload panicked: {name}"));
             -1
         }
     }
@@ -71,7 +69,9 @@ pub unsafe fn reload_all_mods() -> i32 {
 
 pub unsafe fn reload_mod_by_name(name: &str) -> i32 {
     if RELOAD_IN_PROGRESS.swap(true, Ordering::SeqCst) {
-        log_warn(&format!("reload already in progress, skip: {}", name));
+        log_warn(&format!(
+            "A module reload is already in progress; skipped: {name}"
+        ));
         return -1;
     }
     let result = reload_mod_by_name_inner(name);
@@ -87,20 +87,19 @@ unsafe fn reload_mod_by_name_inner(name: &str) -> i32 {
         };
         let wanted = normalize_name(name);
         let Some(index) = state.mods.iter().position(|m| mod_matches(m, &wanted)) else {
-            log_warn(&format!("reload target not found: {}", name));
+            log_warn(&format!("Reload target was not found: {name}"));
             return -1;
         };
         let old_mod = state.mods.remove(index);
         (index, old_mod)
     };
 
-    log_info(&format!("reload start: {}", old_mod.name));
+    log_info(&format!("Reloading external module: {}", old_mod.name));
     if let Some(shutdown) = old_mod.shutdown {
-        log_info(&format!("reload shutdown: {}", old_mod.name));
+        log_info(&format!("Stopping old module instance: {}", old_mod.name));
         call_mod_shutdown(&old_mod.name, shutdown);
     }
     if !old_mod.handle.is_null() {
-        log_info(&format!("reload FreeLibrary: {}", old_mod.name));
         FreeLibrary(old_mod.handle);
     }
 
@@ -118,12 +117,12 @@ unsafe fn reload_mod_by_name_inner(name: &str) -> i32 {
                 call_mod_on_ready(&ready_name, on_ready);
             }
             frame_hook::start_if_needed();
-            log_info(&format!("reload complete: {}", new_name));
+            log_info(&format!("External module reloaded: {new_name}"));
             0
         }
         None => {
             log_error(&format!(
-                "reload failed, mod remains unloaded: {}",
+                "External module reload failed and the module remains unloaded: {}",
                 old_mod.name
             ));
             -1
@@ -132,12 +131,12 @@ unsafe fn reload_mod_by_name_inner(name: &str) -> i32 {
 }
 
 unsafe fn load_replacement(file_name: &str, full_path: &str) -> Option<LoadedMod> {
-    log_info(&format!("reload LoadLibrary: {}", full_path));
+    log_info(&format!("Loading external module file: {full_path}"));
     let full_path_c = CString::new(full_path).ok()?;
     let mod_handle = LoadLibraryA(full_path_c.as_ptr() as *const u8);
     if mod_handle.is_null() {
         log_error(&format!(
-            "reload LoadLibrary failed: {} (err={})",
+            "Failed to load external module file: {}, error {}",
             full_path,
             GetLastError()
         ));

@@ -17,6 +17,7 @@ type LoadLibraryExAFn = unsafe extern "system" fn(*const c_char, HANDLE, u32) ->
 type LoadLibraryExWFn = unsafe extern "system" fn(*const u16, HANDLE, u32) -> usize;
 
 pub type GpaOverride = fn(usize, &str) -> Option<*const ()>;
+pub type GpaOrdinalOverride = fn(usize, u16) -> Option<*const ()>;
 pub type LoadOverrideA = fn(&str) -> Option<usize>;
 pub type LoadOverrideW = fn(&str) -> Option<usize>;
 
@@ -36,6 +37,8 @@ struct ProcAddrTable {
 
 static TABLES: Lazy<Mutex<Vec<ProcAddrTable>>> = Lazy::new(|| Mutex::new(Vec::new()));
 static GPA_OVERRIDES: Lazy<Mutex<Vec<GpaOverride>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static GPA_ORDINAL_OVERRIDES: Lazy<Mutex<Vec<GpaOrdinalOverride>>> =
+    Lazy::new(|| Mutex::new(Vec::new()));
 static LOAD_OVERRIDES_A: Lazy<Mutex<Vec<LoadOverrideA>>> = Lazy::new(|| Mutex::new(Vec::new()));
 static LOAD_OVERRIDES_W: Lazy<Mutex<Vec<LoadOverrideW>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
@@ -107,7 +110,9 @@ pub fn init(api: &Api) {
         ];
         let patched =
             hook_table::hook_table_apply(hook_table::null_module(), "kernel32.dll", &symbols);
-        api.log_info(&format!("proc_addr: kernel32 hooks installed ({patched})"));
+        api.log_info(&format!(
+            "Dynamic API compatibility ready with {patched} patched entries"
+        ));
     }
 }
 
@@ -120,7 +125,6 @@ pub fn push(dll_name: &'static str, symbols: &[HookSymbol], sync_originals: fn()
             original: symbol.original as usize,
         })
         .collect::<Vec<_>>();
-    let count = entries.len();
     let table = ProcAddrTable {
         dll_name,
         symbols: entries,
@@ -129,30 +133,30 @@ pub fn push(dll_name: &'static str, symbols: &[HookSymbol], sync_originals: fn()
     if let Ok(mut tables) = TABLES.lock() {
         tables.push(table);
     }
-    log_info(&format!(
-        "proc_addr: registered {dll_name} ({count} symbols)"
-    ));
 }
 
 pub fn push_get_proc_override(_dll_name: &'static str, handler: GpaOverride) {
     if let Ok(mut handlers) = GPA_OVERRIDES.lock() {
         handlers.push(handler);
     }
-    log_info("proc_addr: registered GetProcAddress override");
+}
+
+pub fn push_get_proc_ordinal_override(handler: GpaOrdinalOverride) {
+    if let Ok(mut handlers) = GPA_ORDINAL_OVERRIDES.lock() {
+        handlers.push(handler);
+    }
 }
 
 pub fn push_load_override_a(handler: LoadOverrideA) {
     if let Ok(mut handlers) = LOAD_OVERRIDES_A.lock() {
         handlers.push(handler);
     }
-    log_info("proc_addr: registered LoadLibraryA override");
 }
 
 pub fn push_load_override_w(handler: LoadOverrideW) {
     if let Ok(mut handlers) = LOAD_OVERRIDES_W.lock() {
         handlers.push(handler);
     }
-    log_info("proc_addr: registered LoadLibraryW override");
 }
 
 pub fn rehook_module(module: HMODULE) -> usize {
@@ -172,7 +176,7 @@ unsafe extern "system" fn hooked_get_proc_address(
     module: usize,
     proc_name: *const u8,
 ) -> *const () {
-    if module == 0 || proc_name.is_null() || (proc_name as usize) <= 0xFFFF {
+    if module == 0 || proc_name.is_null() {
         return real_gpa(module, proc_name);
     }
     if REENTER.with(Cell::get) {
@@ -181,6 +185,9 @@ unsafe extern "system" fn hooked_get_proc_address(
 
     let _guard = ReentryGuard::enter();
     let real = real_gpa(module, proc_name);
+    if (proc_name as usize) <= 0xFFFF {
+        return lookup_ordinal_override(module, proc_name as usize as u16).unwrap_or(real);
+    }
     let name = CStr::from_ptr(proc_name.cast());
     if let Some(detour) = lookup_detour(module, name, real) {
         return detour;
@@ -189,6 +196,13 @@ unsafe extern "system" fn hooked_get_proc_address(
         return detour;
     }
     real
+}
+
+fn lookup_ordinal_override(module: usize, ordinal: u16) -> Option<*const ()> {
+    let handlers = GPA_ORDINAL_OVERRIDES.lock().ok()?.clone();
+    handlers
+        .into_iter()
+        .find_map(|handler| handler(module, ordinal))
 }
 
 unsafe extern "system" fn hooked_load_library_a(name: *const c_char) -> usize {
@@ -484,10 +498,4 @@ unsafe fn wide_to_string(ptr: *const u16) -> Option<String> {
     Some(String::from_utf16_lossy(std::slice::from_raw_parts(
         ptr, len,
     )))
-}
-
-fn log_info(message: &str) {
-    if let Some(api) = crate::util::api::API.get() {
-        api.log_info(message);
-    }
 }

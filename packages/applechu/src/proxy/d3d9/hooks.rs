@@ -17,11 +17,11 @@ pub unsafe fn install_early(game_base: usize) {
     ) {
         Some(original) => {
             ORIGINAL_DIRECT3D_CREATE9.store(original as usize, Ordering::SeqCst);
-            log_info("d3d9: Direct3DCreate9 IAT hook installed");
+            log_info("D3D9 entry hook installed");
         }
         None => {
             HOOK_INSTALLED.store(false, Ordering::SeqCst);
-            log_warn("d3d9: Direct3DCreate9 import not found (IAT hook skipped)");
+            log_warn("Direct3DCreate9 was not found; D3D9 compatibility was skipped");
         }
     }
 }
@@ -54,15 +54,15 @@ unsafe fn hook_create_device(d3d: *mut c_void) {
     }
     if patch_slot(slot, detour) {
         ORIGINAL_CREATE_DEVICE.store(current, Ordering::SeqCst);
-        log_info("d3d9: IDirect3D9::CreateDevice vtable hook installed");
+        log_info("D3D9 device creation hook installed");
     } else {
-        log_warn("d3d9: CreateDevice vtable write failed");
+        log_warn("Failed to install the D3D9 device creation hook");
     }
 }
 
 unsafe extern "system" fn hooked_create_device(
     this: *mut c_void,
-    adapter: u32,
+    _adapter: u32,
     device_type: u32,
     focus_window: usize,
     behavior_flags: u32,
@@ -78,6 +78,19 @@ unsafe extern "system" fn hooked_create_device(
         if let Some(parameters) = unsafe { presentation_parameters.as_mut() } {
             parameters.force_windowed();
         }
+    }
+    // 显示适配器始终使用配置值，不沿用游戏传入值
+    let get_adapter_count: GetAdapterCountFn =
+        std::mem::transmute(*(*(this as *const *const usize)).add(D3D9_GET_ADAPTER_COUNT_INDEX));
+    let adapter_count = get_adapter_count(this);
+    let configured_adapter = crate::gfx::monitor::preferred_adapter().max(0) as u32;
+    let adapter = crate::gfx::monitor::select_adapter(adapter_count);
+    if configured_adapter == adapter {
+        log_info(&format!("D3D9 is using display adapter {adapter}"));
+    } else {
+        log_warn(&format!(
+            "gfx: requested adapter {configured_adapter}, but adapter count is {adapter_count}; using adapter 0"
+        ));
     }
     let original: CreateDeviceFn = std::mem::transmute(addr);
     let result = original(
@@ -163,11 +176,11 @@ unsafe fn hook_slot(
     }
     if patch_slot(slot, detour) {
         original.store(current, Ordering::SeqCst);
-        log_info(&format!(
-            "d3d9: IDirect3DDevice9::{name} vtable hook installed"
-        ));
+        log_info(&format!("D3D9 device method hook installed: {name}"));
     } else {
-        log_warn(&format!("d3d9: {name} vtable write failed"));
+        log_warn(&format!(
+            "Failed to install D3D9 device method hook: {name}"
+        ));
     }
 }
 

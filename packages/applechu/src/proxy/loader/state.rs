@@ -11,10 +11,7 @@ pub type HMODULE = *mut c_void;
 #[derive(Clone, Copy)]
 pub enum OutputSink {
     None,
-    Console {
-        handle: HANDLE,
-        ansi_enabled: bool,
-    },
+    Console { handle: HANDLE, ansi_enabled: bool },
     Stream(HANDLE),
 }
 

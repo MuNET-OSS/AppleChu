@@ -1,5 +1,5 @@
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use crate::aime;
 use crate::iohook::uart;
@@ -10,11 +10,18 @@ crate::config_section! {
     pub(crate) struct VfdConfig => VFD_CONFIG_SECTION {
         section: "Vfd",
         order: 390,
-        default_enabled: true,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         comment: "VFD 显示板模拟，仅 SP 模式",
-        fields: {}
+        fields: {
+            pub port: u32 = 0,
+            key: "portNo",
+            comment: "VFD 串口号；0 表示使用 SP 默认串口";
+            pub utf_conversion: bool = false,
+            key: "utfConversion",
+            comment: "启用 VFD 文本编码转换日志";
+        }
     }
 }
 
@@ -41,10 +48,12 @@ const CMD_CREATE_CHAR2: u8 = 0xA4;
 const VFD_ENC_SHIFT_JIS: u8 = 2;
 const VFD_ENC_MAX: u8 = 3;
 const VFD_BRIGHTNESS_MAX: u8 = 4;
-const VFD_PORT: u32 = 2;
+const ERROR_ACCESS_DENIED: u32 = 5;
+const ERROR_INVALID_FUNCTION: u32 = 1;
 
 static VFD: Mutex<Option<VfdDevice>> = Mutex::new(None);
 static VFD_FD: AtomicUsize = AtomicUsize::new(0);
+static VFD_PORT: AtomicUsize = AtomicUsize::new(2);
 
 #[derive(Clone)]
 pub struct VfdState {
@@ -89,7 +98,6 @@ impl VfdState {
 #[derive(Default)]
 pub struct VfdDevice {
     state: VfdState,
-    tx: Vec<u8>,
 }
 
 impl Default for VfdState {
@@ -124,7 +132,7 @@ impl VfdState {
 }
 
 impl VfdDevice {
-    pub fn write(&mut self, bytes: &[u8]) -> Result<(), i32> {
+    pub fn process(&mut self, bytes: &mut Vec<u8>, readable: &mut Vec<u8>) -> Result<(), i32> {
         let mut pos = 0;
         while pos < bytes.len() {
             if bytes[pos] == SYNC1 || bytes[pos] == SYNC2 {
@@ -134,7 +142,7 @@ impl VfdDevice {
                 }
                 let cmd = bytes[pos];
                 pos += 1;
-                self.handle_command(cmd, bytes, &mut pos)?;
+                self.handle_command(cmd, bytes, &mut pos, readable)?;
             } else {
                 let start = pos;
                 while pos < bytes.len() && bytes[pos] != SYNC1 && bytes[pos] != SYNC2 {
@@ -144,21 +152,23 @@ impl VfdDevice {
                 self.forward_text(&bytes[start..pos]);
             }
         }
+        bytes.clear();
         Ok(())
     }
 
-    pub fn drain(&mut self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.tx);
-        self.tx.clear();
-    }
-
-    fn handle_command(&mut self, cmd: u8, bytes: &[u8], pos: &mut usize) -> Result<(), i32> {
+    fn handle_command(
+        &mut self,
+        cmd: u8,
+        bytes: &[u8],
+        pos: &mut usize,
+        readable: &mut Vec<u8>,
+    ) -> Result<(), i32> {
         match cmd {
             CMD_GET_VERSION => {
                 if *pos < bytes.len() && !is_sync(bytes[*pos]) {
                     *pos += 1;
                 }
-                self.tx.extend_from_slice(&[2, b'0', b'1', b'.', b'2', b'0', 1]);
+                readable.extend_from_slice(&[2, b'0', b'1', b'.', b'2', b'0', 1]);
             }
             CMD_RESET => {
                 self.state = VfdState::default();
@@ -195,7 +205,11 @@ impl VfdDevice {
                 let y0 = take_u8(bytes, pos).unwrap_or(0);
                 let width = take_be_u16(bytes, pos).unwrap_or(0);
                 let y1 = take_u8(bytes, pos).unwrap_or(0);
-                let lines = y1.saturating_sub(y0).saturating_add(1) as usize;
+                let lines = if y1 >= y0 {
+                    usize::from(y1 - y0 + 1)
+                } else {
+                    0
+                };
                 let payload = width as usize * lines * 8;
                 *pos = (*pos + payload).min(bytes.len());
             }
@@ -282,9 +296,7 @@ impl VfdDevice {
         if is_sync(next) || next > VFD_BRIGHTNESS_MAX {
             return false;
         }
-        let end_or_sync = bytes
-            .get(*pos + 1)
-            .is_none_or(|follow| is_sync(*follow));
+        let end_or_sync = bytes.get(*pos + 1).is_none_or(|follow| is_sync(*follow));
         if !end_or_sync {
             return false;
         }
@@ -301,25 +313,38 @@ impl VfdDevice {
     condition = crate::system_config::is_sp_mode
 )]
 pub fn init(api: &Api, _config: &VfdConfig) {
+    let port = if _config.port == 0 { 2 } else { _config.port };
     if let Ok(mut device) = VFD.lock() {
         *device = Some(VfdDevice::default());
+        if let Some(device) = device.as_ref() {
+            // 安装 VFD 设备时立即发布默认状态
+            // 外部 AimeIO 后端依赖该调用清理上一次进程留下的显示状态
+            device.forward_state();
+        }
     }
+    VFD_PORT.store(port as usize, Ordering::Release);
     unsafe {
         iohook::push_handler(vfd_irp_handler);
     }
-    api.log_info("VFD emulator initialized");
+    api.log_info(&format!("VFD emulator enabled on COM{port}"));
 }
 
 unsafe fn vfd_irp_handler(irp: &mut Irp) -> i32 {
     if irp.op == IrpOp::Open {
-        if !matches_com_port(irp, VFD_PORT) {
+        if !matches_com_port(irp, vfd_port()) {
             return iohook::invoke_next(irp);
         }
-        uart::uart_init(VFD_PORT);
-        let handle = uart::fake_handle_pub(VFD_PORT);
-        irp.fd = crate::util::win32::handle_from_value(handle);
+        if VFD_FD.load(Ordering::SeqCst) != 0 {
+            return iohook::hresult_from_win32(ERROR_ACCESS_DENIED);
+        }
+        let Some(fd) = iohook::open_nul_fd() else {
+            return iohook::E_FAIL;
+        };
+        let handle = crate::util::win32::handle_value(fd);
+        uart::bind_handle(handle, vfd_port());
+        irp.fd = fd;
         VFD_FD.store(handle, Ordering::SeqCst);
-        return 1;
+        return iohook::S_OK;
     }
 
     let my_fd = VFD_FD.load(Ordering::SeqCst);
@@ -330,9 +355,10 @@ unsafe fn vfd_irp_handler(irp: &mut Irp) -> i32 {
     match irp.op {
         IrpOp::Close => {
             VFD_FD.store(0, Ordering::SeqCst);
-            1
+            uart::unbind_handle(my_fd);
+            iohook::invoke_next(irp)
         }
-        IrpOp::Read => read_vfd(irp),
+        IrpOp::Read => uart::uart_handle_irp(irp),
         IrpOp::Write => write_vfd(irp),
         IrpOp::Ioctl => uart::device_io_control(
             crate::util::win32::handle_value(irp.fd),
@@ -343,59 +369,46 @@ unsafe fn vfd_irp_handler(irp: &mut Irp) -> i32 {
             irp.ioctl_out_nbytes,
             irp.out_nbytes,
         ),
-        IrpOp::Fsync | IrpOp::Seek => 1,
-        IrpOp::Open => 1,
+        IrpOp::Fsync => iohook::S_OK,
+        IrpOp::Seek | IrpOp::Open => iohook::hresult_from_win32(ERROR_INVALID_FUNCTION),
     }
-}
-
-unsafe fn read_vfd(irp: &mut Irp) -> i32 {
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = 0;
-    }
-    if irp.read_buf.is_null() || irp.nbytes == 0 {
-        return 1;
-    }
-
-    let mut data = Vec::new();
-    if let Ok(mut vfd) = VFD.lock() {
-        if let Some(device) = vfd.as_mut() {
-            device.drain(&mut data);
-        }
-    }
-
-    let count = data.len().min(irp.nbytes as usize);
-    std::ptr::copy_nonoverlapping(data.as_ptr(), irp.read_buf, count);
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = count as u32;
-    }
-    1
 }
 
 unsafe fn write_vfd(irp: &mut Irp) -> i32 {
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = 0;
+    let hr = uart::uart_handle_irp(irp);
+    if hr < 0 {
+        return hr;
     }
-    if irp.write_buf.is_null() || irp.nbytes == 0 {
-        return 1;
-    }
-
-    let bytes = std::slice::from_raw_parts(irp.write_buf, irp.nbytes as usize);
-    if let Ok(mut vfd) = VFD.lock() {
+    let handle = crate::util::win32::handle_value(irp.fd);
+    let Some(mut written) = uart::take_written(handle) else {
+        return iohook::E_FAIL;
+    };
+    let mut readable = Vec::new();
+    let result = if let Ok(mut vfd) = VFD.lock() {
         if let Some(device) = vfd.as_mut() {
-            if device.write(bytes).is_err() {
-                return 0;
-            }
+            device.process(&mut written, &mut readable)
+        } else {
+            Err(iohook::E_FAIL)
         }
+    } else {
+        Err(iohook::E_FAIL)
+    };
+    if !uart::restore_written(handle, written) {
+        return iohook::E_FAIL;
     }
-    if !irp.out_nbytes.is_null() {
-        *irp.out_nbytes = irp.nbytes;
+    if !readable.is_empty() && !uart::push_readable(handle, &readable) {
+        return iohook::E_FAIL;
     }
-    1
+    result.map_or(iohook::E_FAIL, |()| hr)
 }
 
 unsafe fn matches_com_port(irp: &Irp, port_no: u32) -> bool {
     uart::parse_com_a(irp.open_filename_a).or_else(|| uart::parse_com_w(irp.open_filename_w))
         == Some(port_no)
+}
+
+fn vfd_port() -> u32 {
+    VFD_PORT.load(Ordering::Acquire) as u32
 }
 
 fn is_sync(byte: u8) -> bool {

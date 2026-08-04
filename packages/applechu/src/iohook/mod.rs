@@ -8,26 +8,47 @@ pub mod uart;
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
 
 use windows_sys::Win32::Foundation::{BOOL, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Threading::{
-    CRITICAL_SECTION, EnterCriticalSection, InitializeCriticalSection, LeaveCriticalSection,
+    EnterCriticalSection, InitializeCriticalSection, LeaveCriticalSection, SetEvent,
+    CRITICAL_SECTION,
 };
+use windows_sys::Win32::System::IO::OVERLAPPED;
 
 use crate::config::Config;
 use crate::util::api::Api;
 
-use self::hook_table::{HookSymbol, hook_table_apply, null_module};
+use self::hook_table::{hook_table_apply, null_module, HookSymbol};
 
 const MAX_HANDLERS: usize = 32;
 const KERNEL32_DLL: &str = "kernel32.dll";
-
-fn log_diag(msg: &str) {
-    if let Some(api) = crate::util::api::API.get() {
-        api.log_info(msg);
-    }
-}
+const ERROR_INVALID_PARAMETER: u32 = 87;
+const ERROR_ACCESS_DENIED: u32 = 5;
+const ERROR_GEN_FAILURE: u32 = 31;
+const ERROR_INVALID_HANDLE: u32 = 6;
+const ERROR_INVALID_FUNCTION: u32 = 1;
+const ERROR_NOT_SUPPORTED: u32 = 50;
+const ERROR_OUTOFMEMORY: u32 = 14;
+const ERROR_OPERATION_ABORTED: u32 = 995;
+const ERROR_INVALID_ADDRESS: u32 = 487;
+const ERROR_INTERNAL_ERROR: u32 = 1359;
+pub const ERROR_IO_PENDING: u32 = 997;
+const STATUS_SUCCESS: usize = 0;
+pub const S_OK: i32 = 0;
+pub const E_FAIL: i32 = 0x8000_4005_u32 as i32;
+pub const E_PENDING: i32 = 0x8000_000A_u32 as i32;
+const E_ABORT: i32 = 0x8000_4004_u32 as i32;
+const E_ACCESSDENIED: i32 = 0x8007_0005_u32 as i32;
+const E_HANDLE: i32 = 0x8007_0006_u32 as i32;
+const E_INVALIDARG: i32 = 0x8007_0057_u32 as i32;
+const E_NOINTERFACE: i32 = 0x8000_4002_u32 as i32;
+const E_NOTIMPL: i32 = 0x8000_4001_u32 as i32;
+const E_OUTOFMEMORY: i32 = 0x8007_000E_u32 as i32;
+const E_POINTER: i32 = 0x8000_4003_u32 as i32;
+const E_UNEXPECTED: i32 = 0x8000_FFFF_u32 as i32;
 
 type CreateFileAFn =
     unsafe extern "system" fn(*const u8, u32, u32, *const c_void, u32, u32, HANDLE) -> HANDLE;
@@ -57,6 +78,41 @@ extern "system" {
     fn GetModuleHandleW(module_name: *const u16) -> HANDLE;
     fn GetProcAddress(module: HANDLE, proc_name: *const u8) -> *const ();
     fn SetLastError(error: u32);
+    fn GetLastError() -> u32;
+}
+
+pub const fn hresult_from_win32(error: u32) -> i32 {
+    if error == 0 {
+        S_OK
+    } else {
+        (0x8007_0000 | (error & 0xFFFF)) as i32
+    }
+}
+
+const fn failed(hr: i32) -> bool {
+    hr < 0
+}
+
+unsafe fn propagate_hresult(hr: i32) {
+    let error = if (hr as u32 & 0xFFFF_0000) == 0x8007_0000 {
+        hr as u32 & 0xFFFF
+    } else {
+        match hr {
+            E_ABORT => ERROR_OPERATION_ABORTED,
+            E_ACCESSDENIED => ERROR_ACCESS_DENIED,
+            E_FAIL => ERROR_GEN_FAILURE,
+            E_HANDLE => ERROR_INVALID_HANDLE,
+            E_INVALIDARG => ERROR_INVALID_PARAMETER,
+            E_NOINTERFACE => ERROR_INVALID_FUNCTION,
+            E_NOTIMPL => ERROR_NOT_SUPPORTED,
+            E_OUTOFMEMORY => ERROR_OUTOFMEMORY,
+            E_PENDING => ERROR_IO_PENDING,
+            E_POINTER => ERROR_INVALID_ADDRESS,
+            E_UNEXPECTED => ERROR_INTERNAL_ERROR,
+            _ => ERROR_INTERNAL_ERROR,
+        }
+    };
+    SetLastError(error);
 }
 
 pub type IrpHandler = unsafe fn(&mut Irp) -> i32;
@@ -139,6 +195,8 @@ impl Drop for CriticalSectionGuard<'_> {
 }
 
 static HANDLER_LOCK: CriticalSectionLock = CriticalSectionLock::new();
+static INSTALL_ONCE: Once = Once::new();
+static INSTALLED_PATCHES: AtomicUsize = AtomicUsize::new(0);
 static mut HANDLERS: HandlerState = HandlerState {
     handlers: [None; MAX_HANDLERS],
     count: 0,
@@ -156,19 +214,18 @@ static mut ORIGINAL_FLUSH_FILE_BUFFERS: *const () = ptr::null();
 
 #[applechu_macros::config_section(stage = IoHook, order = 10)]
 pub fn init_all(api: &Api, config: &Config) {
-    unsafe {
-        let patched = install();
-        if patched != 0 {
-            api.log_info(&format!("iohook: kernel32 hooks installed ({})", patched));
-            api.log_info(&format!(
-                "iohook: ORIG_CreateFileA={:#x}, ORIG_CreateFileW={:#x}",
-                ORIGINAL_CREATE_FILE_A as usize, ORIGINAL_CREATE_FILE_W as usize
-            ));
-        }
-    }
     setupapi::init(api);
     uart::init_all(api, config);
-    serial::init(api);
+}
+
+#[applechu_macros::config_section(stage = PlatformCore, order = 25)]
+pub fn init_core(api: &Api, _config: &Config) {
+    unsafe {
+        let patched = install();
+        api.log_info(&format!(
+            "Device I/O compatibility ready with {patched} patched entries"
+        ));
+    }
 }
 
 pub unsafe fn push_handler(handler: IrpHandler) -> bool {
@@ -183,14 +240,16 @@ pub unsafe fn push_handler(handler: IrpHandler) -> bool {
 }
 
 pub unsafe fn open_nul_fd() -> Option<HANDLE> {
-    let create_file: CreateFileAFn = resolve_original(ORIGINAL_CREATE_FILE_A, b"CreateFileA\0");
+    // 平台设备可能早于显式 IoHook 阶段调用这里，因此需要惰性初始化
+    install();
+    let create_file: CreateFileWFn = resolve_original(ORIGINAL_CREATE_FILE_W, b"CreateFileW\0");
     let handle = create_file(
-        b"NUL\0".as_ptr(),
+        [b'N' as u16, b'U' as u16, b'L' as u16, 0].as_ptr(),
         0xC000_0000,
         3,
         ptr::null(),
         3,
-        0,
+        0x4000_0000,
         ptr::null_mut(),
     );
     (handle != INVALID_HANDLE_VALUE).then_some(handle)
@@ -212,68 +271,75 @@ pub unsafe fn invoke_next(irp: &mut Irp) -> i32 {
         }
     };
 
-    match handler {
+    let hr = match handler {
         Some(handler) => handler(irp),
         None => fallthrough(irp),
+    };
+    if failed(hr) {
+        irp.next_handler = usize::MAX;
     }
+    hr
 }
 
 pub unsafe fn install() -> usize {
-    let symbols = [
-        HookSymbol {
-            name: "CreateFileA",
-            patch: hooked_create_file_a as *const (),
-            original: ptr::addr_of_mut!(ORIGINAL_CREATE_FILE_A),
-        },
-        HookSymbol {
-            name: "CreateFileW",
-            patch: hooked_create_file_w as *const (),
-            original: ptr::addr_of_mut!(ORIGINAL_CREATE_FILE_W),
-        },
-        HookSymbol {
-            name: "ReadFile",
-            patch: hooked_read_file as *const (),
-            original: ptr::addr_of_mut!(ORIGINAL_READ_FILE),
-        },
-        HookSymbol {
-            name: "WriteFile",
-            patch: hooked_write_file as *const (),
-            original: ptr::addr_of_mut!(ORIGINAL_WRITE_FILE),
-        },
-        HookSymbol {
-            name: "DeviceIoControl",
-            patch: hooked_device_io_control as *const (),
-            original: ptr::addr_of_mut!(ORIGINAL_DEVICE_IO_CONTROL),
-        },
-        HookSymbol {
-            name: "CloseHandle",
-            patch: hooked_close_handle as *const (),
-            original: ptr::addr_of_mut!(ORIGINAL_CLOSE_HANDLE),
-        },
-        HookSymbol {
-            name: "SetFilePointer",
-            patch: hooked_set_file_pointer as *const (),
-            original: ptr::addr_of_mut!(ORIGINAL_SET_FILE_POINTER),
-        },
-        HookSymbol {
-            name: "SetFilePointerEx",
-            patch: hooked_set_file_pointer_ex as *const (),
-            original: ptr::addr_of_mut!(ORIGINAL_SET_FILE_POINTER_EX),
-        },
-        HookSymbol {
-            name: "FlushFileBuffers",
-            patch: hooked_flush_file_buffers as *const (),
-            original: ptr::addr_of_mut!(ORIGINAL_FLUSH_FILE_BUFFERS),
-        },
-    ];
-    hook_table_apply(null_module(), KERNEL32_DLL, &symbols)
+    INSTALL_ONCE.call_once(|| unsafe {
+        let symbols = [
+            HookSymbol {
+                name: "CreateFileA",
+                patch: hooked_create_file_a as *const (),
+                original: ptr::addr_of_mut!(ORIGINAL_CREATE_FILE_A),
+            },
+            HookSymbol {
+                name: "CreateFileW",
+                patch: hooked_create_file_w as *const (),
+                original: ptr::addr_of_mut!(ORIGINAL_CREATE_FILE_W),
+            },
+            HookSymbol {
+                name: "ReadFile",
+                patch: hooked_read_file as *const (),
+                original: ptr::addr_of_mut!(ORIGINAL_READ_FILE),
+            },
+            HookSymbol {
+                name: "WriteFile",
+                patch: hooked_write_file as *const (),
+                original: ptr::addr_of_mut!(ORIGINAL_WRITE_FILE),
+            },
+            HookSymbol {
+                name: "DeviceIoControl",
+                patch: hooked_device_io_control as *const (),
+                original: ptr::addr_of_mut!(ORIGINAL_DEVICE_IO_CONTROL),
+            },
+            HookSymbol {
+                name: "CloseHandle",
+                patch: hooked_close_handle as *const (),
+                original: ptr::addr_of_mut!(ORIGINAL_CLOSE_HANDLE),
+            },
+            HookSymbol {
+                name: "SetFilePointer",
+                patch: hooked_set_file_pointer as *const (),
+                original: ptr::addr_of_mut!(ORIGINAL_SET_FILE_POINTER),
+            },
+            HookSymbol {
+                name: "SetFilePointerEx",
+                patch: hooked_set_file_pointer_ex as *const (),
+                original: ptr::addr_of_mut!(ORIGINAL_SET_FILE_POINTER_EX),
+            },
+            HookSymbol {
+                name: "FlushFileBuffers",
+                patch: hooked_flush_file_buffers as *const (),
+                original: ptr::addr_of_mut!(ORIGINAL_FLUSH_FILE_BUFFERS),
+            },
+        ];
+        let patched = hook_table_apply(null_module(), KERNEL32_DLL, &symbols);
+        proc_addr::push(KERNEL32_DLL, &symbols, sync_originals);
+        INSTALLED_PATCHES.store(patched, Ordering::Release);
+    });
+    INSTALLED_PATCHES.load(Ordering::Acquire)
 }
 
+fn sync_originals() {}
+
 unsafe fn fallthrough(irp: &mut Irp) -> i32 {
-    if irp.op == IrpOp::Open && !irp.open_filename_a.is_null() {
-        let name = std::ffi::CStr::from_ptr(irp.open_filename_a.cast()).to_string_lossy();
-        log_diag(&format!("iohook fallthrough OPEN(A): {}", name));
-    }
     match irp.op {
         IrpOp::Open if !irp.open_filename_a.is_null() => {
             let original: CreateFileAFn =
@@ -288,7 +354,11 @@ unsafe fn fallthrough(irp: &mut Irp) -> i32 {
                 irp.open_template,
             );
             irp.fd = handle;
-            (handle != INVALID_HANDLE_VALUE) as i32
+            if handle == INVALID_HANDLE_VALUE {
+                hresult_from_win32(GetLastError())
+            } else {
+                S_OK
+            }
         }
         IrpOp::Open => {
             let original: CreateFileWFn =
@@ -303,60 +373,102 @@ unsafe fn fallthrough(irp: &mut Irp) -> i32 {
                 irp.open_template,
             );
             irp.fd = handle;
-            (handle != INVALID_HANDLE_VALUE) as i32
+            if handle == INVALID_HANDLE_VALUE {
+                hresult_from_win32(GetLastError())
+            } else {
+                S_OK
+            }
         }
         IrpOp::Close => {
             let original: CloseHandleFn = resolve_original(ORIGINAL_CLOSE_HANDLE, b"CloseHandle\0");
-            original(irp.fd)
+            if original(irp.fd) == 0 {
+                hresult_from_win32(GetLastError())
+            } else {
+                S_OK
+            }
         }
         IrpOp::Read => {
             let original: ReadFileFn = resolve_original(ORIGINAL_READ_FILE, b"ReadFile\0");
-            original(
+            let mut transferred = 0;
+            let ok = original(
                 irp.fd,
                 irp.read_buf.cast(),
                 irp.nbytes,
-                irp.out_nbytes,
+                &mut transferred,
                 irp.ovl,
-            )
+            );
+            if !irp.out_nbytes.is_null() {
+                *irp.out_nbytes = transferred;
+            }
+            if ok == 0 {
+                hresult_from_win32(GetLastError())
+            } else {
+                S_OK
+            }
         }
         IrpOp::Write => {
             let original: WriteFileFn = resolve_original(ORIGINAL_WRITE_FILE, b"WriteFile\0");
-            original(
+            let mut transferred = 0;
+            let ok = original(
                 irp.fd,
                 irp.write_buf.cast(),
                 irp.nbytes,
-                irp.out_nbytes,
+                &mut transferred,
                 irp.ovl,
-            )
+            );
+            if !irp.out_nbytes.is_null() {
+                *irp.out_nbytes = transferred;
+            }
+            if ok == 0 {
+                hresult_from_win32(GetLastError())
+            } else {
+                S_OK
+            }
         }
         IrpOp::Ioctl => {
             let original: DeviceIoControlFn =
                 resolve_original(ORIGINAL_DEVICE_IO_CONTROL, b"DeviceIoControl\0");
-            original(
+            let mut transferred = 0;
+            let ok = original(
                 irp.fd,
                 irp.ioctl,
                 irp.ioctl_in,
                 irp.ioctl_in_nbytes,
                 irp.ioctl_out,
                 irp.ioctl_out_nbytes,
-                irp.out_nbytes,
+                &mut transferred,
                 irp.ovl,
-            )
+            );
+            if !irp.out_nbytes.is_null() {
+                *irp.out_nbytes = transferred;
+            }
+            if ok == 0 {
+                hresult_from_win32(GetLastError())
+            } else {
+                S_OK
+            }
         }
         IrpOp::Fsync => {
             let original: FlushFileBuffersFn =
                 resolve_original(ORIGINAL_FLUSH_FILE_BUFFERS, b"FlushFileBuffers\0");
-            original(irp.fd)
+            if original(irp.fd) == 0 {
+                hresult_from_win32(GetLastError())
+            } else {
+                S_OK
+            }
         }
         IrpOp::Seek => {
             let original: SetFilePointerExFn =
                 resolve_original(ORIGINAL_SET_FILE_POINTER_EX, b"SetFilePointerEx\0");
             let mut new_pos: i64 = 0;
             let ok = original(irp.fd, irp.seek_distance, &mut new_pos, irp.seek_method);
-            if ok != 0 && !irp.seek_result.is_null() {
+            if ok == 0 {
+                return hresult_from_win32(GetLastError());
+            }
+            if !irp.seek_result.is_null() {
                 *irp.seek_result = new_pos;
             }
-            ok
+            S_OK
         }
     }
 }
@@ -404,9 +516,12 @@ unsafe extern "system" fn hooked_create_file_a(
         flags,
         template,
     );
-    if invoke_next(&mut irp) == 0 {
+    let hr = invoke_next(&mut irp);
+    if failed(hr) {
+        propagate_hresult(hr);
         INVALID_HANDLE_VALUE
     } else {
+        set_last_error(0);
         irp.fd
     }
 }
@@ -430,9 +545,12 @@ unsafe extern "system" fn hooked_create_file_w(
         flags,
         template,
     );
-    if invoke_next(&mut irp) == 0 {
+    let hr = invoke_next(&mut irp);
+    if failed(hr) {
+        propagate_hresult(hr);
         INVALID_HANDLE_VALUE
     } else {
+        set_last_error(0);
         irp.fd
     }
 }
@@ -483,10 +601,34 @@ unsafe extern "system" fn hooked_read_file(
     out_nbytes: *mut u32,
     ovl: *mut c_void,
 ) -> BOOL {
-    let mut irp = make_fd_irp(IrpOp::Read, fd, ovl, out_nbytes);
+    if fd.is_null() || fd == INVALID_HANDLE_VALUE || buf.is_null() {
+        set_last_error(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    if ovl.is_null() && out_nbytes.is_null() {
+        set_last_error(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    if ovl.is_null() {
+        *out_nbytes = 0;
+    }
+    let mut transferred = 0;
+    let reported = &mut transferred;
+    let mut irp = make_fd_irp(IrpOp::Read, fd, ovl, reported);
     irp.read_buf = buf.cast();
     irp.nbytes = nbytes;
-    invoke_next(&mut irp)
+    let result = invoke_next(&mut irp);
+    if result == E_PENDING {
+        if !out_nbytes.is_null() {
+            *out_nbytes = 0;
+        }
+        return complete_overlapped(ptr::null_mut(), ovl, 0);
+    }
+    if failed(result) {
+        propagate_hresult(result);
+        return 0;
+    }
+    complete_overlapped(out_nbytes, ovl, transferred)
 }
 
 unsafe extern "system" fn hooked_write_file(
@@ -496,10 +638,28 @@ unsafe extern "system" fn hooked_write_file(
     out_nbytes: *mut u32,
     ovl: *mut c_void,
 ) -> BOOL {
-    let mut irp = make_fd_irp(IrpOp::Write, fd, ovl, out_nbytes);
+    if fd.is_null() || fd == INVALID_HANDLE_VALUE || buf.is_null() {
+        set_last_error(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    if ovl.is_null() && out_nbytes.is_null() {
+        set_last_error(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    if ovl.is_null() {
+        *out_nbytes = 0;
+    }
+    let mut transferred = 0;
+    let reported = &mut transferred;
+    let mut irp = make_fd_irp(IrpOp::Write, fd, ovl, reported);
     irp.write_buf = buf.cast();
     irp.nbytes = nbytes;
-    invoke_next(&mut irp)
+    let hr = invoke_next(&mut irp);
+    if failed(hr) {
+        propagate_hresult(hr);
+        return 0;
+    }
+    complete_overlapped(out_nbytes, ovl, transferred)
 }
 
 unsafe extern "system" fn hooked_device_io_control(
@@ -512,23 +672,86 @@ unsafe extern "system" fn hooked_device_io_control(
     returned: *mut u32,
     ovl: *mut c_void,
 ) -> BOOL {
-    let mut irp = make_fd_irp(IrpOp::Ioctl, fd, ovl, returned);
+    if fd.is_null() || fd == INVALID_HANDLE_VALUE {
+        set_last_error(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    if ovl.is_null() {
+        if returned.is_null() {
+            set_last_error(ERROR_INVALID_PARAMETER);
+            return 0;
+        }
+        *returned = 0;
+    }
+
+    let mut transferred = 0;
+    let mut irp = make_fd_irp(IrpOp::Ioctl, fd, ovl, &mut transferred);
     irp.ioctl = ioctl;
     irp.ioctl_in = in_buf;
     irp.ioctl_in_nbytes = in_nbytes;
     irp.ioctl_out = out_buf;
     irp.ioctl_out_nbytes = out_nbytes;
-    invoke_next(&mut irp)
+    let result = invoke_next(&mut irp);
+    if failed(result) {
+        // ERROR_MORE_DATA 等失败仍可能返回有效字节数
+        if !returned.is_null() {
+            *returned = transferred;
+        }
+        propagate_hresult(result);
+        return 0;
+    }
+    complete_overlapped(returned, ovl, transferred)
+}
+
+unsafe fn complete_overlapped(returned: *mut u32, ovl: *mut c_void, transferred: u32) -> BOOL {
+    if !ovl.is_null() {
+        let ovl = ovl.cast::<OVERLAPPED>();
+        (*ovl).Internal = STATUS_SUCCESS;
+        (*ovl).InternalHigh = transferred as usize;
+        if !(*ovl).hEvent.is_null() {
+            SetEvent((*ovl).hEvent);
+        }
+    }
+
+    if returned.is_null() {
+        set_last_error(ERROR_IO_PENDING);
+        0
+    } else {
+        *returned = transferred;
+        set_last_error(0);
+        1
+    }
 }
 
 unsafe extern "system" fn hooked_close_handle(fd: HANDLE) -> BOOL {
+    if fd.is_null() || fd == INVALID_HANDLE_VALUE {
+        set_last_error(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
     let mut irp = make_fd_irp(IrpOp::Close, fd, ptr::null_mut(), ptr::null_mut());
-    invoke_next(&mut irp)
+    let hr = invoke_next(&mut irp);
+    if failed(hr) {
+        propagate_hresult(hr);
+        0
+    } else {
+        1
+    }
 }
 
 unsafe extern "system" fn hooked_flush_file_buffers(fd: HANDLE) -> BOOL {
+    if fd.is_null() || fd == INVALID_HANDLE_VALUE {
+        set_last_error(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
     let mut irp = make_fd_irp(IrpOp::Fsync, fd, ptr::null_mut(), ptr::null_mut());
-    invoke_next(&mut irp)
+    let hr = invoke_next(&mut irp);
+    if failed(hr) {
+        propagate_hresult(hr);
+        0
+    } else {
+        set_last_error(0);
+        1
+    }
 }
 
 unsafe extern "system" fn hooked_set_file_pointer(
@@ -538,6 +761,10 @@ unsafe extern "system" fn hooked_set_file_pointer(
     method: u32,
 ) -> u32 {
     const INVALID_SET_FILE_POINTER: u32 = 0xFFFF_FFFF;
+    if fd.is_null() || fd == INVALID_HANDLE_VALUE {
+        set_last_error(ERROR_INVALID_PARAMETER);
+        return INVALID_SET_FILE_POINTER;
+    }
     let mut irp = make_fd_irp(IrpOp::Seek, fd, ptr::null_mut(), ptr::null_mut());
     irp.seek_distance = if distance_high.is_null() {
         distance as i64
@@ -548,12 +775,15 @@ unsafe extern "system" fn hooked_set_file_pointer(
     irp.seek_method = method;
     let mut result_pos: i64 = 0;
     irp.seek_result = &mut result_pos;
-    if invoke_next(&mut irp) == 0 {
+    let hr = invoke_next(&mut irp);
+    if failed(hr) {
+        propagate_hresult(hr);
         return INVALID_SET_FILE_POINTER;
     }
     if !distance_high.is_null() {
         *distance_high = (result_pos >> 32) as i32;
     }
+    set_last_error(0);
     result_pos as u32
 }
 
@@ -563,16 +793,25 @@ unsafe extern "system" fn hooked_set_file_pointer_ex(
     new_pointer: *mut i64,
     method: u32,
 ) -> BOOL {
+    if fd.is_null() || fd == INVALID_HANDLE_VALUE {
+        set_last_error(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
     let mut irp = make_fd_irp(IrpOp::Seek, fd, ptr::null_mut(), ptr::null_mut());
     irp.seek_distance = distance;
     irp.seek_method = method;
     let mut result_pos: i64 = 0;
     irp.seek_result = &mut result_pos;
     let result = invoke_next(&mut irp);
-    if result != 0 && !new_pointer.is_null() {
+    if failed(result) {
+        propagate_hresult(result);
+        return 0;
+    }
+    if !new_pointer.is_null() {
         *new_pointer = result_pos;
     }
-    result
+    set_last_error(0);
+    1
 }
 
 fn make_fd_irp(op: IrpOp, fd: HANDLE, ovl: *mut c_void, out_nbytes: *mut u32) -> Irp {

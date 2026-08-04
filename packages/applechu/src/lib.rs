@@ -7,51 +7,70 @@
     clippy::too_many_arguments
 )]
 mod aime;
+pub mod amdaemon;
 mod autoplay;
 mod chuniio;
-mod config;
+pub mod config;
 mod d3d9;
+#[cfg(target_arch = "x86")]
 mod early_patch;
 mod gfx;
 mod io4;
-mod iohook;
+pub mod iohook;
 mod led;
-mod module_registry;
+pub mod module_registry;
+#[cfg(target_arch = "x86")]
 mod national_match;
 mod patch_engine;
 mod patches;
-mod platform;
+pub mod platform;
+#[cfg(target_arch = "x86")]
 mod proxy;
+#[cfg(target_arch = "x86")]
+mod schema_embed;
 mod slider;
 mod system_config;
-mod util;
+pub mod util;
 mod ux;
 mod vfd;
 
+#[cfg(target_arch = "x86")]
 use std::ffi::c_char;
 
+#[cfg(target_arch = "x86")]
 use crate::config::{Config, DiagnosticLevel};
-use crate::util::api::{Api, ChuModAPI, ChuModInfo, API};
+use crate::util::api::Api;
+#[cfg(target_arch = "x86")]
+use crate::util::api::API;
+#[cfg(target_arch = "x86")]
+use crate::util::api::{ChuModAPI, ChuModInfo};
 
+#[cfg(target_arch = "x86")]
 const NAME: &[u8] = b"AppleChu\0";
+#[cfg(target_arch = "x86")]
 const VERSION: &[u8] = b"1.0.0\0";
+#[cfg(target_arch = "x86")]
 const MIN_LOADER_VERSION: &[u8] = b"1.0.0\0";
 
+#[cfg(target_arch = "x86")]
 #[no_mangle]
 pub extern "C" fn chumod_name() -> *const c_char {
     NAME.as_ptr().cast()
 }
 
+#[cfg(target_arch = "x86")]
 #[no_mangle]
 pub extern "C" fn chumod_version() -> *const c_char {
     VERSION.as_ptr().cast()
 }
 
+#[cfg(target_arch = "x86")]
 #[no_mangle]
 pub extern "C" fn chumod_min_loader_version() -> *const c_char {
     MIN_LOADER_VERSION.as_ptr().cast()
 }
 
+#[cfg(target_arch = "x86")]
 #[no_mangle]
 pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) -> i32 {
     if info.is_null() || api.is_null() {
@@ -67,7 +86,7 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
         return -1;
     };
 
-    api.log_info("--- Begin chusan_pre_startup ---");
+    api.log_info("Game feature initialization started");
     let config = Config::global(&base_dir(info));
     early_patch::flush_logs(api);
     for diagnostic in config.diagnostics() {
@@ -80,7 +99,7 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
         return -1;
     }
     if let Err(error) = config.sync() {
-        api.log_warn(&format!("写入规范化 AppleChu.toml 失败: {error}"));
+        api.log_warn(&format!("Failed to update AppleChu.toml: {error}"));
     }
     patches::install_pre_entry_hooks(api, config);
 
@@ -89,18 +108,21 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
 
     module_registry::init_all(api, config);
 
-    api.log_info("--- End chusan_pre_startup ---");
+    api.log_info("Game feature initialization completed");
     0
 }
 
 fn pin_dll(api: &Api, name: &str) {
     let cname = format!("{}\0", name);
     let handle = unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryA(cname.as_ptr()) };
-    if !handle.is_null() {
-        api.log_info(&format!("pinned {}", name));
+    if handle.is_null() {
+        api.log_warn(&format!("Failed to load dependency: {name}"));
+    } else {
+        api.log_info(&format!("Dependency loaded: {name}"));
     }
 }
 
+#[cfg(target_arch = "x86")]
 fn base_dir(info: *const ChuModInfo) -> String {
     let Some(info) = (unsafe { info.as_ref() }) else {
         return ".".to_owned();
@@ -119,10 +141,11 @@ fn base_dir(info: *const ChuModInfo) -> String {
         .to_owned()
 }
 
+#[cfg(target_arch = "x86")]
 #[no_mangle]
 pub extern "C" fn chumod_shutdown() {
     if let Some(api) = API.get() {
         module_registry::shutdown_all();
-        api.log_info("AppleChu unloaded");
+        api.log_info("AppleChu game module unloaded");
     }
 }

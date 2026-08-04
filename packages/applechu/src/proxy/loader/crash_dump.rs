@@ -1,4 +1,4 @@
-mod stack_trace;
+pub(super) mod stack_trace;
 
 use std::ffi::c_void;
 use std::fs::{self, File};
@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS;
 
-use self::stack_trace::{append_registers, append_stack_trace, module_offset, NativeContext};
+use self::stack_trace::module_offset;
+#[cfg(target_arch = "x86")]
+use self::stack_trace::{append_registers, append_stack_trace, NativeContext};
 use super::log::{log_error, log_info};
 use super::pe::get_self_base_dir;
 use super::{crash_ui, crash_zip};
@@ -50,7 +52,7 @@ pub unsafe fn install() {
     AddVectoredExceptionHandler(1, vectored_handler);
     // UEF 作为第二道防线，兜底 VEH 放行的未处理异常
     SetUnhandledExceptionFilter(Some(unhandled_exception_filter));
-    log_info("crash handler installed (VEH + UEF)");
+    log_info("Game crash handler ready");
 }
 
 /// 仅对明确致命的异常码弹崩溃窗口；放行 C++ 异常 / 断点 / 普通 first-chance，
@@ -85,25 +87,35 @@ unsafe extern "system" fn unhandled_exception_filter(exception: *mut EXCEPTION_P
 
 unsafe fn handle_crash(exception: *mut EXCEPTION_POINTERS) {
     let report = build_crash_text(exception);
-    log_error("game crashed Nya... (>_<)");
+    log_error("Game crashed");
     for line in report.lines() {
         log_error(line);
     }
+    save_and_show(&report, "crash");
+}
 
+pub(super) unsafe fn handle_deliberate_exit(report: &str) {
+    if CRASH_HANDLING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    save_and_show(report, "exit");
+}
+
+unsafe fn save_and_show(report: &str, prefix: &str) {
     let base_dir = get_self_base_dir().unwrap_or_default();
     let crash_dir = format!("{}\\mods\\crash", base_dir);
     CreateDirectoryA(format!("{}\\mods\0", base_dir).as_ptr(), null());
     CreateDirectoryA(format!("{}\0", crash_dir).as_ptr(), null());
 
     let stamp = timestamp();
-    let log_path = format!("{}\\crash_{}.log", crash_dir, stamp);
+    let log_path = format!("{}\\{}_{}.log", crash_dir, prefix, stamp);
     if let Ok(mut file) = File::create(&log_path) {
         let _ = file.write_all(report.as_bytes());
     }
 
     let zip_path = crash_zip::build(&base_dir, &crash_dir, &stamp, &log_path);
 
-    crash_ui::show(&report, &crash_dir, zip_path.as_deref());
+    crash_ui::show(report, &crash_dir, zip_path.as_deref());
 }
 
 unsafe fn build_crash_text(exception: *mut EXCEPTION_POINTERS) -> String {
@@ -173,7 +185,7 @@ unsafe fn timestamp() -> String {
 pub fn log_panic_context(scope: &str, name: &str) {
     let base_dir = get_self_base_dir().unwrap_or_default();
     if base_dir.is_empty() {
-        log_error(&format!("panic caught in {}: {}", scope, name));
+        log_error(&format!("Rust panic caught: {scope}: {name}"));
         return;
     }
     let crash_dir = format!("{}\\mods\\crash", base_dir);
@@ -188,7 +200,7 @@ pub fn log_panic_context(scope: &str, name: &str) {
         let _ = file.write_all(report.as_bytes());
     }
     log_error(&format!(
-        "panic caught in {}: {} (context={})",
+        "Rust panic caught: {}: {}; report: {}",
         scope, name, path
     ));
     crash_ui::show(&report, &crash_dir, None);

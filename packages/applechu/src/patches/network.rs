@@ -51,7 +51,7 @@ crate::config_section! {
     pub(crate) struct DisableEncryptionConfig => DISABLE_ENCRYPTION_CONFIG_SECTION {
         section: "DisableEncryption",
         order: 160,
-        default_enabled: false,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         comment: "关闭网络加密，私服需要",
@@ -63,7 +63,7 @@ crate::config_section! {
     pub(crate) struct DisableTlsConfig => DISABLE_TLS_CONFIG_SECTION {
         section: "DisableTLS",
         order: 170,
-        default_enabled: false,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         comment: "关闭 TLS，私服需要",
@@ -80,7 +80,9 @@ pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
         .section::<DisableEncryptionConfig>()
         .is_some_and(|config| config.enabled)
     {
-        apply_patch(api, &VersionedPatch {
+        apply_patch(
+            api,
+            &VersionedPatch {
                 name: "disable encryption 1",
                 variants: &[
                     PatchVariant {
@@ -98,8 +100,11 @@ pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
                         patch: &[0x00],
                     },
                 ],
-        });
-        apply_patch(api, &VersionedPatch {
+            },
+        );
+        apply_patch(
+            api,
+            &VersionedPatch {
                 name: "disable encryption 2",
                 variants: &[
                     PatchVariant {
@@ -117,13 +122,16 @@ pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
                         patch: &[0x00],
                     },
                 ],
-        });
+            },
+        );
     }
     if config
         .section::<DisableTlsConfig>()
         .is_some_and(|config| config.enabled)
     {
-        apply_patch(api, &VersionedPatch {
+        apply_patch(
+            api,
+            &VersionedPatch {
                 name: "disable TLS flag",
                 variants: &[PatchVariant {
                     pattern: Some(TLS_FLAG_PATTERN),
@@ -132,7 +140,8 @@ pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
                     expected: &[0x80],
                     patch: &[0x00],
                 }],
-        });
+            },
+        );
     }
 }
 

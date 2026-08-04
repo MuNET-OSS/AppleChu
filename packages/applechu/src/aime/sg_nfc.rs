@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-use super::external::ExternalAimeIo;
 use super::{external_call, AimeReader};
 
 const SYNC: u8 = 0xE0;
@@ -55,8 +54,6 @@ pub struct SgNfcDevice {
     authdata_path: PathBuf,
     mifare: [[[u8; 16]; 4]; 16],
     felica_idm: u64,
-    rx: Vec<u8>,
-    tx: Vec<u8>,
 }
 
 impl SgNfcDevice {
@@ -68,28 +65,40 @@ impl SgNfcDevice {
             authdata_path: config.authdata_path,
             mifare: [[[0; 16]; 4]; 16],
             felica_idm: 0,
-            rx: Vec::new(),
-            tx: Vec::new(),
         }
     }
 
-    pub fn write(&mut self, reader: &AimeReader, bytes: &[u8]) {
-        self.rx.extend_from_slice(bytes);
-        while let Some(frame) = decode_frame(&mut self.rx) {
-            if let Some(response) = self.dispatch(reader, &frame) {
-                encode_frame_into(&mut self.tx, &response);
+    pub fn process(
+        &mut self,
+        reader: &mut AimeReader,
+        written: &mut Vec<u8>,
+        readable: &mut Vec<u8>,
+    ) {
+        /*
+         * sg-reader.c 将同一份 UART 写缓冲依次交给 sg_nfc_transact 和
+         * sg_led_transact。两个事务解析器看到的是同一帧，只有最后才移除
+         * 请求；不能让第一个解析器在地址不匹配时提前消费 RGB LED 帧。
+         */
+        if let Some(frame) = decode_frame(written) {
+            // 同一帧先交给 NFC，再交给 RGB LED
+            if frame.get(1).copied() == Some(self.addr) {
+                if let Some(response) = self.dispatch_nfc(reader, &frame) {
+                    encode_frame_into(readable, &response);
+                }
+            }
+            if frame.get(1).copied() == Some(LED_ADDR) {
+                if let Some(response) = self.dispatch_led_frame(&frame) {
+                    encode_frame_into(readable, &response);
+                }
             }
         }
+
+        // sg_reader 在两个事务解析器返回后无条件清空写缓冲；解帧失败时
+        // 也会丢弃当前 WriteFile 提交的全部请求
+        written.clear();
     }
 
-    pub fn read(&mut self, out: &mut [u8]) -> usize {
-        let count = out.len().min(self.tx.len());
-        out[..count].copy_from_slice(&self.tx[..count]);
-        self.tx.drain(..count);
-        count
-    }
-
-    fn dispatch(&mut self, reader: &AimeReader, req: &[u8]) -> Option<Vec<u8>> {
+    fn dispatch_nfc(&mut self, reader: &mut AimeReader, req: &[u8]) -> Option<Vec<u8>> {
         if req.len() < 5 || req[0] as usize != req.len() {
             return None;
         }
@@ -102,14 +111,14 @@ impl SgNfcDevice {
         let seq = req[2];
         let cmd = req[3];
         let payload = &req[5..];
-        if addr == LED_ADDR {
-            return self.dispatch_led(seq, cmd, payload);
-        }
         if addr != self.addr {
             return None;
         }
         let result = match cmd {
-            CMD_RESET => Ok(response(addr, seq, cmd, 3, &[])),
+            CMD_RESET => {
+                protocol_log(&format!("Aime NFC {addr:02x}: reset"));
+                Ok(response(addr, seq, cmd, 3, &[]))
+            }
             CMD_GET_FW_VERSION => Ok(self.version_response(addr, seq, cmd, true)),
             CMD_GET_HW_VERSION => Ok(self.version_response(addr, seq, cmd, false)),
             CMD_POLL => self.cmd_poll(reader, addr, seq, cmd),
@@ -124,15 +133,9 @@ impl SgNfcDevice {
             CMD_MIFARE_AUTHENTICATE_BANA => {
                 self.cmd_mifare_authenticate(addr, seq, cmd, KEY_BANA, payload)
             }
-            CMD_RADIO_ON => {
-                self.cmd_unit(addr, seq, cmd, |external| unsafe { external.radio_on() })
-            }
-            CMD_RADIO_OFF => {
-                self.cmd_unit(addr, seq, cmd, |external| unsafe { external.radio_off() })
-            }
-            CMD_TO_UPDATE_MODE => self.cmd_unit(addr, seq, cmd, |external| unsafe {
-                external.to_update_mode()
-            }),
+            CMD_RADIO_ON => self.cmd_unit(addr, seq, cmd, reader.radio_on()),
+            CMD_RADIO_OFF => self.cmd_unit(addr, seq, cmd, reader.radio_off()),
+            CMD_TO_UPDATE_MODE => self.cmd_unit(addr, seq, cmd, reader.to_update_mode()),
             CMD_SEND_HEX_DATA => self.cmd_send_hex_data(addr, seq, cmd, payload),
             _ => Err(()),
         };
@@ -140,10 +143,25 @@ impl SgNfcDevice {
         Some(result.unwrap_or_else(|_| response(addr, seq, cmd, 1, &[])))
     }
 
+    fn dispatch_led_frame(&self, req: &[u8]) -> Option<Vec<u8>> {
+        if req.len() < 5 || req[0] as usize != req.len() {
+            return None;
+        }
+        let payload_len = req[4] as usize;
+        if payload_len != req.len().saturating_sub(5) || req[1] != LED_ADDR {
+            return None;
+        }
+        self.dispatch_led(req[2], req[3], &req[5..])
+    }
+
     fn dispatch_led(&self, seq: u8, cmd: u8, payload: &[u8]) -> Option<Vec<u8>> {
         match cmd {
-            LED_CMD_RESET => Some(response(LED_ADDR, seq, cmd, 0, &[0])),
+            LED_CMD_RESET => {
+                protocol_log(&format!("Aime RGB LED {LED_ADDR:02x}: reset"));
+                Some(response(LED_ADDR, seq, cmd, 0, &[0]))
+            }
             LED_CMD_GET_INFO => {
+                protocol_log(&format!("Aime RGB LED {LED_ADDR:02x}: get info"));
                 let index = self.gen.saturating_sub(1) as usize;
                 Some(response(LED_ADDR, seq, cmd, 0, LED_VERSION[index]))
             }
@@ -170,10 +188,18 @@ impl SgNfcDevice {
         response(addr, seq, cmd, 0, data)
     }
 
-    fn cmd_poll(&mut self, reader: &AimeReader, addr: u8, seq: u8, cmd: u8) -> Result<Vec<u8>, ()> {
-        external_call(|external| unsafe { external.poll() });
+    fn cmd_poll(
+        &mut self,
+        reader: &mut AimeReader,
+        addr: u8,
+        seq: u8,
+        cmd: u8,
+    ) -> Result<Vec<u8>, ()> {
+        if reader.poll() < 0 {
+            return Err(());
+        }
 
-        if let Some(idm) = reader.read_felica_id() {
+        if let Some(idm) = reader.felica_id() {
             self.felica_idm = idm;
             let mut payload = Vec::with_capacity(19);
             payload.push(1);
@@ -184,7 +210,7 @@ impl SgNfcDevice {
             return Ok(response(addr, seq, cmd, 0, &payload));
         }
 
-        if let Some(luid) = reader.read_aime_id() {
+        if let Some(luid) = reader.aime_id() {
             self.populate_aime_card(&luid)?;
             let uid = reader.read_mifare_uid().unwrap_or([1, 2, 3, 4]);
             let mut payload = Vec::with_capacity(7);
@@ -227,7 +253,7 @@ impl SgNfcDevice {
             block[2] = self.proxy_flag;
             block[3] = 0x01;
         } else if block_no >= 5 {
-            self.read_authdata_block(block_no, &mut block);
+            self.read_authdata_block(block_no, &mut block)?;
         } else {
             block = self.mifare[0][block_no as usize];
         }
@@ -246,7 +272,9 @@ impl SgNfcDevice {
         if payload.len() < 9 || payload[8] as usize + 8 != payload.len() {
             return Err(());
         }
-        let felica_req = &payload[8..];
+        // sg_nfc 的 payload 中前 8 字节是 IDm，FeliCa 帧从第 9 字节开始
+        // 事务层把长度字节一起交给后端，响应也原样带回长度字节
+        let felica_req = &payload[8..8 + payload[8] as usize];
         let mut felica_res = [0u8; 250];
         if let Some(count) = reader.felica_transact(felica_req, &mut felica_res) {
             return Ok(response(addr, seq, cmd, 0, &felica_res[..count]));
@@ -260,7 +288,11 @@ impl SgNfcDevice {
         if payload.len() != 4 {
             return Err(());
         }
-        external_call(|external| unsafe { external.mifare_select(payload) });
+        if external_call(|external| unsafe { external.mifare_select(payload) })
+            .is_some_and(|status| status < 0)
+        {
+            return Err(());
+        }
         Ok(response(addr, seq, cmd, 0, &[]))
     }
 
@@ -272,7 +304,11 @@ impl SgNfcDevice {
         key_type: u8,
         payload: &[u8],
     ) -> Result<Vec<u8>, ()> {
-        external_call(|external| unsafe { external.mifare_set_key(key_type, payload) });
+        if external_call(|external| unsafe { external.mifare_set_key(key_type, payload) })
+            .is_some_and(|status| status < 0)
+        {
+            return Err(());
+        }
         Ok(response(addr, seq, cmd, 0, &[]))
     }
 
@@ -284,21 +320,28 @@ impl SgNfcDevice {
         key_type: u8,
         payload: &[u8],
     ) -> Result<Vec<u8>, ()> {
-        external_call(|external| unsafe { external.mifare_authenticate(key_type, payload) });
+        if external_call(|external| unsafe { external.mifare_authenticate(key_type, payload) })
+            .is_some_and(|status| status < 0)
+        {
+            return Err(());
+        }
         Ok(response(addr, seq, cmd, 0, &[]))
     }
 
-    fn cmd_unit<F>(&self, addr: u8, seq: u8, cmd: u8, call: F) -> Result<Vec<u8>, ()>
-    where
-        F: FnOnce(&ExternalAimeIo) -> i32,
-    {
-        external_call(call);
+    fn cmd_unit(&self, addr: u8, seq: u8, cmd: u8, status: i32) -> Result<Vec<u8>, ()> {
+        if status < 0 {
+            return Err(());
+        }
         Ok(response(addr, seq, cmd, 0, &[]))
     }
 
     fn cmd_send_hex_data(&self, addr: u8, seq: u8, cmd: u8, payload: &[u8]) -> Result<Vec<u8>, ()> {
         let mut status = if payload.len() == 0x2B { 0x20 } else { 0 };
-        external_call(|external| unsafe { external.send_hex_data(payload, &mut status) });
+        if external_call(|external| unsafe { external.send_hex_data(payload, &mut status) })
+            .is_some_and(|result| result < 0)
+        {
+            return Err(());
+        }
         Ok(response(addr, seq, cmd, status, &[]))
     }
 
@@ -313,7 +356,7 @@ impl SgNfcDevice {
         Ok(())
     }
 
-    fn read_authdata_block(&self, block_no: u8, block: &mut [u8; 16]) {
+    fn read_authdata_block(&self, block_no: u8, block: &mut [u8; 16]) -> Result<(), ()> {
         let offset = match block_no {
             6 => 16,
             8 => 32,
@@ -324,13 +367,13 @@ impl SgNfcDevice {
             14 => 114,
             _ => 0,
         };
-        if let Ok(authdata) = fs::read(&self.authdata_path) {
-            for (idx, byte) in block.iter_mut().enumerate() {
-                if let Some(value) = authdata.get(offset + idx) {
-                    *byte = *value;
-                }
+        let authdata = fs::read(&self.authdata_path).map_err(|_| ())?;
+        for (idx, byte) in block.iter_mut().enumerate() {
+            if let Some(value) = authdata.get(offset + idx) {
+                *byte = *value;
             }
         }
+        Ok(())
     }
 
     fn felica_transact(&self, req: &[u8], res: &mut [u8; 250]) -> Result<usize, ()> {
@@ -409,11 +452,17 @@ impl SgNfcDevice {
             if block == 0x82 {
                 out.extend_from_slice(&self.felica_idm.to_be_bytes());
                 out.extend_from_slice(&0x0078000000000000u64.to_be_bytes());
-            } else {
-                out.extend_from_slice(&[0; 16]);
             }
+            // 其他块仍需追加一个零块
+            out.extend_from_slice(&[0; 16]);
         }
         Ok(())
+    }
+}
+
+fn protocol_log(message: &str) {
+    if let Some(api) = crate::util::api::API.get() {
+        api.log_info(message);
     }
 }
 
@@ -431,16 +480,16 @@ fn response(addr: u8, seq: u8, cmd: u8, status: u8, payload: &[u8]) -> Vec<u8> {
     out
 }
 
-fn decode_frame(rx: &mut Vec<u8>) -> Option<Vec<u8>> {
-    let sync = rx.iter().position(|byte| *byte == SYNC)?;
-    if sync > 0 {
-        rx.drain(..sync);
+/// 一次写入必须恰好包含一帧
+fn decode_frame(rx: &[u8]) -> Option<Vec<u8>> {
+    if rx.first().copied() != Some(SYNC) {
+        return None;
     }
     let mut decoded = Vec::with_capacity(256);
     let mut escape = false;
-    for (idx, byte) in rx.iter().copied().enumerate().skip(1) {
+
+    for (raw_index, byte) in rx.iter().copied().enumerate().skip(1) {
         if byte == SYNC {
-            rx.drain(..idx);
             return None;
         }
         if byte == ESC {
@@ -449,19 +498,23 @@ fn decode_frame(rx: &mut Vec<u8>) -> Option<Vec<u8>> {
         }
         decoded.push(if escape { byte.wrapping_add(1) } else { byte });
         escape = false;
-        if let Some(frame_len) = decoded.first().copied() {
-            if decoded.len() == frame_len as usize + 1 {
-                let checksum = decoded[..decoded.len() - 1]
-                    .iter()
-                    .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
-                rx.drain(..=idx);
-                if checksum == decoded[decoded.len() - 1] {
-                    decoded.pop();
-                    return Some(decoded);
-                }
-                return None;
-            }
+        let Some(frame_len) = decoded.first().copied() else {
+            continue;
+        };
+        if decoded.len() != frame_len as usize + 1 {
+            continue;
         }
+        let checksum = decoded[..decoded.len() - 1]
+            .iter()
+            .fold(0u8, |sum, value| sum.wrapping_add(*value));
+        if checksum != decoded[decoded.len() - 1] {
+            return None;
+        }
+        decoded.pop();
+        if raw_index + 1 != rx.len() {
+            return None;
+        }
+        return Some(decoded);
     }
     None
 }

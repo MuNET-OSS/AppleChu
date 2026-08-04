@@ -1,4 +1,4 @@
-use std::ffi::{CStr, CString, OsString, c_char, c_void};
+use std::ffi::{c_char, c_void, CStr, CString, OsString};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Component, Path, PathBuf};
 
@@ -251,4 +251,9 @@ unsafe fn write_reg_bytes(data: *mut u8, data_len: *mut u32, bytes: &[u8]) -> u3
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len());
     }
     ERROR_SUCCESS
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    pub fn OutputDebugStringA(lpOutputString: *const c_char);
 }

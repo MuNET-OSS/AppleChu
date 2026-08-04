@@ -1,4 +1,5 @@
 use super::{Config, DiagnosticLevel};
+use crate::amdaemon::AmdaemonConfig;
 use crate::gfx::d3d9::D3D9ExConfig;
 use crate::system_config::SystemConfig;
 use std::fs;
@@ -8,7 +9,7 @@ crate::config_section! {
     pub struct TestSectionConfig => TEST_SECTION {
         section: "TestSection",
         order: 900,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "测试栏目",
@@ -73,19 +74,39 @@ fn device_lost_fix_is_not_a_registered_section() {
 }
 
 #[test]
-fn disabled_is_applied_centrally() {
-    // Given: 用户通过统一语义关闭一个默认开启的栏目。
-    let source = "Version = \"1\"\n[D3D9Ex]\nDisabled = true\n";
-
-    // When: 中央框架注入模块配置。
-    let config = Config::parse(".", source).expect("测试配置必须有效");
+fn amdaemon_is_a_container_with_independent_controls() {
+    let source = "Version = \"1\"\n[Amdaemon]\n";
+    let config = Config::parse(".", source).expect("TOML 语法必须有效");
     let section = config
-        .section::<D3D9ExConfig>()
-        .expect("D3D9Ex 必须完成注入");
+        .section::<AmdaemonConfig>()
+        .expect("AM Daemon 配置必须完成注入");
+    let output = config.to_toml();
 
-    // Then: 模块获得关闭状态，规范化结果保留用户选择。
-    assert!(!section.enabled);
-    assert!(config.to_toml().contains("[D3D9Ex]\nDisabled = true"));
+    assert!(section.enabled);
+    assert!(!section.auto_start);
+    assert!(!section.append_config_args);
+    assert!(output.contains("[Amdaemon]\n"));
+    assert!(output.contains("AutoStart = false"));
+    assert!(output.contains("AppendConfigArgs = false"));
+}
+
+#[test]
+fn section_state_matches_section_presence() {
+    let absent = Config::parse(".", "Version = \"1\"\n").expect("测试配置必须有效");
+    assert!(!absent.section::<TestSectionConfig>().unwrap().enabled);
+    assert!(
+        !absent
+            .section::<crate::gfx::WindowConfig>()
+            .unwrap()
+            .enabled
+    );
+    assert!(absent.to_toml().contains("#[Window]"));
+
+    let present = Config::parse(".", "Version = \"1\"\n[TestSection]\n").expect("测试配置必须有效");
+    assert!(present.section::<TestSectionConfig>().unwrap().enabled);
+
+    let commented = Config::parse(".", "Version = \"1\"\n").expect("测试配置必须有效");
+    assert!(!commented.section::<SystemConfig>().unwrap().enabled);
 }
 
 #[test]
@@ -139,6 +160,103 @@ fn unknown_entries_are_reported_and_removed() {
         .any(|diagnostic| diagnostic.message.contains("UnknownSection")));
     assert!(!output.contains("obsolete"));
     assert!(!output.contains("UnknownSection"));
+}
+
+#[test]
+fn amdaemon_sections_are_normalized_by_game_proxy() {
+    let source = concat!(
+        "Version = \"1\"\n",
+        "[Dns]\n",
+        "default = \"127.0.0.1\"\n",
+        "[UnknownSection]\n",
+        "value = 1\n",
+    );
+
+    let config = Config::parse(".", source).expect("TOML 语法必须有效");
+    let output = config.to_toml();
+
+    assert!(output.contains("[Dns]"));
+    assert!(output.contains("default = \"127.0.0.1\""));
+    assert!(output.contains("#router = \"localhost\""));
+    assert!(!output.contains("[UnknownSection]"));
+}
+
+#[test]
+fn amdaemon_values_survive_game_side_normalization() {
+    let source = concat!(
+        "Version = \"1\"\n",
+        "[Keychip]\n",
+        "id = \"A69E-01A88888888\"\n",
+        "[Dns]\n",
+        "default = \"127.0.0.1\"\n",
+    );
+
+    let config = Config::parse(".", source).expect("TOML 语法必须有效");
+    let output = config.to_toml();
+
+    assert!(output.contains("[Keychip]"));
+    assert!(output.contains("id = \"A69E-01A88888888\""));
+    assert!(output.contains("[Dns]"));
+    assert!(output.contains("default = \"127.0.0.1\""));
+}
+
+#[test]
+fn empty_dns_section_is_filled_by_game_proxy() {
+    let config = Config::parse(".", "Version = \"1\"\n[Dns]\n").expect("TOML 语法必须有效");
+    let dns = config
+        .section::<crate::amdaemon::DnsConfig>()
+        .expect("DNS 配置必须完成注入");
+    let output = config.to_toml();
+
+    assert!(dns.enabled);
+    assert_eq!(dns.default, "localhost");
+    assert!(output.contains("[Dns]"));
+    assert!(output.contains("#default = \"localhost\""));
+    assert!(output.contains("#title = \"title\""));
+}
+
+#[test]
+fn required_internal_sections_are_not_emitted() {
+    let source = concat!(
+        "Version = \"1\"\n",
+        "[Clock]\n",
+        "timezone = \"real\"\n",
+        "[Hwmon]\n",
+        "[PCBID]\n",
+        "serialNo = \"ACAE01A99999999\"\n",
+        "[VFS]\n",
+        "option = \"option\"\n",
+    );
+    let config = Config::parse(".", source).expect("TOML 语法必须有效");
+    let output = config.to_toml();
+
+    for name in [
+        "Clock",
+        "Misc",
+        "AMVideo",
+        "DVD",
+        "Epay",
+        "OpenSsl",
+        "Hwmon",
+        "Hwreset",
+        "HookMode",
+        "SliderDevice",
+    ] {
+        assert!(!output.contains(&format!("[{name}]")));
+    }
+    assert!(output.contains("[PCBID]"));
+    assert!(output.contains("[VFS]"));
+}
+
+#[test]
+fn slider_device_remains_enabled_without_public_section() {
+    let config = Config::parse(".", "Version = \"1\"\n").expect("TOML 语法必须有效");
+    let slider = config
+        .section::<crate::slider::SliderDeviceConfig>()
+        .expect("触摸条设备配置必须完成注入");
+
+    assert!(slider.enabled);
+    assert!(!config.to_toml().contains("[SliderDevice]"));
 }
 
 #[test]
@@ -203,12 +321,13 @@ fn module_value_types_validate_their_domain() {
         .expect("系统配置必须完成注入");
 
     assert!(system.is_sp_mode());
-    assert_eq!(system.dipsw(), [true, true, true]);
+    // 无效模式回退为 SP，SP 对应 DIPSW3 OFF
+    assert_eq!(system.dipsw(), [true, true, false]);
     assert_eq!(config.diagnostics().len(), 2);
     assert!(config
         .diagnostics()
         .iter()
-        .all(|diagnostic| diagnostic.message.contains("值无效")));
+        .all(|diagnostic| diagnostic.message.contains("Invalid value")));
 }
 
 #[test]
@@ -232,8 +351,6 @@ fn optional_user_features_are_disabled_by_default() {
         "DisableTimer",
         "SkipMapAnimation",
         "Unlock120fps",
-        "DisableEncryption",
-        "DisableTLS",
         "DpiAware",
     ];
     let sections = Config::registered_sections();
@@ -243,13 +360,13 @@ fn optional_user_features_are_disabled_by_default() {
             .iter()
             .find(|section| section.name == name)
             .unwrap_or_else(|| panic!("缺少配置栏目 {name}"));
-        assert!(!section.default_enabled, "{name} 不应默认启用");
+        assert!(!section.default_on(), "{name} 不应默认启用");
     }
 }
 
 #[test]
 fn window_defaults_to_fullscreen() {
-    let config = Config::parse(".", "Version = \"1\"\n").expect("测试配置必须有效");
+    let config = Config::parse(".", "Version = \"1\"\n[Window]\n").expect("测试配置必须有效");
     let window = config
         .section::<crate::gfx::WindowConfig>()
         .expect("窗口配置必须完成注入");

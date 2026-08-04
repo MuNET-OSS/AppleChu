@@ -2,8 +2,8 @@ use super::{Io4Ops, Io4State};
 use super::{BUTTON_SERVICE, BUTTON_TEST};
 use crate::chuniio;
 
-// API < 0x0101 的旧版映射，segatools 早期把 IR beam 顺序搞反过，
-// 报告该版本的 DLL 是按错误映射写的，必须保留兼容
+// API < 0x0101 的旧版映射使用反向 IR beam 顺序
+// 报告该版本的 DLL 按旧映射写入，因此必须保留兼容
 const IR_MASKS_V1: [(u16, u16); 6] = [
     (0, 1 << 13),
     (1 << 13, 0),

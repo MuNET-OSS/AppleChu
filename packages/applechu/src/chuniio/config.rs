@@ -48,8 +48,8 @@ crate::config_section! {
     pub(crate) struct ButtonsConfig => BUTTONS_CONFIG_SECTION {
         section: "Buttons",
         order: 310,
-        default_enabled: true,
-        always_enabled: true,
+        default_on: true,
+        always_enabled: false,
         hidden: false,
         comment: "机台按钮按键映射",
         fields: {
@@ -69,8 +69,8 @@ crate::config_section! {
     pub(crate) struct AirConfig => AIR_CONFIG_SECTION {
         section: "Air",
         order: 311,
-        default_enabled: true,
-        always_enabled: true,
+        default_on: true,
+        always_enabled: false,
         hidden: false,
         comment: "红外传感器按键映射",
         fields: {
@@ -94,8 +94,8 @@ crate::config_section! {
     pub(crate) struct SliderKeysConfig => SLIDER_KEYS_CONFIG_SECTION {
         section: "Slider",
         order: 312,
-        default_enabled: true,
-        always_enabled: true,
+        default_on: true,
+        always_enabled: false,
         hidden: false,
         comment: "触摸条按键映射",
         fields: {

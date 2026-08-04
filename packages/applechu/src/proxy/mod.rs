@@ -65,6 +65,7 @@ unsafe extern "system" fn DllMain(h_module: HMODULE, reason: u32, _reserved: *mu
             crate::early_patch::apply(HIJACK.game_base);
         }
         DLL_PROCESS_DETACH if _reserved.is_null() => {
+            crate::amdaemon::stop_auto_started();
             loader::unload_mods();
         }
         _ => {}
@@ -87,23 +88,16 @@ unsafe fn install_entry_hijack() {
 
     let game = GetModuleHandleA(ptr::null());
     if game.is_null() {
-        diag("hijack: GetModuleHandleA(NULL) returned null");
         return;
     }
     let game_base = game as usize;
     let Some(entry) = entry_pe::image_entry_point(game_base) else {
-        diag("hijack: image_entry_point failed");
         return;
     };
     let Some(overwritten_len) = x86_decoder::instruction_span(entry, JMP_REL32_LEN) else {
-        diag(&format!("hijack: instruction_span failed at {:p}", entry));
         return;
     };
     if overwritten_len > HIJACK_ORIGINAL_LEN {
-        diag(&format!(
-            "hijack: overwritten_len {} too large",
-            overwritten_len
-        ));
         return;
     }
 
@@ -129,10 +123,6 @@ unsafe fn install_entry_hijack() {
     HIJACK.trampoline = trampoline;
     HIJACK.stub = stub;
     HIJACK.installed = true;
-    diag(&format!(
-        "hijack: installed, entry={:p}, overwritten={}, stub={:p}, trampoline={:p}",
-        entry, overwritten_len, stub, trampoline
-    ));
 }
 
 unsafe fn build_trampoline(entry: *mut u8, overwritten_len: usize) -> Option<*mut u8> {
@@ -187,6 +177,10 @@ unsafe extern "system" fn entry_bootstrap() {
 
     loader::crash_dump::install();
     loader::load_mods();
+    if let Some(base_dir) = base_dir() {
+        crate::amdaemon::auto_start(&base_dir);
+    }
+    loader::exit_trace::install();
 
     if HIJACK.game_base != 0 {
         d3d9::install_early(HIJACK.game_base);
@@ -245,15 +239,4 @@ unsafe fn write_rel32(slot: *mut u8, next_instruction: *const u8, target: *const
 
 unsafe fn flush_icache(address: *const c_void, len: usize) {
     let _ = FlushInstructionCache(GetCurrentProcess(), address, len);
-}
-
-fn diag(msg: &str) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("hijack_diag.log")
-    {
-        let _ = writeln!(f, "{}", msg);
-    }
 }

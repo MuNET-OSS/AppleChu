@@ -1,6 +1,18 @@
+#[cfg(target_arch = "x86")]
 mod autoplay;
 
+#[cfg(target_arch = "x86")]
 pub use autoplay::{is_enabled, was_used};
+
+#[cfg(not(target_arch = "x86"))]
+pub fn is_enabled() -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "x86"))]
+pub fn was_used() -> bool {
+    false
+}
 
 use crate::config::Config;
 use crate::util::api::Api;
@@ -9,7 +21,7 @@ crate::config_section! {
     pub(crate) struct AutoplayConfig => AUTOPLAY_CONFIG_SECTION {
         section: "Autoplay",
         order: 180,
-        default_enabled: false,
+        default_on: false,
         always_enabled: false,
         hidden: false,
         comment: "自动游玩",
@@ -26,8 +38,13 @@ crate::config_section! {
     shutdown = shutdown_all
 )]
 pub fn init_all(api: &Api, config: &AutoplayConfig) {
-    autoplay::init(api, &config.hotkey);
-    autoplay::init_upload_guard(api);
+    #[cfg(target_arch = "x86")]
+    {
+        autoplay::init(api, &config.hotkey);
+        autoplay::init_upload_guard(api);
+    }
+    #[cfg(not(target_arch = "x86"))]
+    let _ = (api, config);
 }
 
 pub fn is_config_enabled(config: &Config) -> bool {
@@ -37,6 +54,9 @@ pub fn is_config_enabled(config: &Config) -> bool {
 }
 
 pub fn shutdown_all() {
-    autoplay::shutdown_upload_guard();
-    autoplay::shutdown();
+    #[cfg(target_arch = "x86")]
+    {
+        autoplay::shutdown_upload_guard();
+        autoplay::shutdown();
+    }
 }

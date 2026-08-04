@@ -1,0 +1,374 @@
+//! 供游戏侧启动和 AM Daemon 侧共享的配置支持
+
+use crate::config::DiagnosticLevel;
+use crate::iohook::hook_table::{hook_table_apply, null_module, HookSymbol};
+use crate::util::api::{Api, StandaloneLogger, API};
+
+#[cfg(windows)]
+use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(windows)]
+use std::sync::{Mutex, OnceLock};
+
+const DEFAULT_CONFIG_FILES: [&str; 6] = [
+    "config_common.json",
+    "config_server.json",
+    "config_client.json",
+    "config_cvt.json",
+    "config_sp.json",
+    "config_hook.json",
+];
+
+pub const INHERIT_CONSOLE_ENV: &str = "APPLECHU_AMDAEMON_INHERIT_CONSOLE";
+
+#[cfg(windows)]
+static AUTO_STARTED_CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
+static TERMINATE_AUTO_STARTED: AtomicBool = AtomicBool::new(false);
+
+crate::config_section! {
+    pub(crate) struct AmdaemonConfig => AMDAEMON_CONFIG_SECTION {
+        section: "Amdaemon",
+        order: 5,
+        default_on: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "AM Daemon x64 winmm 劫持配置",
+        fields: {
+            pub auto_start: bool = false,
+            key: "AutoStart",
+            emit_default: true,
+            comment: "由游戏侧启动 AM Daemon";
+            pub executable: String = String::from("amdaemon.exe"),
+            key: "Executable",
+            comment: "AM Daemon 可执行文件名";
+            pub hide_window: bool = false,
+            key: "HideWindow",
+            comment: "手动启动 AM Daemon 时隐藏控制台窗口";
+            pub terminate_on_exit: bool = true,
+            key: "TerminateOnExit",
+            comment: "AppleChu 退出时终止 AM Daemon";
+            pub append_config_args: bool = false,
+            key: "AppendConfigArgs",
+            emit_default: true,
+            comment: "无完整 -c 参数时补充 JSON 配置";
+            pub config_files: Vec<String> = DEFAULT_CONFIG_FILES.iter().map(|file| (*file).to_owned()).collect(),
+            key: "ConfigFiles",
+            comment: "AM Daemon JSON 配置文件列表";
+        }
+    }
+}
+
+crate::config_section! {
+    pub struct DnsConfig => DNS_CONFIG_SECTION {
+        section: "Dns",
+        order: 980,
+        default_on: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "AM 平台 DNS 映射",
+        fields: {
+            pub default: String = String::from("localhost"),
+            comment: "未单独指定时使用的服务器地址";
+            pub router: String = String::from("localhost"),
+            comment: "店内路由服务器";
+            pub startup: String = String::from("localhost"),
+            comment: "启动认证服务器";
+            pub billing: String = String::from("localhost"),
+            comment: "计费服务器";
+            pub aimedb: String = String::from("localhost"),
+            comment: "AimeDB 服务器";
+            pub title: String = String::from("title"),
+            comment: "标题/其他服务器";
+            pub replace_host: bool = false,
+            key: "replaceHost",
+            comment: "替换 HTTP Host";
+            pub startup_port: u16 = 0,
+            key: "startupPort",
+            comment: "启动认证服务器端口";
+            pub billing_port: u16 = 0,
+            key: "billingPort",
+            comment: "计费服务器端口";
+            pub aimedb_port: u16 = 0,
+            key: "aimedbPort",
+            comment: "AimeDB 服务器端口";
+        }
+    }
+}
+
+crate::config_section! {
+    pub struct KeychipConfig => KEYCHIP_CONFIG_SECTION {
+        section: "Keychip",
+        order: 970,
+        default_on: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "NuSec/keychip 模拟",
+        fields: {
+            pub keychip_id: String = String::from("A69E-01A88888888"),
+            key: "id",
+            comment: "Keychip ID";
+            pub game_id: String = String::from("SDHD"),
+            key: "gameId",
+            comment: "游戏 ID，默认 SDHD";
+            pub platform_id: String = String::new(),
+            key: "platformId",
+            comment: "平台 ID；留空时使用当前平台默认值";
+            pub region: u32 = 1,
+            comment: "区域编号";
+            pub billing_type: u32 = 1,
+            key: "billingType",
+            comment: "计费类型";
+            pub system_flag: u32 = 0x64,
+            key: "systemFlag",
+            comment: "系统标志";
+            pub subnet: String = String::from("192.168.139.0"),
+            comment: "店内网络子网";
+            pub billing_ca: String = String::from("DEVICE\\ca.crt"),
+            key: "billingCa",
+            comment: "计费 CA 证书";
+            pub billing_pub: String = String::from("DEVICE\\billing.pub"),
+            key: "billingPub",
+            comment: "计费公钥";
+        }
+    }
+}
+
+crate::config_section! {
+    pub struct NetEnvConfig => NETENV_CONFIG_SECTION {
+        section: "NetEnv",
+        order: 975,
+        default_on: true,
+        always_enabled: false,
+        hidden: false,
+        comment: "店内网络适配器模拟",
+        fields: {
+            pub addr_suffix: u32 = 11,
+            key: "addrSuffix",
+            comment: "机台 IP 的末尾地址";
+            pub router_suffix: u32 = 254,
+            key: "routerSuffix",
+            comment: "店内路由 IP 的末尾地址";
+            pub mac_addr: String = String::from("01:02:03:04:05:06"),
+            key: "macAddr",
+            comment: "虚拟网卡 MAC 地址";
+            pub broadcast: String = String::from("255.255.255.255"),
+            comment: "UDP 广播目标地址";
+        }
+    }
+}
+
+crate::config_section! {
+    pub struct EpayConfig => EPAY_CONFIG_SECTION {
+        section: "Epay",
+        order: 972,
+        default_on: true,
+        always_enabled: false,
+        hidden: true,
+        comment: "AM Daemon ThincaPayment 兼容",
+        fields: {
+            pub hook: bool = true,
+            comment: "使用本地支付接口桩，使 AM Daemon 可在无支付终端时启动";
+        }
+    }
+}
+
+crate::config_section! {
+    pub struct OpenSslConfig => OPENSSL_CONFIG_SECTION {
+        section: "OpenSsl",
+        order: 975,
+        default_on: true,
+        always_enabled: false,
+        hidden: true,
+        comment: "AM Daemon OpenSSL 兼容",
+        fields: {
+            pub force_legacy_sha: bool = false,
+            key: "forceLegacySha",
+            comment: "强制禁用 OpenSSL SHA 扩展路径";
+        }
+    }
+}
+
+pub fn config_files(base_dir: &str) -> Vec<String> {
+    let config = crate::config::Config::global(base_dir);
+    config
+        .section::<AmdaemonConfig>()
+        .filter(|section| !section.config_files.is_empty())
+        .map_or_else(
+            || {
+                DEFAULT_CONFIG_FILES
+                    .iter()
+                    .map(|file| (*file).to_owned())
+                    .collect()
+            },
+            |section| section.config_files.clone(),
+        )
+}
+
+pub fn append_config_args(base_dir: &str) -> bool {
+    crate::config::Config::global(base_dir)
+        .section::<AmdaemonConfig>()
+        .is_some_and(|section| section.append_config_args)
+}
+
+pub fn hide_window(base_dir: &str) -> bool {
+    crate::config::Config::global(base_dir)
+        .section::<AmdaemonConfig>()
+        .is_some_and(|section| section.hide_window)
+}
+
+/// 在游戏侧 winhttp 加载后异步启动 AM Daemon，避免在 DllMain 中调用进程创建 API
+#[cfg(windows)]
+pub fn auto_start(base_dir: &str) {
+    let config = crate::config::Config::global(base_dir);
+    let Some(section) = config.section::<AmdaemonConfig>() else {
+        return;
+    };
+    if !section.auto_start {
+        return;
+    }
+
+    let base_dir = std::path::Path::new(base_dir).to_owned();
+    let executable = section.executable.clone();
+    let terminate_on_exit = section.terminate_on_exit;
+    let config_files = config_files(base_dir.to_string_lossy().as_ref());
+    TERMINATE_AUTO_STARTED.store(terminate_on_exit, Ordering::Release);
+
+    std::thread::spawn(move || {
+        let children = AUTO_STARTED_CHILD.get_or_init(|| Mutex::new(None));
+        let Ok(mut guard) = children.lock() else {
+            log_error("Unable to access AM Daemon child process state");
+            return;
+        };
+
+        if let Some(child) = guard.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return,
+                Ok(Some(_)) | Err(_) => *guard = None,
+            }
+        }
+
+        let executable_path = std::path::Path::new(&executable);
+        let executable_path = if executable_path.is_absolute() {
+            executable_path.to_owned()
+        } else {
+            base_dir.join(executable_path)
+        };
+        let mut command = Command::new(&executable_path);
+        command.current_dir(&base_dir).arg("-c");
+        command.args(&config_files);
+        command.env(INHERIT_CONSOLE_ENV, "1");
+
+        match command.spawn() {
+            Ok(child) => {
+                log_info(&format!(
+                    "AM Daemon started with output attached to the game console: {}",
+                    executable_path.display()
+                ));
+                *guard = Some(child);
+            }
+            Err(error) => log_error(&format!(
+                "Failed to start AM Daemon: {}: {error}",
+                executable_path.display()
+            )),
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn auto_start(_base_dir: &str) {}
+
+#[cfg(windows)]
+pub fn stop_auto_started() {
+    if !TERMINATE_AUTO_STARTED.load(Ordering::Acquire) {
+        return;
+    }
+    let Some(children) = AUTO_STARTED_CHILD.get() else {
+        return;
+    };
+    let Ok(mut guard) = children.lock() else {
+        return;
+    };
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+        log_info("Stopped the automatically started AM Daemon");
+    }
+}
+
+#[cfg(not(windows))]
+pub fn stop_auto_started() {}
+
+fn log_info(message: &str) {
+    if let Some(api) = API.get() {
+        api.log_info(message);
+    }
+}
+
+fn log_error(message: &str) {
+    if let Some(api) = API.get() {
+        api.log_error(message);
+    }
+}
+
+/// 在 AM Daemon 的 CRT 初始化前替换 ANSI 和宽字符命令行入口
+pub unsafe fn install_command_line_hooks(
+    get_command_line_a: *const (),
+    get_command_line_w: *const (),
+) -> usize {
+    let symbols = [
+        HookSymbol {
+            name: "GetCommandLineA",
+            patch: get_command_line_a,
+            original: std::ptr::null_mut(),
+        },
+        HookSymbol {
+            name: "GetCommandLineW",
+            patch: get_command_line_w,
+            original: std::ptr::null_mut(),
+        },
+    ];
+    hook_table_apply(null_module(), "kernel32.dll", &symbols)
+}
+
+/// 安装 AM Daemon 自身导入的 `__wgetmainargs` hook，并返回原函数地址
+pub unsafe fn install_wgetmainargs_hook(replacement: *const (), original: *mut *const ()) -> usize {
+    let symbols = [HookSymbol {
+        name: "__wgetmainargs",
+        patch: replacement,
+        original,
+    }];
+    hook_table_apply(null_module(), "msvcr110.dll", &symbols)
+}
+
+/// 初始化公共 AM Daemon 运行时，并按调用方提供的顺序启动其专用模块
+pub fn initialize(
+    base_dir: &str,
+    logger: StandaloneLogger,
+    module_order: &[&str],
+) -> Result<(), String> {
+    let api = unsafe { Api::standalone(logger) }
+        .ok_or_else(|| "failed to inspect AM Daemon PE image".to_owned())?;
+    api.install();
+    let api = API
+        .get()
+        .ok_or_else(|| "failed to install standalone API".to_owned())?;
+    let config = crate::config::Config::global(base_dir);
+
+    for diagnostic in config.diagnostics() {
+        match diagnostic.level {
+            DiagnosticLevel::Warning => api.log_warn(&diagnostic.message),
+            DiagnosticLevel::Error => api.log_error(&diagnostic.message),
+        }
+    }
+    if !config.is_valid() {
+        return Err("AppleChu.toml is invalid".to_owned());
+    }
+
+    // 手工启动 AM Daemon 时仍需完成最终配置同步
+    if let Err(error) = config.sync() {
+        api.log_warn(&format!("Failed to update AppleChu.toml: {error}"));
+    }
+
+    crate::module_registry::init_ordered(api, config, module_order);
+    Ok(())
+}
