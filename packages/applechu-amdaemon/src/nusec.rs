@@ -313,7 +313,7 @@ unsafe fn read_input_dword(irp: &Irp) -> Option<u32> {
 }
 
 unsafe fn write_dwords(irp: &mut Irp, values: &[u32]) -> i32 {
-    let size = values.len() * std::mem::size_of::<u32>();
+    let size = std::mem::size_of_val(values);
     if irp.ioctl_out.is_null() || (irp.ioctl_out_nbytes as usize) < size {
         return iohook::hresult_from_win32(ERROR_INSUFFICIENT_BUFFER);
     }

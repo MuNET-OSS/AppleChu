@@ -237,7 +237,7 @@ unsafe fn patch_msvcr_command_line() -> usize {
     }
 
     let mut patched = 0;
-    let ansi_proc = GetProcAddress(module, b"__p__acmdln\0".as_ptr());
+    let ansi_proc = GetProcAddress(module, c"__p__acmdln".as_ptr().cast());
     if !ansi_proc.is_null() {
         let get_slot: AnsiCommandLineSlot = std::mem::transmute(ansi_proc);
         let slot = get_slot();
@@ -247,7 +247,7 @@ unsafe fn patch_msvcr_command_line() -> usize {
         }
     }
 
-    let wide_proc = GetProcAddress(module, b"__p__wcmdln\0".as_ptr());
+    let wide_proc = GetProcAddress(module, c"__p__wcmdln".as_ptr().cast());
     if !wide_proc.is_null() {
         let get_slot: WideCommandLineSlot = std::mem::transmute(wide_proc);
         let slot = get_slot();

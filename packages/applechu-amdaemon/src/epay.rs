@@ -110,7 +110,7 @@ pub fn init(api: &Api, config: &EpayConfig) {
 }
 
 fn thinca_ordinal_override(module: usize, ordinal: u16) -> Option<*const ()> {
-    let thinca = unsafe { GetModuleHandleA(b"ThincaPayment.dll\0".as_ptr()) };
+    let thinca = unsafe { GetModuleHandleA(c"ThincaPayment.dll".as_ptr().cast()) };
     if thinca.is_null() || thinca as usize != module {
         return None;
     }
