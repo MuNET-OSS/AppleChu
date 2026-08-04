@@ -2,6 +2,7 @@
 members = [
     "packages/applechu",
     "packages/applechu-macros",
+    "packages/applechu-schema",
     "packages/chu-abi",
 ]
 default-members = ["packages/applechu"]
@@ -14,6 +15,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 applechu-macros = { path = "packages/applechu-macros" }
+applechu-schema = { path = "packages/applechu-schema" }
 chu-abi = { path = "packages/chu-abi" }
 forward-dll = "0.1.11"
 linkme = "0.3.36"
@@ -21,12 +23,15 @@ once_cell = "1"
 proc-macro2 = "1"
 quote = "1"
 retour = "0.4.0-alpha.4"
+sha2 = "0.11"
 syn = { version = "2", features = ["full"] }
 toml = "0.8"
 windows-sys = { version = "0.59", features = [
     "Win32_Devices_Communication",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
     "Win32_Security",
     "Win32_Security_Cryptography",
