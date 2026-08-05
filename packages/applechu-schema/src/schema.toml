@@ -54,7 +54,7 @@ label = { zh = "AM Daemon", en = "AM Daemon" }
     [[config.sections.entries]]
     key = "ConfigFiles"
     type = "string_array"
-    default = ["config_common.json", "config_server.json", "config_client.json", "config_cvt.json", "config_sp.json", "config_hook.json"]
+    default = ["config_*.json"]
     label = { zh = "AM Daemon JSON 配置文件列表", en = "AM Daemon JSON config files" }
 
 [[config.sections]]

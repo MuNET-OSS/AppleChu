@@ -791,6 +791,7 @@ mod tests {
         assert!(amdaemon.starts_with("enable = true\n"));
         assert!(amdaemon.contains("AutoStart = false"));
         assert!(amdaemon.contains("AppendConfigArgs = false"));
+        assert!(amdaemon.contains("ConfigFiles = [\"config_*.json\"]"));
         assert_eq!(
             document["DisableEncryption"]["enable"].as_bool(),
             Some(true)

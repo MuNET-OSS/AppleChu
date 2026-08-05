@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(windows)]
 use std::sync::{Mutex, OnceLock};
 
-const DEFAULT_CONFIG_FILES: [&str; 6] = [
+const CONFIG_FILE_PATTERN: &str = "config_*.json";
+const STANDARD_CONFIG_ORDER: [&str; 6] = [
     "config_common.json",
     "config_server.json",
     "config_client.json",
@@ -51,7 +52,7 @@ crate::config_section! {
             key: "AppendConfigArgs",
             emit_default: true,
             comment: "无完整 -c 参数时补充 JSON 配置";
-            pub config_files: Vec<String> = DEFAULT_CONFIG_FILES.iter().map(|file| (*file).to_owned()).collect(),
+            pub config_files: Vec<String> = vec![CONFIG_FILE_PATTERN.to_owned()],
             key: "ConfigFiles",
             comment: "AM Daemon JSON 配置文件列表";
         }
@@ -190,18 +191,67 @@ crate::config_section! {
 
 pub fn config_files(base_dir: &str) -> Vec<String> {
     let config = crate::config::Config::global(base_dir);
-    config
+    let configured = config
         .section::<AmdaemonConfig>()
-        .filter(|section| section.enabled && !section.config_files.is_empty())
-        .map_or_else(
-            || {
-                DEFAULT_CONFIG_FILES
+        .filter(|section| section.enabled)
+        .map(|section| section.config_files.clone())
+        .unwrap_or_default();
+    resolve_config_files(std::path::Path::new(base_dir), &configured)
+}
+
+fn resolve_config_files(base_dir: &std::path::Path, configured: &[String]) -> Vec<String> {
+    if configured.is_empty() {
+        return discover_config_files(base_dir);
+    }
+
+    let mut resolved = Vec::new();
+    for file in configured {
+        if file.eq_ignore_ascii_case(CONFIG_FILE_PATTERN) {
+            for discovered in discover_config_files(base_dir) {
+                if !resolved
                     .iter()
-                    .map(|file| (*file).to_owned())
-                    .collect()
-            },
-            |section| section.config_files.clone(),
-        )
+                    .any(|current: &String| current.eq_ignore_ascii_case(&discovered))
+                {
+                    resolved.push(discovered);
+                }
+            }
+        } else if !resolved
+            .iter()
+            .any(|current| current.eq_ignore_ascii_case(file))
+        {
+            resolved.push(file.clone());
+        }
+    }
+    resolved
+}
+
+fn discover_config_files(base_dir: &std::path::Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(base_dir) else {
+        return Vec::new();
+    };
+    let mut files = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_file()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| {
+            let name = name.to_ascii_lowercase();
+            name.starts_with("config_") && name.ends_with(".json")
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| {
+        config_file_rank(left)
+            .cmp(&config_file_rank(right))
+            .then_with(|| left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase()))
+            .then_with(|| left.cmp(right))
+    });
+    files
+}
+
+fn config_file_rank(name: &str) -> usize {
+    STANDARD_CONFIG_ORDER
+        .iter()
+        .position(|standard| name.eq_ignore_ascii_case(standard))
+        .unwrap_or(STANDARD_CONFIG_ORDER.len())
 }
 
 pub fn append_config_args(base_dir: &str) -> bool {
@@ -231,6 +281,10 @@ pub fn auto_start(base_dir: &str) {
     let executable = section.executable.clone();
     let terminate_on_exit = section.terminate_on_exit;
     let config_files = config_files(base_dir.to_string_lossy().as_ref());
+    if config_files.is_empty() {
+        log_error("No AM Daemon config_*.json files were found");
+        return;
+    }
     TERMINATE_AUTO_STARTED.store(terminate_on_exit, Ordering::Release);
 
     std::thread::spawn(move || {
@@ -366,4 +420,68 @@ pub fn initialize(
 
     crate::module_registry::init_ordered(api, config, module_order);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{discover_config_files, resolve_config_files, CONFIG_FILE_PATTERN};
+
+    struct TestDirectory(std::path::PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "applechu-amdaemon-config-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("系统时间必须有效")
+                    .as_nanos()
+            ));
+            std::fs::create_dir(&path).expect("测试目录必须可创建");
+            Self(path)
+        }
+
+        fn create(&self, name: &str) {
+            std::fs::write(self.0.join(name), []).expect("测试文件必须可创建");
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn discovers_all_json_configs_in_standard_order() {
+        let directory = TestDirectory::new();
+        for name in [
+            "config_extra.json",
+            "config_sp.json",
+            "config_common.json",
+            "config_server.json.bak",
+            "other.json",
+        ] {
+            directory.create(name);
+        }
+
+        assert_eq!(
+            discover_config_files(&directory.0),
+            ["config_common.json", "config_sp.json", "config_extra.json"]
+        );
+        assert_eq!(
+            resolve_config_files(&directory.0, &[CONFIG_FILE_PATTERN.to_owned()]),
+            ["config_common.json", "config_sp.json", "config_extra.json"]
+        );
+    }
+
+    #[test]
+    fn explicit_config_files_keep_their_order() {
+        let configured = vec!["second.json".to_owned(), "first.json".to_owned()];
+        assert_eq!(
+            resolve_config_files(std::path::Path::new("."), &configured),
+            configured
+        );
+    }
 }

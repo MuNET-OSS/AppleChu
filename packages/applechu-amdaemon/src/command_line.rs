@@ -30,6 +30,10 @@ pub(crate) fn prepare(base_dir: &str) {
         return;
     }
     let config_files = winhttp::amdaemon::config_files(base_dir);
+    if config_files.is_empty() {
+        crate::console::error("No AM Daemon config_*.json files were found");
+        return;
+    }
     let Some(current) = current_command_line() else {
         crate::console::warn("Unable to read the AM Daemon command line");
         return;

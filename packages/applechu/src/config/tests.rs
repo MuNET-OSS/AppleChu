@@ -86,6 +86,7 @@ fn amdaemon_is_a_container_with_independent_controls() {
     assert!(section.enabled);
     assert!(!section.auto_start);
     assert!(!section.append_config_args);
+    assert_eq!(section.config_files, ["config_*.json"]);
     assert!(output.contains("[Amdaemon]\n"));
     assert!(output.contains("AutoStart = false"));
     assert!(output.contains("AppendConfigArgs = false"));
