@@ -81,7 +81,8 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
         return -1;
     }
 
-    let Some(api_handle) = Api::new(api, info) else {
+    // SAFETY: loader 在 chumod_init 调用期间提供有效 ABI 指针，API 表在模块存活期内保持有效
+    let Some(api_handle) = (unsafe { Api::new(api, info) }) else {
         return -1;
     };
     let _ = API.set(api_handle);

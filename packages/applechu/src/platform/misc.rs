@@ -4,7 +4,7 @@ use crate::platform::reg_hook::{self, RegValue, HKEY_LOCAL_MACHINE};
 use crate::platform::winapi::{self, ExitWindowsExFn};
 use crate::util::api::Api;
 
-static mut ORIG_EXIT_WINDOWS_EX: Option<ExitWindowsExFn> = None;
+static ORIG_EXIT_WINDOWS_EX: OnceCell<ExitWindowsExFn> = OnceCell::new();
 static CONFIG: OnceCell<MiscConfig> = OnceCell::new();
 
 crate::config_section! {
@@ -32,14 +32,17 @@ crate::config_section! {
 #[applechu_macros::config_section(stage = Platform, order = 50)]
 pub(crate) fn init(api: &Api, config: &MiscConfig) {
     register_platform_keys(config);
+    let _ = CONFIG.set((*config).clone());
+    // SAFETY: detour 与 ExitWindowsEx 使用相同的 system ABI 和参数布局
     unsafe {
-        let _ = CONFIG.set((*config).clone());
-        ORIG_EXIT_WINDOWS_EX = winapi::hook_import(
+        if let Some(original) = winapi::hook_import(
             api,
             "user32.dll",
             "ExitWindowsEx",
             hooked_exit_windows_ex as *const (),
-        );
+        ) {
+            let _ = ORIG_EXIT_WINDOWS_EX.set(original);
+        }
     }
 
     api.log_info("Platform control protection ready");
@@ -76,7 +79,9 @@ fn register_platform_keys(config: &MiscConfig) {
 
 unsafe extern "system" fn hooked_exit_windows_ex(flags: u32, reason: u32) -> i32 {
     if CONFIG.get().is_some_and(|config| config.allow_reboot) {
-        ORIG_EXIT_WINDOWS_EX.map_or(0, |orig| orig(flags, reason))
+        ORIG_EXIT_WINDOWS_EX
+            .get()
+            .map_or(0, |orig| orig(flags, reason))
     } else {
         1
     }

@@ -1,6 +1,5 @@
-use std::ffi::CStr;
-
-use windows_sys::Win32::Foundation::HANDLE;
+use std::ffi::{c_void, CStr};
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 use applechu::config::Config;
 use applechu::iohook::{self, Irp, IrpOp};
@@ -9,7 +8,7 @@ use applechu::util::api::Api;
 const HWRESET_IOCTL_RESTART: u32 = 0x8000_2000;
 const ERROR_INVALID_FUNCTION: u32 = 1;
 const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
-static mut HWRESET_FD: HANDLE = std::ptr::null_mut();
+static HWRESET_FD: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 #[applechu_macros::config_section(stage = Platform, order = 31)]
 pub fn init(api: &Api, _config: &Config) {
@@ -17,7 +16,7 @@ pub fn init(api: &Api, _config: &Config) {
         let Some(fd) = iohook::open_nul_fd() else {
             return api.log_warn("Hardware reset emulator failed to create a device handle");
         };
-        HWRESET_FD = fd;
+        HWRESET_FD.store(fd, Ordering::Release);
         if !iohook::push_handler(handle_irp) {
             return api.log_warn("Hardware reset emulator failed to register its device handler");
         }
@@ -26,7 +25,8 @@ pub fn init(api: &Api, _config: &Config) {
 }
 
 unsafe fn handle_irp(irp: &mut Irp) -> i32 {
-    if irp.op != IrpOp::Open && irp.fd != HWRESET_FD {
+    let fd = HWRESET_FD.load(Ordering::Acquire);
+    if irp.op != IrpOp::Open && irp.fd != fd {
         return iohook::invoke_next(irp);
     }
     match irp.op {
@@ -34,7 +34,7 @@ unsafe fn handle_irp(irp: &mut Irp) -> i32 {
             if matches_wide(irp.open_filename_w, "\\\\.\\sghwreset")
                 || matches_ansi(irp.open_filename_a, "\\\\.\\sghwreset") =>
         {
-            irp.fd = HWRESET_FD;
+            irp.fd = fd;
             log_info("Hardware reset device opened");
             iohook::S_OK
         }

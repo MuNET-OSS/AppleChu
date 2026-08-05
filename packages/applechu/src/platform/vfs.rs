@@ -62,7 +62,7 @@ pub(crate) fn init(api: &Api, config: &Config, section: &VfsSectionConfig) {
 
     let _ = CONFIG.set(VfsConfig {
         amfs,
-        option: option.clone(),
+        option,
         appdata,
         nthome,
         allow_amfs_downloads: section.allow_amfs_downloads,

@@ -104,21 +104,47 @@ pub fn init(api: &Api, _config: &NationalMatchConfig) {
     music::init(api);
 }
 
-unsafe fn collect_payload(buffers: *const WSABUF, count: u32) -> Vec<u8> {
-    let mut data = Vec::new();
-    for i in 0..count {
-        let buf = &*buffers.add(i as usize);
-        if !buf.buf.is_null() && buf.len > 0 {
-            data.extend_from_slice(std::slice::from_raw_parts(buf.buf, buf.len as usize));
-        }
-    }
-    data
-}
-
-fn sockaddr_ipv4(addr: *const SOCKADDR) -> Option<([u8; 4], u16)> {
-    if addr.is_null() {
+unsafe fn collect_payload(buffers: &[WSABUF]) -> Option<Vec<u8>> {
+    let capacity = buffers
+        .iter()
+        .filter(|buffer| !buffer.buf.is_null())
+        .try_fold(0usize, |length, buffer| {
+            length.checked_add(buffer.len as usize)
+        })?;
+    if capacity > isize::MAX as usize {
         return None;
     }
+    let mut data = Vec::new();
+    data.try_reserve_exact(capacity).ok()?;
+    for buf in buffers {
+        if !buf.buf.is_null() && buf.len > 0 {
+            // SAFETY: WSASendTo 保证每个非空 WSABUF 在调用期间至少包含 len 字节
+            let bytes = unsafe { std::slice::from_raw_parts(buf.buf, buf.len as usize) };
+            data.extend_from_slice(bytes);
+        }
+    }
+    Some(data)
+}
+
+fn descriptor_count(buffers: *const WSABUF, count: u32) -> Option<usize> {
+    if count == 0 {
+        return Some(0);
+    }
+    if buffers.is_null() {
+        return None;
+    }
+    let count = count as usize;
+    if count > isize::MAX as usize / std::mem::size_of::<WSABUF>() {
+        return None;
+    }
+    Some(count)
+}
+
+unsafe fn sockaddr_ipv4(addr: *const SOCKADDR, addr_len: i32) -> Option<([u8; 4], u16)> {
+    if addr.is_null() || addr_len < std::mem::size_of::<SOCKADDR_IN>() as i32 {
+        return None;
+    }
+    // SAFETY: 上方已验证非空指针和调用方声明的缓冲区长度
     unsafe {
         let sin = &*(addr as *const SOCKADDR_IN);
         let ip = sin.sin_addr.S_un.S_addr.to_ne_bytes();
@@ -143,10 +169,19 @@ fn send_to_reflector(frame: &[u8]) -> bool {
         return false;
     };
 
-    let mut guard = state.reflector.lock().unwrap();
+    let mut guard = state
+        .reflector
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if guard.is_none() {
-        let addr = state.reflector_addr.lock().unwrap();
-        let port = *state.reflector_port.lock().unwrap();
+        let addr = state
+            .reflector_addr
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let port = *state
+            .reflector_port
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(ip) = *addr {
             let target = std::net::SocketAddr::from((ip, port));
             if let Ok(stream) = TcpStream::connect(target) {
@@ -190,21 +225,63 @@ unsafe extern "system" fn hooked_sendto(
         );
     };
 
-    let payload = collect_payload(buffers, buffer_count);
-    let dest = sockaddr_ipv4(to);
+    let Some(descriptor_count) = descriptor_count(buffers, buffer_count) else {
+        return passthrough_sendto(
+            socket,
+            buffers,
+            buffer_count,
+            bytes_sent,
+            flags,
+            to,
+            to_len,
+            overlapped,
+            completion,
+        );
+    };
+    let descriptors = if descriptor_count == 0 {
+        &[]
+    } else {
+        // SAFETY: WSASendTo 保证 buffers 在调用期间包含 buffer_count 个有效描述符
+        unsafe { std::slice::from_raw_parts(buffers, descriptor_count) }
+    };
+    // SAFETY: WSASendTo 保证每个描述符的非空缓冲区在调用期间至少包含 len 字节
+    let Some(payload) = (unsafe { collect_payload(descriptors) }) else {
+        return passthrough_sendto(
+            socket,
+            buffers,
+            buffer_count,
+            bytes_sent,
+            flags,
+            to,
+            to_len,
+            overlapped,
+            completion,
+        );
+    };
+    // SAFETY: WSASendTo 保证 to 在非空时指向长度为 to_len 的可读地址结构
+    let dest = unsafe { sockaddr_ipv4(to, to_len) };
 
     let is_holdpunch = payload.len() >= 4 && &payload[0..4] == b"{\"ro";
 
     if is_holdpunch {
         if let Some((ip, port)) = dest {
-            *state.reflector_addr.lock().unwrap() = Some(ip);
-            *state.reflector_port.lock().unwrap() = port;
+            *state
+                .reflector_addr
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ip);
+            *state
+                .reflector_port
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = port;
         }
         let frame = build_frame(TYPE_HOLDPUNCH, &payload);
         send_to_reflector(&frame);
 
         let already = {
-            let mut sent = state.music_sent.lock().unwrap();
+            let mut sent = state
+                .music_sent
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let was = *sent;
             *sent = true;
             was
@@ -219,7 +296,10 @@ unsafe extern "system" fn hooked_sendto(
         return 0;
     }
 
-    let reflector_ip = *state.reflector_addr.lock().unwrap();
+    let reflector_ip = *state
+        .reflector_addr
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let (Some((ip, port)), Some(refl)) = (dest, reflector_ip) {
         let frame = if ip == refl {
             build_frame(TYPE_REFLECTOR, &payload)
@@ -324,8 +404,15 @@ unsafe extern "system" fn hooked_recvfrom(
     };
 
     let (packet_type, payload) = frame;
-    let reflector_ip = state.reflector_addr.lock().unwrap().unwrap_or([0, 0, 0, 0]);
-    let reflector_port = *state.reflector_port.lock().unwrap();
+    let reflector_ip = *state
+        .reflector_addr
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let reflector_ip = reflector_ip.unwrap_or([0, 0, 0, 0]);
+    let reflector_port = *state
+        .reflector_port
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match packet_type {
         TYPE_TUNNEL if payload.len() >= 6 => {
@@ -350,7 +437,10 @@ unsafe extern "system" fn hooked_recvfrom(
 
 fn recv_frame(state: &State) -> Option<(u8, Vec<u8>)> {
     use std::io::Read;
-    let mut guard = state.reflector.lock().unwrap();
+    let mut guard = state
+        .reflector
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let stream = guard.as_mut()?;
 
     let mut header = [0u8; 3];
@@ -370,29 +460,40 @@ fn recv_frame(state: &State) -> Option<(u8, Vec<u8>)> {
 }
 
 unsafe fn write_from(from: *mut SOCKADDR, from_len: *mut i32, ip: [u8; 4], port: u16) {
-    if from.is_null() {
+    let required = std::mem::size_of::<SOCKADDR_IN>() as i32;
+    if from.is_null() || from_len.is_null() || *from_len < required {
         return;
     }
     let sin = &mut *(from as *mut SOCKADDR_IN);
     sin.sin_family = windows_sys::Win32::Networking::WinSock::AF_INET;
     sin.sin_port = port.to_be();
     sin.sin_addr.S_un.S_addr = u32::from_ne_bytes(ip);
-    if !from_len.is_null() {
-        *from_len = std::mem::size_of::<SOCKADDR_IN>() as i32;
-    }
+    *from_len = required;
 }
 
 unsafe fn deliver(buffers: *const WSABUF, buffer_count: u32, bytes_recvd: *mut u32, data: &[u8]) {
     let mut written = 0usize;
-    for i in 0..buffer_count {
+    let Some(descriptor_count) = descriptor_count(buffers, buffer_count) else {
+        if !bytes_recvd.is_null() {
+            *bytes_recvd = 0;
+        }
+        return;
+    };
+    let descriptors = if descriptor_count == 0 {
+        &[]
+    } else {
+        // SAFETY: WSARecvFrom 保证 buffers 在调用期间包含 buffer_count 个有效描述符
+        unsafe { std::slice::from_raw_parts(buffers, descriptor_count) }
+    };
+    for buf in descriptors {
         if written >= data.len() {
             break;
         }
-        let buf = &*buffers.add(i as usize);
         if buf.buf.is_null() || buf.len == 0 {
             continue;
         }
         let take = std::cmp::min(buf.len as usize, data.len() - written);
+        // SAFETY: WSARecvFrom 保证每个非空 WSABUF 在调用期间至少可写入 len 字节
         std::ptr::copy_nonoverlapping(data.as_ptr().add(written), buf.buf, take);
         written += take;
     }
@@ -426,4 +527,46 @@ unsafe fn passthrough_recvfrom(
         );
     }
     -1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_frame, collect_payload, descriptor_count};
+    use windows_sys::Win32::Networking::WinSock::WSABUF;
+
+    #[test]
+    fn reflector_frame_keeps_type_length_and_payload() {
+        assert_eq!(build_frame(2, &[0xAA, 0xBB]), [2, 2, 0, 0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn payload_collection_preserves_descriptor_order() {
+        let mut first = [1u8, 2];
+        let mut second = [3u8, 4, 5];
+        let buffers = [
+            WSABUF {
+                len: first.len() as u32,
+                buf: first.as_mut_ptr(),
+            },
+            WSABUF {
+                len: 0,
+                buf: std::ptr::null_mut(),
+            },
+            WSABUF {
+                len: second.len() as u32,
+                buf: second.as_mut_ptr(),
+            },
+        ];
+
+        // SAFETY: 测试描述符引用上方仍在作用域内的数组
+        assert_eq!(
+            unsafe { collect_payload(&buffers) },
+            Some(vec![1, 2, 3, 4, 5])
+        );
+    }
+
+    #[test]
+    fn nonempty_descriptor_list_rejects_null_pointer() {
+        assert!(descriptor_count(std::ptr::null(), 1).is_none());
+    }
 }

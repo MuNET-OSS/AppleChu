@@ -1,6 +1,5 @@
-use std::ffi::CStr;
-
-use windows_sys::Win32::Foundation::HANDLE;
+use std::ffi::{c_void, CStr};
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 use applechu::config::Config;
 use applechu::iohook::{self, Irp, IrpOp};
@@ -9,7 +8,7 @@ use applechu::util::api::Api;
 const HWMON_IOCTL_READ_CPU_TEMP: u32 = 0x8000_6000;
 const ERROR_INVALID_FUNCTION: u32 = 1;
 const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
-static mut HWMON_FD: HANDLE = std::ptr::null_mut();
+static HWMON_FD: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 #[applechu_macros::config_section(stage = Platform, order = 40)]
 pub fn init(api: &Api, _config: &Config) {
@@ -17,7 +16,7 @@ pub fn init(api: &Api, _config: &Config) {
         let Some(fd) = iohook::open_nul_fd() else {
             return api.log_warn("Hwmon emulator failed to create a device handle");
         };
-        HWMON_FD = fd;
+        HWMON_FD.store(fd, Ordering::Release);
         if !iohook::push_handler(handle_irp) {
             return api.log_warn("Hwmon emulator failed to register its device handler");
         }
@@ -26,7 +25,8 @@ pub fn init(api: &Api, _config: &Config) {
 }
 
 unsafe fn handle_irp(irp: &mut Irp) -> i32 {
-    if irp.op != IrpOp::Open && irp.fd != HWMON_FD {
+    let fd = HWMON_FD.load(Ordering::Acquire);
+    if irp.op != IrpOp::Open && irp.fd != fd {
         return iohook::invoke_next(irp);
     }
     match irp.op {
@@ -34,7 +34,7 @@ unsafe fn handle_irp(irp: &mut Irp) -> i32 {
             if matches_wide(irp.open_filename_w, "\\\\.\\sghwmonitor")
                 || matches_ansi(irp.open_filename_a, "\\\\.\\sghwmonitor") =>
         {
-            irp.fd = HWMON_FD;
+            irp.fd = fd;
             log_info("Hwmon device opened");
             iohook::S_OK
         }

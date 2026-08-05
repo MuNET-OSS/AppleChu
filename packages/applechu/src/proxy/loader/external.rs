@@ -23,7 +23,9 @@ pub(super) unsafe fn load(base_dir: &str, info: &ChuModInfo, api: *mut ChuModAPI
     log_info(&format!("Scanning external module directory: {mods_dir}"));
     let manifests = scan_manifest_files(base_dir);
     {
-        let mut state = STATE.lock().unwrap();
+        let mut state = STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.manifest_paths = manifests.clone();
     }
     for manifest in &manifests {
@@ -141,7 +143,9 @@ pub(super) unsafe fn load(base_dir: &str, info: &ChuModInfo, api: *mut ChuModAPI
         let on_frame_ptr = GetProcAddress(mod_handle, b"chumod_on_frame\0".as_ptr());
         let on_frame: Option<ChuModFrameFunc> = on_frame_ptr.map(|f| std::mem::transmute(f));
 
-        let mut state = STATE.lock().unwrap();
+        let mut state = STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.mods.push(LoadedMod {
             handle: mod_handle,
             on_ready,

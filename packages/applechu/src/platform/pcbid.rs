@@ -10,7 +10,7 @@ const ERROR_SUCCESS: u32 = 0;
 const ERROR_INVALID_PARAMETER: u32 = 87;
 const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 
-static mut ORIG_GET_COMPUTER_NAME_A: Option<GetComputerNameAFn> = None;
+static ORIG_GET_COMPUTER_NAME_A: OnceCell<GetComputerNameAFn> = OnceCell::new();
 static SERIAL_NO: OnceCell<String> = OnceCell::new();
 
 crate::config_section! {
@@ -35,6 +35,7 @@ pub(crate) fn init(api: &Api, config: &PcbIdConfig) -> Result<(), String> {
         return Err("PCBID serialNo must contain exactly 15 ASCII characters".to_owned());
     }
     let _ = SERIAL_NO.set(config.serial_no.clone());
+    // SAFETY: detour 与 GetComputerNameA 使用相同的 system ABI 和参数布局
     unsafe {
         let mut original = std::ptr::null();
         let symbols = [HookSymbol {
@@ -44,9 +45,8 @@ pub(crate) fn init(api: &Api, config: &PcbIdConfig) -> Result<(), String> {
         }];
         let patched = hook_table_apply(null_module(), "kernel32.dll", &symbols);
         if !original.is_null() {
-            ORIG_GET_COMPUTER_NAME_A = Some(std::mem::transmute::<*const (), GetComputerNameAFn>(
-                original,
-            ));
+            let original = std::mem::transmute::<*const (), GetComputerNameAFn>(original);
+            let _ = ORIG_GET_COMPUTER_NAME_A.set(original);
         }
         api.log_info(&format!(
             "Cabinet serial emulation ready with {patched} patched entries"
@@ -64,7 +64,9 @@ unsafe extern "system" fn hooked_get_computer_name_a(buffer: *mut c_char, size: 
         return 0;
     }
     let Some(serial) = SERIAL_NO.get() else {
-        return ORIG_GET_COMPUTER_NAME_A.map_or(0, |orig| orig(buffer, size));
+        return ORIG_GET_COMPUTER_NAME_A
+            .get()
+            .map_or(0, |orig| orig(buffer, size));
     };
 
     let required = serial.len() as u32 + 1;

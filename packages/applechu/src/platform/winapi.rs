@@ -90,24 +90,35 @@ where
     Some(std::mem::transmute_copy(&original))
 }
 
-pub fn cstr_to_string(ptr: *const c_char) -> Option<String> {
+/// 将 FFI 传入的 NUL 结尾 ANSI 字符串复制为 Rust 字符串
+///
+/// # Safety
+/// `ptr` 非空时必须指向当前调用期间有效且以 NUL 结尾的可读字节序列
+pub unsafe fn cstr_to_string(ptr: *const c_char) -> Option<String> {
     (!ptr.is_null()).then(|| {
+        // SAFETY: 调用方保证 ptr 指向有效的 NUL 结尾字符串
         unsafe { CStr::from_ptr(ptr) }
             .to_string_lossy()
             .into_owned()
     })
 }
 
-pub fn wide_to_string(ptr: *const u16) -> Option<String> {
+/// 将 FFI 传入的 NUL 结尾 UTF-16 字符串复制为 Rust 字符串
+///
+/// # Safety
+/// `ptr` 非空时必须指向当前调用期间有效且以 NUL 结尾的可读 UTF-16 序列
+pub unsafe fn wide_to_string(ptr: *const u16) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
 
     let mut len = 0usize;
+    // SAFETY: 调用方保证 ptr 指向有效的 NUL 结尾 UTF-16 序列
     while unsafe { *ptr.add(len) } != 0 {
         len += 1;
     }
     Some(
+        // SAFETY: 上方扫描确认 ptr 的前 len 个单元均可读
         OsString::from_wide(unsafe { std::slice::from_raw_parts(ptr, len) })
             .to_string_lossy()
             .into_owned(),
@@ -121,7 +132,10 @@ pub fn string_to_wide(value: &str) -> Vec<u16> {
 pub fn to_cstring_lossy(value: &str) -> CString {
     let mut bytes = value.as_bytes().to_vec();
     bytes.retain(|byte| *byte != 0);
-    CString::new(bytes).expect("nul bytes removed")
+    match CString::new(bytes) {
+        Ok(value) => value,
+        Err(_) => unreachable!("interior NUL bytes were removed"),
+    }
 }
 
 pub fn normalize_path(value: &str) -> String {

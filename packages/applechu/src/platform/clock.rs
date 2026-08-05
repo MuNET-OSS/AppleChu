@@ -6,7 +6,7 @@ use crate::platform::winapi::{
 };
 use crate::util::api::Api;
 use std::ptr;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU8, Ordering};
 
 static mut ORIG_GET_SYSTEM_TIME_AS_FILE_TIME: *const () = ptr::null();
 static mut ORIG_GET_LOCAL_TIME: *const () = ptr::null();
@@ -15,11 +15,7 @@ static mut ORIG_GET_TIME_ZONE_INFORMATION: *const () = ptr::null();
 static mut ORIG_SET_LOCAL_TIME: *const () = ptr::null();
 static mut ORIG_SET_SYSTEM_TIME: *const () = ptr::null();
 static mut ORIG_SET_TIME_ZONE_INFORMATION: *const () = ptr::null();
-static mut CONFIG: ClockConfig = ClockConfig {
-    timezone: TimezoneMode::Real,
-    timewarp: false,
-    writeable: false,
-};
+static CONFIG_BITS: AtomicU8 = AtomicU8::new(0);
 static CURRENT_DAY: AtomicI64 = AtomicI64::new(0);
 
 const TICKS_PER_SECOND: i64 = 10_000_000;
@@ -34,7 +30,40 @@ struct ClockConfig {
     writeable: bool,
 }
 
+impl ClockConfig {
+    const TIMEZONE_JST: u8 = 1 << 0;
+    const TIMEWARP: u8 = 1 << 1;
+    const WRITEABLE: u8 = 1 << 2;
+
+    fn encode(self) -> u8 {
+        let mut bits = 0;
+        if self.timezone == TimezoneMode::Jst {
+            bits |= Self::TIMEZONE_JST;
+        }
+        if self.timewarp {
+            bits |= Self::TIMEWARP;
+        }
+        if self.writeable {
+            bits |= Self::WRITEABLE;
+        }
+        bits
+    }
+
+    fn decode(bits: u8) -> Self {
+        Self {
+            timezone: if bits & Self::TIMEZONE_JST != 0 {
+                TimezoneMode::Jst
+            } else {
+                TimezoneMode::Real
+            },
+            timewarp: bits & Self::TIMEWARP != 0,
+            writeable: bits & Self::WRITEABLE != 0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 enum TimezoneMode {
     Real,
     Jst,
@@ -61,30 +90,32 @@ crate::config_section! {
 
 #[applechu_macros::config_section(stage = Platform, order = 20)]
 pub(crate) fn init(api: &Api, config: &ClockSectionConfig) {
+    let runtime = ClockConfig {
+        timezone: match config.timezone.to_ascii_lowercase().as_str() {
+            "real" | "local" | "system" => TimezoneMode::Real,
+            _ => TimezoneMode::Jst,
+        },
+        timewarp: config.timewarp != 0,
+        writeable: config.writeable,
+    };
+    CONFIG_BITS.store(runtime.encode(), Ordering::Release);
+    // SAFETY: hook 表中的函数签名与对应 kernel32 API 完全一致
     unsafe {
-        CONFIG = ClockConfig {
-            timezone: match config.timezone.to_ascii_lowercase().as_str() {
-                "real" | "local" | "system" => TimezoneMode::Real,
-                _ => TimezoneMode::Jst,
-            },
-            timewarp: config.timewarp != 0,
-            writeable: config.writeable,
-        };
         // 只安装配置实际需要的 API，并登记到 proc_addr
         // 后续动态加载的模块会自动补装这些入口
         let base_hooks = clock_base_hooks();
         let read_hooks = clock_read_hooks();
         let write_hooks = clock_write_hooks();
         let mut patched = 0;
-        if CONFIG.timezone != TimezoneMode::Real || CONFIG.timewarp || !CONFIG.writeable {
+        if runtime.timezone != TimezoneMode::Real || runtime.timewarp || !runtime.writeable {
             patched += hook_table_apply(null_module(), "kernel32.dll", &base_hooks);
             proc_addr::push("kernel32.dll", &base_hooks, sync_originals);
         }
-        if CONFIG.timezone != TimezoneMode::Real {
+        if runtime.timezone != TimezoneMode::Real {
             patched += hook_table_apply(null_module(), "kernel32.dll", &read_hooks);
             proc_addr::push("kernel32.dll", &read_hooks, sync_originals);
         }
-        if !CONFIG.writeable {
+        if !runtime.writeable {
             patched += hook_table_apply(null_module(), "kernel32.dll", &write_hooks);
             proc_addr::push("kernel32.dll", &write_hooks, sync_originals);
         }
@@ -150,12 +181,16 @@ fn clock_log(message: &str) {
     }
 }
 
+fn clock_config() -> ClockConfig {
+    ClockConfig::decode(CONFIG_BITS.load(Ordering::Acquire))
+}
+
 unsafe extern "system" fn hooked_get_system_time_as_file_time(file_time: *mut FileTime) {
     let original: GetSystemTimeAsFileTimeFn = match ORIG_GET_SYSTEM_TIME_AS_FILE_TIME {
         ptr if !ptr.is_null() => std::mem::transmute(ptr),
         _ => return,
     };
-    if !CONFIG.timewarp {
+    if !clock_config().timewarp {
         original(file_time);
         return;
     }
@@ -167,14 +202,17 @@ unsafe extern "system" fn hooked_get_system_time_as_file_time(file_time: *mut Fi
     let mut real = FileTime::default();
     original(&mut real);
     let real_ticks = filetime_ticks(real);
-    let biased = real_ticks + 2 * TICKS_PER_HOUR;
+    let biased = real_ticks.wrapping_add(2 * TICKS_PER_HOUR);
     let day = biased / TICKS_PER_DAY;
     let time = biased % TICKS_PER_DAY;
     let previous_day = CURRENT_DAY.swap(day, Ordering::Relaxed);
     if previous_day != 0 && previous_day != day {
         clock_log("Date changed; time warp baseline updated");
     }
-    let fake = day * TICKS_PER_DAY + time * 19 / 24 - 2 * TICKS_PER_HOUR;
+    let fake = day
+        .wrapping_mul(TICKS_PER_DAY)
+        .wrapping_add(time.wrapping_mul(19) / 24)
+        .wrapping_sub(2 * TICKS_PER_HOUR);
     *file_time = ticks_to_filetime(fake);
 }
 
@@ -185,7 +223,7 @@ unsafe extern "system" fn hooked_get_system_time(system_time: *mut SystemTime) {
 }
 
 unsafe extern "system" fn hooked_get_local_time(system_time: *mut SystemTime) {
-    if CONFIG.timezone == TimezoneMode::Real {
+    if clock_config().timezone == TimezoneMode::Real {
         let original: GetLocalTimeFn = match ORIG_GET_LOCAL_TIME {
             ptr if !ptr.is_null() => std::mem::transmute(ptr),
             _ => return,
@@ -195,12 +233,12 @@ unsafe extern "system" fn hooked_get_local_time(system_time: *mut SystemTime) {
     }
     let mut linear = FileTime::default();
     hooked_get_system_time_as_file_time(&mut linear);
-    linear = ticks_to_filetime(filetime_ticks(linear) + 9 * TICKS_PER_HOUR);
+    linear = ticks_to_filetime(filetime_ticks(linear).wrapping_add(9 * TICKS_PER_HOUR));
     filetime_to_systemtime(&linear, system_time);
 }
 
 unsafe extern "system" fn hooked_get_time_zone_information(info: *mut TimeZoneInformation) -> u32 {
-    if CONFIG.timezone == TimezoneMode::Jst {
+    if clock_config().timezone == TimezoneMode::Jst {
         if info.is_null() {
             crate::iohook::set_last_error(ERROR_INVALID_PARAMETER);
             return 0xFFFF_FFFF;
@@ -219,7 +257,7 @@ unsafe extern "system" fn hooked_get_time_zone_information(info: *mut TimeZoneIn
 }
 
 unsafe extern "system" fn hooked_set_local_time(time: *const SystemTime) -> i32 {
-    if CONFIG.writeable {
+    if clock_config().writeable {
         let original: SetLocalTimeFn = match ORIG_SET_LOCAL_TIME {
             ptr if !ptr.is_null() => std::mem::transmute(ptr),
             _ => return 0,
@@ -232,7 +270,7 @@ unsafe extern "system" fn hooked_set_local_time(time: *const SystemTime) -> i32 
 }
 
 unsafe extern "system" fn hooked_set_system_time(time: *const SystemTime) -> i32 {
-    if CONFIG.writeable {
+    if clock_config().writeable {
         let original: SetSystemTimeFn = match ORIG_SET_SYSTEM_TIME {
             ptr if !ptr.is_null() => std::mem::transmute(ptr),
             _ => return 0,
@@ -247,7 +285,7 @@ unsafe extern "system" fn hooked_set_system_time(time: *const SystemTime) -> i32
 unsafe extern "system" fn hooked_set_time_zone_information(
     info: *const TimeZoneInformation,
 ) -> i32 {
-    if CONFIG.writeable {
+    if clock_config().writeable {
         let original: SetTimeZoneInformationFn = match ORIG_SET_TIME_ZONE_INFORMATION {
             ptr if !ptr.is_null() => std::mem::transmute(ptr),
             _ => return 0,
@@ -256,6 +294,18 @@ unsafe extern "system" fn hooked_set_time_zone_information(
     } else {
         clock_log("Blocked timezone update");
         1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClockConfig;
+
+    #[test]
+    fn runtime_config_bits_round_trip() {
+        for bits in 0..8 {
+            assert_eq!(ClockConfig::decode(bits).encode(), bits);
+        }
     }
 }
 

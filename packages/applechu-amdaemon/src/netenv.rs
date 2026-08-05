@@ -171,7 +171,9 @@ unsafe extern "system" fn hooked_get_adapters_addresses(
     if adapters.is_null() || available < required {
         return ERROR_BUFFER_OVERFLOW;
     }
-    let network = network();
+    let Some(network) = NETWORK.get() else {
+        return ERROR_NOT_SUPPORTED;
+    };
     let blob = &mut *(adapters.cast::<AdapterBlob>());
     *blob = zeroed();
     fill_adapter_addresses(blob, network);
@@ -191,7 +193,9 @@ unsafe extern "system" fn hooked_get_adapters_info(
     if adapter.is_null() || available < required {
         return ERROR_BUFFER_OVERFLOW;
     }
-    let network = network();
+    let Some(network) = NETWORK.get() else {
+        return ERROR_NOT_SUPPORTED;
+    };
     *adapter = zeroed();
     write_ascii(&mut (*adapter).AdapterName, b"Fake Ethernet");
     write_ascii(&mut (*adapter).Description, b"Adapter Description");
@@ -219,7 +223,10 @@ unsafe extern "system" fn hooked_get_best_route(
     let _ = (destination, source);
     *route = zeroed();
     (*route).dwForwardMask = u32::MAX;
-    (*route).dwForwardNextHop = network().router.to_be();
+    let Some(network) = NETWORK.get() else {
+        return ERROR_NOT_SUPPORTED;
+    };
+    (*route).dwForwardNextHop = network.router.to_be();
     (*route).dwForwardIfIndex = 1;
     (*route).Anonymous1 = MIB_IPFORWARDROW_0 {
         ForwardType: MIB_IPROUTE_TYPE_INDIRECT,
@@ -244,7 +251,9 @@ unsafe extern "system" fn hooked_get_if_table(
     if table.is_null() || available < required {
         return ERROR_BUFFER_OVERFLOW;
     }
-    let network = network();
+    let Some(network) = NETWORK.get() else {
+        return ERROR_NOT_SUPPORTED;
+    };
     ptr::write_bytes(table.cast::<u8>(), 0, required as usize);
     (*table).dwNumEntries = 1;
     let row = (*table).table.as_mut_ptr();
@@ -320,12 +329,15 @@ unsafe extern "system" fn hooked_send_to(
         return original(socket, buffer, length, flags, destination, destination_len);
     }
     let original_destination = destination.cast::<SOCKADDR_IN>();
-    let old_broadcast = (network().subnet | 0xFF).to_be();
+    let Some(network) = NETWORK.get() else {
+        return original(socket, buffer, length, flags, destination, destination_len);
+    };
+    let old_broadcast = (network.subnet | 0xFF).to_be();
     if (*original_destination).sin_addr.S_un.S_addr != old_broadcast {
         return original(socket, buffer, length, flags, destination, destination_len);
     }
     let mut replacement = *original_destination;
-    replacement.sin_addr.S_un.S_addr = network().broadcast.to_be();
+    replacement.sin_addr.S_un.S_addr = network.broadcast.to_be();
     original(
         socket,
         buffer,
@@ -469,24 +481,22 @@ fn write_wide(buffer: &mut [u16], value: &str) {
 }
 
 fn parse_mac(value: &str) -> Option<[u8; 6]> {
-    let parts = value
-        .split(':')
-        .map(|part| u8::from_str_radix(part, 16))
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    (parts.len() == 6).then(|| [parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]])
+    let mut parts = value.split(':').map(|part| u8::from_str_radix(part, 16));
+    let address = [
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+    ];
+    (parts.next().is_none()).then_some(address)
 }
 
 fn log_info(message: &str) {
     if let Some(api) = applechu::util::api::API.get() {
         api.log_info(message);
     }
-}
-
-fn network() -> &'static Network {
-    NETWORK
-        .get()
-        .expect("NetEnv initialized before hook dispatch")
 }
 
 fn octet(value: u32, shift: u32) -> u8 {
@@ -524,5 +534,13 @@ mod tests {
     fn parses_segtools_style_network_values() {
         assert_eq!(parse_ipv4("192.168.139.0"), Some(0xC0A8_8B00));
         assert_eq!(parse_mac("01:02:03:04:05:06"), Some([1, 2, 3, 4, 5, 6]));
+    }
+
+    #[test]
+    fn rejects_incomplete_or_oversized_network_values() {
+        assert_eq!(parse_ipv4("192.168.139"), None);
+        assert_eq!(parse_ipv4("192.168.139.0.1"), None);
+        assert_eq!(parse_mac("01:02:03:04:05"), None);
+        assert_eq!(parse_mac("01:02:03:04:05:06:07"), None);
     }
 }

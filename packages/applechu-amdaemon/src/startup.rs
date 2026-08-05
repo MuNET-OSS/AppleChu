@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::OnceLock;
 
 use windows_sys::Win32::System::Diagnostics::Debug::FlushInstructionCache;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -14,7 +15,7 @@ const STUB_CAPACITY: usize = 96;
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static ENTRY: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
-static mut ORIGINAL: [u8; ENTRY_JUMP_LEN] = [0; ENTRY_JUMP_LEN];
+static ORIGINAL: OnceLock<[u8; ENTRY_JUMP_LEN]> = OnceLock::new();
 
 /// winmm 是由 AM Daemon 主线程自然加载的，不能照搬注入器对挂起线程的
 /// CONTEXT 劫持。这里仅在 DllMain 中改写 EXE 入口，实际初始化在离开加载器锁后执行
@@ -34,11 +35,10 @@ pub(crate) fn install() {
             return;
         };
 
-        ptr::copy_nonoverlapping(
-            entry,
-            ptr::addr_of_mut!(ORIGINAL).cast::<u8>(),
-            ENTRY_JUMP_LEN,
-        );
+        let mut original = [0; ENTRY_JUMP_LEN];
+        // SAFETY: entry 指向当前进程已加载 EXE 的可执行入口，长度由固定 x64 跳板协议限定
+        ptr::copy_nonoverlapping(entry, original.as_mut_ptr(), ENTRY_JUMP_LEN);
+        let _ = ORIGINAL.set(original);
         let stub = build_stub(entry);
         if stub.is_null() {
             install_failed("failed to allocate entry stub");
@@ -184,9 +184,6 @@ fn initialize_hooks() -> Result<(), String> {
 // 模块顺序必须满足平台、网络和硬件模拟之间的初始化依赖
 const AMDAEMON_MODULE_ORDER: &[&str] = &[
     "platform::dvd::init",
-    "gfx::windowed::init",
-    "gfx::monitor::init",
-    "gfx::d3d9::init",
     "iohook::proc_addr::init",
     "platform::reg_hook::init",
     "iohook::init_core",
@@ -250,6 +247,10 @@ unsafe fn restore_entry() {
     if entry.is_null() {
         return;
     }
+    let Some(original) = ORIGINAL.get() else {
+        crate::console::error("Unable to restore the original AM Daemon entry point");
+        windows_sys::Win32::System::Threading::ExitProcess(1);
+    };
 
     let mut old_protect = 0;
     if VirtualProtect(
@@ -262,7 +263,8 @@ unsafe fn restore_entry() {
         crate::console::error("Unable to restore the original AM Daemon entry point");
         windows_sys::Win32::System::Threading::ExitProcess(1);
     }
-    ptr::copy_nonoverlapping(ptr::addr_of!(ORIGINAL).cast::<u8>(), entry, ENTRY_JUMP_LEN);
+    // SAFETY: entry 仍是 install 时保存的 EXE 入口，目标内存已由 VirtualProtect 临时设为可写
+    ptr::copy_nonoverlapping(original.as_ptr(), entry, ENTRY_JUMP_LEN);
     let mut ignored = 0;
     let _ = VirtualProtect(entry.cast(), ENTRY_JUMP_LEN, old_protect, &mut ignored);
     flush(entry.cast(), ENTRY_JUMP_LEN);

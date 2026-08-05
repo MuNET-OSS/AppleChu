@@ -580,7 +580,7 @@ unsafe fn write_raw_value(
     winapi::ERROR_SUCCESS
 }
 
-fn resolve_key_id(parent: usize, subkey: *const u16) -> Option<usize> {
+unsafe fn resolve_key_id(parent: usize, subkey: *const u16) -> Option<usize> {
     let subkey = winapi::wide_to_string(subkey).unwrap_or_default();
     let (root, path) = resolve_candidate(parent, &subkey)?;
     KEYS.lock()

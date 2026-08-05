@@ -284,8 +284,11 @@ impl Schema {
     }
 }
 
-pub static SCHEMA: Lazy<Schema> =
-    Lazy::new(|| Schema::parse(sections::SOURCE.to_owned()).expect("AppleChu schema 必须有效"));
+pub static SCHEMA: Lazy<Schema> = Lazy::new(|| match Schema::parse(sections::SOURCE.to_owned()) {
+    Ok(schema) => schema,
+    // 内嵌 schema 同时由 build.rs 校验，运行到这里失败表示构建产物损坏
+    Err(error) => panic!("AppleChu schema 无效: {error}"),
+});
 
 pub fn section(id: &str) -> Option<&'static SectionSpec> {
     SCHEMA.section(id)
@@ -314,10 +317,8 @@ pub fn decode_acmani(blob: &[u8]) -> Result<Acmani<'_>, SchemaError> {
     if blob[52..header].iter().any(|byte| *byte != 0) {
         return Err(SchemaError::Invalid("acmani reserved 字段非零".to_owned()));
     }
-    let manifest_len =
-        u32::from_le_bytes(blob[12..16].try_into().expect("fixed header slice")) as usize;
-    let default_len =
-        u32::from_le_bytes(blob[16..20].try_into().expect("fixed header slice")) as usize;
+    let manifest_len = u32::from_le_bytes([blob[12], blob[13], blob[14], blob[15]]) as usize;
+    let default_len = u32::from_le_bytes([blob[16], blob[17], blob[18], blob[19]]) as usize;
     let manifest_end = header
         .checked_add(manifest_len)
         .ok_or_else(|| SchemaError::Invalid("acmani manifest 长度溢出".to_owned()))?;
@@ -422,9 +423,7 @@ fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, SchemaError> {
     let value = bytes
         .get(offset..offset.saturating_add(4))
         .ok_or_else(|| SchemaError::Invalid("二进制数据截断".to_owned()))?;
-    Ok(u32::from_le_bytes(
-        value.try_into().expect("fixed binary slice"),
-    ))
+    Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
 }
 
 fn validate_sections(sections: &[SectionSpec]) -> Result<(), SchemaError> {

@@ -56,8 +56,10 @@ pub(crate) fn init(api: &Api, config: &Config, system: &SystemConfig) {
         u8::from(dipsw[1]),
         u8::from(dipsw[2]),
     ));
-    let mut credit = data[CREDIT_PRIMARY..CREDIT_PRIMARY + BLOCK_SIZE].to_vec();
-    let mut dip = data[DIP_PRIMARY..DIP_PRIMARY + BLOCK_SIZE].to_vec();
+    let mut credit = [0; BLOCK_SIZE];
+    credit.copy_from_slice(&data[CREDIT_PRIMARY..CREDIT_PRIMARY + BLOCK_SIZE]);
+    let mut dip = [0; BLOCK_SIZE];
+    dip.copy_from_slice(&data[DIP_PRIMARY..DIP_PRIMARY + BLOCK_SIZE]);
     credit[CREDIT_FREEPLAY_OFFSET] = u8::from(freeplay);
     dip[DIP_SWITCH_OFFSET] = dip_switches;
     update_checksum(&mut credit);

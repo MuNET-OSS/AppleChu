@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::d3d9::D3dPresentParameters;
 use crate::gfx::WindowConfig;
 use crate::util::api::Api;
-use crate::util::iat_hook::hook_iat;
+use crate::util::iat_hook::hook_iat_all_modules;
 
 crate::config_section! {
     pub(crate) struct D3D9ExConfig => D3D9EX_CONFIG_SECTION {
@@ -108,9 +108,10 @@ pub fn init(api: &Api, config: &Config) {
         resolve_direct3d_create9_ex(api);
     }
 
+    // 游戏可能通过其他模块或动态加载 d3d9，先覆盖所有已加载模块的导入表
+    // SAFETY: detour 与 Direct3DCreate9 使用相同的 system ABI 和参数布局
     let original = unsafe {
-        hook_iat(
-            api.game_base(),
+        hook_iat_all_modules(
             "d3d9.dll",
             "Direct3DCreate9",
             hooked_direct3d_create9 as *const (),
@@ -119,21 +120,56 @@ pub fn init(api: &Api, config: &Config) {
 
     if let Some(original) = original {
         ORIG_DIRECT3D_CREATE9.store(fptr!(original), Ordering::SeqCst);
+        crate::iohook::proc_addr::push_get_proc_override("d3d9.dll", d3d9_get_proc_override);
         api.log_info(&format!(
             "D3D9 display compatibility ready: D3D9Ex={d3d9ex}, windowed={windowed}, monitor={monitor}"
         ));
+    } else if resolve_direct3d_create9() {
+        // 没有静态导入时，动态获取的导出仍由 proc_addr 负责转发
+        crate::iohook::proc_addr::push_get_proc_override("d3d9.dll", d3d9_get_proc_override);
+        api.log_info(&format!(
+            "D3D9 display compatibility ready from d3d9.dll exports: D3D9Ex={d3d9ex}, windowed={windowed}, monitor={monitor}"
+        ));
     } else {
-        api.log_warn("D3D9 display compatibility could not find Direct3DCreate9");
+        api.log_warn("D3D9 display compatibility could not resolve Direct3DCreate9");
     }
 }
 
+fn resolve_direct3d_create9() -> bool {
+    // SAFETY: 两个字符串均为静态 NUL 结尾字节串
+    let module = unsafe { LoadLibraryA(c"d3d9.dll".as_ptr()) };
+    if module == 0 {
+        return false;
+    }
+    // SAFETY: module 是上方成功加载的有效模块句柄，符号名为静态 NUL 结尾字节串
+    let proc = unsafe { GetProcAddress(module, c"Direct3DCreate9".as_ptr()) };
+    if proc.is_null() {
+        return false;
+    }
+    ORIG_DIRECT3D_CREATE9.store(proc as usize, Ordering::SeqCst);
+    true
+}
+
+fn d3d9_get_proc_override(module: usize, name: &str) -> Option<*const ()> {
+    if name != "Direct3DCreate9" {
+        return None;
+    }
+    // SAFETY: 模块名为静态 NUL 结尾字节串
+    let d3d9 = unsafe {
+        windows_sys::Win32::System::LibraryLoader::GetModuleHandleA(c"d3d9.dll".as_ptr().cast())
+    };
+    (module == d3d9 as usize).then_some(hooked_direct3d_create9 as *const ())
+}
+
 fn resolve_direct3d_create9_ex(api: &Api) {
+    // SAFETY: 模块名为静态 NUL 结尾字节串
     let module = unsafe { LoadLibraryA(c"d3d9.dll".as_ptr()) };
     if module == 0 {
         api.log_warn("Failed to load d3d9.dll; D3D9Ex is disabled");
         return;
     }
 
+    // SAFETY: module 是上方成功加载的有效模块句柄，符号名为静态 NUL 结尾字节串
     let proc = unsafe { GetProcAddress(module, c"Direct3DCreate9Ex".as_ptr()) };
     if proc.is_null() {
         api.log_warn("Direct3DCreate9Ex is unavailable; falling back to D3D9");

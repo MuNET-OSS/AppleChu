@@ -22,7 +22,9 @@ struct RuntimeInfo {
     text_size: u32,
 }
 
+// SAFETY: ABI 表在 loader 生命周期内只读，所有跨线程调用均由表内函数自行同步
 unsafe impl Send for Api {}
+// SAFETY: RuntimeInfo 只含值类型，ABI 表在 loader 生命周期内保持稳定
 unsafe impl Sync for Api {}
 
 pub static API: OnceCell<Api> = OnceCell::new();
@@ -31,8 +33,13 @@ static STANDALONE_LOGGER: AtomicUsize = AtomicUsize::new(0);
 pub type StandaloneLogger = unsafe extern "C" fn(LogLevel, *const c_char);
 
 impl Api {
-    pub fn new(raw: *const ChuModAPI, info: *const ChuModInfo) -> Option<Self> {
+    /// 从 loader 提供的 ABI 指针创建 API 句柄
+    ///
+    /// # Safety
+    /// `raw` 和 `info` 非空时必须指向有效的 ABI 结构，且 `raw` 必须在返回句柄的整个使用期内保持有效
+    pub unsafe fn new(raw: *const ChuModAPI, info: *const ChuModInfo) -> Option<Self> {
         let raw = NonNull::new(raw.cast_mut())?;
+        // SAFETY: 调用方保证 info 指向有效的 ChuModInfo
         let info = unsafe { info.as_ref() }?;
         Some(Self {
             raw: Some(raw),
@@ -46,18 +53,25 @@ impl Api {
     }
 
     /// 为独立的 64 位 AM Daemon 构造 API 句柄
-    pub unsafe fn standalone(logger: StandaloneLogger) -> Option<Self> {
-        let game_base =
-            windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null()) as usize;
+    pub fn standalone(logger: StandaloneLogger) -> Option<Self> {
+        // SAFETY: 空模块名按 Win32 契约返回当前进程主模块
+        let game_base = unsafe {
+            windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null()) as usize
+        };
         if game_base == 0 {
             return None;
         }
-        let nt_offset = std::ptr::read_unaligned((game_base + 0x3c) as *const u32) as usize;
+        let dos_lfanew = game_base.checked_add(0x3c)?;
+        // SAFETY: Windows 载入的主模块是有效 PE 映像，DOS 头覆盖 e_lfanew 字段
+        let nt_offset = unsafe { std::ptr::read_unaligned(dos_lfanew as *const u32) } as usize;
         let nt = game_base.checked_add(nt_offset)?;
-        if std::ptr::read_unaligned(nt as *const u32) != 0x0000_4550 {
+        // SAFETY: Windows loader 保证 e_lfanew 指向当前映像内可读的 NT 头
+        if unsafe { std::ptr::read_unaligned(nt as *const u32) } != 0x0000_4550 {
             return None;
         }
-        let game_size = std::ptr::read_unaligned((nt + 0x50) as *const u32);
+        let size_of_image = nt.checked_add(0x50)?;
+        // SAFETY: 已验证 NT 头签名，PE32+ 可选头覆盖 SizeOfImage 字段
+        let game_size = unsafe { std::ptr::read_unaligned(size_of_image as *const u32) };
         if game_size == 0 {
             return None;
         }
@@ -225,6 +239,8 @@ mod tests {
 
     #[test]
     fn runtime_info_is_owned_after_crossing_ffi_boundary() {
+        // SAFETY: ChuModAPI 的整数、裸指针和 Option<fn> 字段均允许全零值
+        let raw = unsafe { std::mem::zeroed::<ChuModAPI>() };
         // Given: loader 提供的运行时信息只在初始化调用期间有效。
         let api = {
             let info = ChuModInfo {
@@ -240,7 +256,7 @@ mod tests {
             };
 
             // When: AppleChu 在 FFI 边界创建 API 句柄。
-            Api::new(std::ptr::dangling(), &info).expect("有效指针必须被接受")
+            unsafe { Api::new(&raw, &info) }.expect("有效指针必须被接受")
         };
 
         // Then: 句柄不再借用 loader 的临时 ChuModInfo。

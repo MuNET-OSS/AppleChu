@@ -1,34 +1,42 @@
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 use super::osd;
 
-static mut INITIALIZED: bool = false;
 static FRAME_COUNT: AtomicU32 = AtomicU32::new(0);
-static mut LAST_TIME: u64 = 0;
-static mut FREQ: u64 = 0;
+static LAST_TIME: AtomicU64 = AtomicU64::new(0);
+static FREQ: OnceLock<u64> = OnceLock::new();
 
-pub unsafe extern "C" fn on_present(_device: *mut c_void) {
-    if !INITIALIZED {
-        INITIALIZED = true;
+pub(crate) fn on_present(_device: *mut c_void) {
+    let freq = *FREQ.get_or_init(|| {
         let mut freq = 0i64;
         let mut now = 0i64;
-        QueryPerformanceFrequency(&mut freq);
-        QueryPerformanceCounter(&mut now);
-        FREQ = freq as u64;
-        LAST_TIME = now as u64;
-    }
+        // SAFETY: 两个 Win32 API 仅写入调用期间有效的栈变量
+        unsafe {
+            QueryPerformanceFrequency(&mut freq);
+            QueryPerformanceCounter(&mut now);
+        }
+        LAST_TIME.store(now as u64, Ordering::Release);
+        freq as u64
+    });
 
     FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
     let mut now = 0i64;
-    QueryPerformanceCounter(&mut now);
+    // SAFETY: Win32 API 仅写入调用期间有效的栈变量
+    unsafe { QueryPerformanceCounter(&mut now) };
     let now = now as u64;
-    let elapsed = now.saturating_sub(LAST_TIME);
-    if FREQ > 0 && elapsed >= FREQ {
+    let previous = LAST_TIME.load(Ordering::Acquire);
+    let elapsed = now.saturating_sub(previous);
+    if freq > 0
+        && elapsed >= freq
+        && LAST_TIME
+            .compare_exchange(previous, now, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    {
         let count = FRAME_COUNT.swap(0, Ordering::Relaxed);
-        let fps_x10 = (count as f64 * FREQ as f64 / elapsed as f64 * 10.0) as u32;
+        let fps_x10 = (count as f64 * freq as f64 / elapsed as f64 * 10.0) as u32;
         osd::set_fps_x10(fps_x10);
-        LAST_TIME = now;
     }
 }
 

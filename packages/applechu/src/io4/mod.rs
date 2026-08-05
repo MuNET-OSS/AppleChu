@@ -329,7 +329,10 @@ unsafe fn io4_async_worker(async_read: *const Io4Async) {
                 };
             }
             // 工作线程复制任务后立即释放提交槽位，再执行设备轮询
-            let task = pending.take().expect("pending IO4 task disappeared");
+            let task = match pending.take() {
+                Some(task) => task,
+                None => unreachable!("pending IO4 task disappeared"),
+            };
             async_read.available_cv.notify_one();
             task
         };

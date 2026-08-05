@@ -346,8 +346,8 @@ pub fn initialize(
     logger: StandaloneLogger,
     module_order: &[&str],
 ) -> Result<(), String> {
-    let api = unsafe { Api::standalone(logger) }
-        .ok_or_else(|| "failed to inspect AM Daemon PE image".to_owned())?;
+    let api =
+        Api::standalone(logger).ok_or_else(|| "failed to inspect AM Daemon PE image".to_owned())?;
     api.install();
     let api = API
         .get()

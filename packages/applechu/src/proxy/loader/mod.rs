@@ -34,7 +34,9 @@ extern "system" {
 }
 
 pub unsafe fn load_mods() {
-    let mut state = STATE.lock().unwrap();
+    let mut state = STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if state.loaded {
         return;
     }
@@ -102,7 +104,9 @@ pub unsafe fn load_mods() {
 
     external::load(&base_dir, &info, api);
 
-    let mut state = STATE.lock().unwrap();
+    let mut state = STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let count = state.mods.len();
     write_log_inner(&mut state, &format!("External modules loaded: {count}"));
     let ready_mods: Vec<_> = state
@@ -123,7 +127,9 @@ pub unsafe fn load_mods() {
 pub unsafe fn unload_mods() {
     hot_reload::stop_monitor();
     frame_hook::stop();
-    let mut state = STATE.lock().unwrap();
+    let mut state = STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     while let Some(m) = state.mods.pop() {
         write_log_inner(
             &mut state,
@@ -147,7 +153,9 @@ pub unsafe fn unload_mods() {
 
     api_impl::shutdown();
 
-    let mut state = STATE.lock().unwrap();
+    let mut state = STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     write_log_inner(&mut state, "Game side stopped");
     state.log_file = None;
 }

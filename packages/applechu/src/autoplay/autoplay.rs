@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
+use std::sync::OnceLock;
 
 use crate::util::api::Api;
 
@@ -9,14 +10,14 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 static WAS_USED: AtomicBool = AtomicBool::new(false);
 static HOTKEY: AtomicI32 = AtomicI32::new(VK_HOME);
 
-static mut API_HANDLE: Option<Api> = None;
-static mut STATE_PTR: usize = 0;
-static mut DEMO_OFF: u32 = 0;
-static mut PRESET_OFF: u32 = 0;
-static mut JUDGE_ADDR: usize = 0;
-static mut ORIG_JUDGE: usize = 0;
-static mut UPSERT_ADDR: usize = 0;
-static mut ORIG_UPSERT: usize = 0;
+static API_HANDLE: OnceLock<Api> = OnceLock::new();
+static STATE_PTR: AtomicUsize = AtomicUsize::new(0);
+static DEMO_OFF: AtomicU32 = AtomicU32::new(0);
+static PRESET_OFF: AtomicU32 = AtomicU32::new(0);
+static JUDGE_ADDR: AtomicUsize = AtomicUsize::new(0);
+static ORIG_JUDGE: AtomicUsize = AtomicUsize::new(0);
+static UPSERT_ADDR: AtomicUsize = AtomicUsize::new(0);
+static ORIG_UPSERT: AtomicUsize = AtomicUsize::new(0);
 
 #[link(name = "kernel32")]
 extern "system" {
@@ -38,7 +39,7 @@ extern "system" {
 const VK_HOME: i32 = 0x24;
 
 pub fn init(api: &Api, hotkey: &str) {
-    unsafe { API_HANDLE = Some(*api) };
+    let _ = API_HANDLE.set(*api);
     let hotkey = parse_hotkey(hotkey).unwrap_or(VK_HOME);
     HOTKEY.store(hotkey, Ordering::Relaxed);
     RUNNING.store(true, Ordering::Relaxed);
@@ -57,18 +58,16 @@ pub fn init(api: &Api, hotkey: &str) {
         api.log_error("Autoplay init failed: demo checker not found");
         return;
     }
-    let Some(demo_off) = read_u32(api, demo_checker + 2) else {
+    let Some(demo_off) = read_u32(api, demo_checker.wrapping_add(2)) else {
         api.log_error("Autoplay init failed: failed to read demo offset");
         return;
     };
-    let Some(preset_off) = read_u32(api, demo_checker + 11) else {
+    let Some(preset_off) = read_u32(api, demo_checker.wrapping_add(11)) else {
         api.log_error("Autoplay init failed: failed to read preset offset");
         return;
     };
-    unsafe {
-        DEMO_OFF = demo_off;
-        PRESET_OFF = preset_off;
-    }
+    DEMO_OFF.store(demo_off, Ordering::Release);
+    PRESET_OFF.store(preset_off, Ordering::Release);
     api.log_info(&format!(
         "Autoplay demo checker @ 0x{demo_checker:08X}, offsets +0x{demo_off:X}/+0x{preset_off:X}"
     ));
@@ -78,7 +77,7 @@ pub fn init(api: &Api, hotkey: &str) {
         api.log_error("Autoplay init failed: JudgeTapChecker::check not found");
         return;
     }
-    unsafe { JUDGE_ADDR = judge };
+    JUDGE_ADDR.store(judge, Ordering::Release);
     api.log_info(&format!("Autoplay JudgeTapChecker::check @ 0x{judge:08X}"));
 
     let state_ptr = find_state_ptr(
@@ -93,14 +92,14 @@ pub fn init(api: &Api, hotkey: &str) {
         api.log_error("Autoplay init failed: global game state pointer not found");
         return;
     }
-    unsafe { STATE_PTR = state_ptr };
+    STATE_PTR.store(state_ptr, Ordering::Release);
     api.log_info(&format!("Autoplay game state ptr @ 0x{state_ptr:08X}"));
 
     let Some(trampoline) = api.hook_create(judge, hooked_judge_check as *const () as usize) else {
         api.log_error("Autoplay init failed: failed to create judge hook");
         return;
     };
-    unsafe { ORIG_JUDGE = trampoline };
+    ORIG_JUDGE.store(trampoline, Ordering::Release);
     if !api.hook_enable(judge) {
         api.log_error("Autoplay init failed: failed to enable judge hook");
         return;
@@ -133,15 +132,13 @@ pub fn init(api: &Api, hotkey: &str) {
 pub fn shutdown() {
     RUNNING.store(false, Ordering::Relaxed);
     ENABLED.store(false, Ordering::Relaxed);
-    unsafe {
-        if let Some(api) = API_HANDLE {
-            if JUDGE_ADDR != 0 {
-                api.hook_disable(JUDGE_ADDR);
-                api.hook_remove(JUDGE_ADDR);
-                JUDGE_ADDR = 0;
-            }
-            api.log_info("Autoplay cleaned up");
+    if let Some(api) = API_HANDLE.get() {
+        let judge = JUDGE_ADDR.swap(0, Ordering::AcqRel);
+        if judge != 0 {
+            api.hook_disable(judge);
+            api.hook_remove(judge);
         }
+        api.log_info("Autoplay cleaned up");
     }
 }
 
@@ -175,10 +172,12 @@ fn find_judge_check(api: &Api, text_base: usize, text_size: u32) -> usize {
         return 0;
     }
     for back in 1..0x200usize {
-        if found < back + text_base {
+        let Some(addr) = found.checked_sub(back) else {
+            break;
+        };
+        if addr < text_base {
             break;
         }
-        let addr = found - back;
         let mut buf = [0u8; 5];
         if !api.mem_read(addr, &mut buf) {
             continue;
@@ -205,12 +204,13 @@ fn find_state_ptr(
     if !api.mem_read(text_base, &mut text) {
         return 0;
     }
-    let demo_off = unsafe { DEMO_OFF };
+    let demo_off = DEMO_OFF.load(Ordering::Acquire);
     let game_end = game_base.saturating_add(game_size as usize);
+    let demo_checker_end = demo_checker.wrapping_add(24);
 
     for i in 0..text.len().saturating_sub(7) {
-        let addr = text_base + i;
-        if (demo_checker..demo_checker + 24).contains(&addr) || text[i] != 0x80 {
+        let addr = text_base.wrapping_add(i);
+        if (demo_checker..demo_checker_end).contains(&addr) || text[i] != 0x80 {
             continue;
         }
         let modrm = text[i + 1];
@@ -254,7 +254,7 @@ unsafe extern "fastcall" fn hooked_judge_check(
     }
 
     let orig: unsafe extern "fastcall" fn(*mut c_void, *mut c_void, f32, u8) -> i32 =
-        std::mem::transmute(ORIG_JUDGE);
+        std::mem::transmute(ORIG_JUDGE.load(Ordering::Acquire));
     orig(ecx, edx, td, input)
 }
 
@@ -292,36 +292,37 @@ unsafe extern "system" fn hotkey_thread(_: *mut c_void) -> u32 {
     0
 }
 
-unsafe fn write_demo_flags() {
-    let Some(api) = API_HANDLE else {
+fn write_demo_flags() {
+    let Some(api) = API_HANDLE.get() else {
         return;
     };
-    let Some(state) = read_usize(&api, STATE_PTR) else {
+    let Some(state) = read_usize(api, STATE_PTR.load(Ordering::Acquire)) else {
         return;
     };
     if state == 0 {
         return;
     }
-    let _ = api.mem_write(state + DEMO_OFF as usize, &[1]);
-    let _ = api.mem_write(state + PRESET_OFF as usize, &1u32.to_le_bytes());
+    let demo_off = DEMO_OFF.load(Ordering::Acquire) as usize;
+    let preset_off = PRESET_OFF.load(Ordering::Acquire) as usize;
+    let _ = api.mem_write(state.wrapping_add(demo_off), &[1]);
+    let _ = api.mem_write(state.wrapping_add(preset_off), &1u32.to_le_bytes());
 }
 
-unsafe fn clear_demo_flag() {
-    let Some(api) = API_HANDLE else {
+fn clear_demo_flag() {
+    let Some(api) = API_HANDLE.get() else {
         return;
     };
-    let Some(state) = read_usize(&api, STATE_PTR) else {
+    let Some(state) = read_usize(api, STATE_PTR.load(Ordering::Acquire)) else {
         return;
     };
     if state != 0 {
-        let _ = api.mem_write(state + DEMO_OFF as usize, &[0]);
+        let address = state.wrapping_add(DEMO_OFF.load(Ordering::Acquire) as usize);
+        let _ = api.mem_write(address, &[0]);
     }
 }
 
 pub fn init_upload_guard(api: &Api) {
-    unsafe {
-        API_HANDLE = Some(*api);
-    }
+    let _ = API_HANDLE.set(*api);
 
     let upsert = find_upsert_function(
         api,
@@ -344,31 +345,27 @@ pub fn init_upload_guard(api: &Api) {
         return;
     }
 
-    unsafe {
-        UPSERT_ADDR = upsert;
-        ORIG_UPSERT = trampoline;
-    }
+    UPSERT_ADDR.store(upsert, Ordering::Release);
+    ORIG_UPSERT.store(trampoline, Ordering::Release);
     api.log_info(&format!(
         "Autoplay upload guard enabled: UpsertUserAll @ 0x{upsert:08X}, scores blocked during autoplay"
     ));
 }
 
 pub fn shutdown_upload_guard() {
-    unsafe {
-        if let Some(api) = API_HANDLE {
-            if UPSERT_ADDR != 0 {
-                api.hook_disable(UPSERT_ADDR);
-                api.hook_remove(UPSERT_ADDR);
-                UPSERT_ADDR = 0;
-            }
-            api.log_info("Autoplay upload guard cleaned up");
+    if let Some(api) = API_HANDLE.get() {
+        let upsert = UPSERT_ADDR.swap(0, Ordering::AcqRel);
+        if upsert != 0 {
+            api.hook_disable(upsert);
+            api.hook_remove(upsert);
         }
+        api.log_info("Autoplay upload guard cleaned up");
     }
 }
 
 unsafe extern "C" fn hooked_upsert(a: *mut c_void, b: *mut c_void, c: *mut c_void) {
     if is_enabled() || was_used() {
-        if let Some(api) = API_HANDLE {
+        if let Some(api) = API_HANDLE.get() {
             api.log_info("Autoplay upload guard: upload blocked because autoplay was used");
         }
         reset_was_used();
@@ -376,7 +373,7 @@ unsafe extern "C" fn hooked_upsert(a: *mut c_void, b: *mut c_void, c: *mut c_voi
     }
 
     let orig: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =
-        std::mem::transmute(ORIG_UPSERT);
+        std::mem::transmute(ORIG_UPSERT.load(Ordering::Acquire));
     orig(a, b, c);
 }
 
@@ -421,7 +418,7 @@ fn find_upsert_function(
             continue;
         }
         if text[q..q + 5] == [0x55, 0x8B, 0xEC, 0x6A, 0xFF] {
-            let data_builder = text_base + q;
+            let data_builder = text_base.wrapping_add(q);
             return find_caller_function(&text, text_base, data_builder).unwrap_or(0);
         }
     }
@@ -434,7 +431,10 @@ fn find_caller_function(text: &[u8], text_base: usize, data_builder: usize) -> O
             continue;
         }
         let rel = read_le_i32(text, j + 1)?;
-        let call_target = (text_base + j + 5).wrapping_add(rel as usize);
+        let call_target = text_base
+            .wrapping_add(j)
+            .wrapping_add(5)
+            .wrapping_add(rel as usize);
         let matched = call_target == data_builder
             || jump_target(text, text_base, call_target) == Some(data_builder);
         if !matched {
@@ -446,7 +446,7 @@ fn find_caller_function(text: &[u8], text_base: usize, data_builder: usize) -> O
                 break;
             };
             if f + 5 <= text.len() && text[f..f + 5] == [0x55, 0x8B, 0xEC, 0x6A, 0xFF] {
-                return Some(text_base + f);
+                return Some(text_base.wrapping_add(f));
             }
         }
     }
@@ -455,11 +455,12 @@ fn find_caller_function(text: &[u8], text_base: usize, data_builder: usize) -> O
 
 fn jump_target(text: &[u8], text_base: usize, target: usize) -> Option<usize> {
     let offset = target.checked_sub(text_base)?;
-    if offset + 5 > text.len() || text[offset] != 0xE9 {
+    let end = offset.checked_add(5)?;
+    if end > text.len() || text[offset] != 0xE9 {
         return None;
     }
-    let rel = read_le_i32(text, offset + 1)?;
-    Some((target + 5).wrapping_add(rel as usize))
+    let rel = read_le_i32(text, offset.checked_add(1)?)?;
+    Some(target.wrapping_add(5).wrapping_add(rel as usize))
 }
 
 fn parse_hotkey(value: &str) -> Option<i32> {
@@ -536,19 +537,17 @@ fn read_usize(api: &Api, addr: usize) -> Option<usize> {
 }
 
 fn read_le_u32(buf: &[u8], offset: usize) -> Option<u32> {
-    let bytes: [u8; 4] = buf.get(offset..offset + 4)?.try_into().ok()?;
+    let bytes: [u8; 4] = buf.get(offset..offset.checked_add(4)?)?.try_into().ok()?;
     Some(u32::from_le_bytes(bytes))
 }
 
 fn read_le_i32(buf: &[u8], offset: usize) -> Option<i32> {
-    let bytes: [u8; 4] = buf.get(offset..offset + 4)?.try_into().ok()?;
+    let bytes: [u8; 4] = buf.get(offset..offset.checked_add(4)?)?.try_into().ok()?;
     Some(i32::from_le_bytes(bytes))
 }
 
 fn log_info(message: &str) {
-    unsafe {
-        if let Some(api) = API_HANDLE {
-            api.log_info(message);
-        }
+    if let Some(api) = API_HANDLE.get() {
+        api.log_info(message);
     }
 }

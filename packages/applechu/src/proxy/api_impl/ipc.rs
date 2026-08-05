@@ -24,7 +24,9 @@ pub unsafe extern "C" fn api_register_service(name: *const c_char, ptr: *mut c_v
         return -1;
     }
     let key = CStr::from_ptr(name).to_string_lossy().into_owned();
-    let mut services = SERVICES.lock().unwrap();
+    let mut services = SERVICES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     services.insert(key, SendPtr(ptr));
     0
 }
@@ -34,7 +36,9 @@ pub unsafe extern "C" fn api_get_service(name: *const c_char) -> *mut c_void {
         return std::ptr::null_mut();
     }
     let key = CStr::from_ptr(name).to_string_lossy();
-    let services = SERVICES.lock().unwrap();
+    let services = SERVICES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     services
         .get(key.as_ref())
         .map_or(std::ptr::null_mut(), |p| p.0)
@@ -45,7 +49,9 @@ pub unsafe extern "C" fn api_publish(topic: *const c_char, data: *mut c_void, si
         return -1;
     }
     let topic_str = CStr::from_ptr(topic).to_string_lossy();
-    let subs = SUBSCRIBERS.lock().unwrap();
+    let subs = SUBSCRIBERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     for sub in subs.iter() {
         if sub.topic == topic_str.as_ref() {
             (sub.cb)(topic, data, size);
@@ -66,7 +72,9 @@ pub unsafe extern "C" fn api_subscribe(
         None => return -1,
     };
     let topic_str = CStr::from_ptr(topic).to_string_lossy().into_owned();
-    let mut subs = SUBSCRIBERS.lock().unwrap();
+    let mut subs = SUBSCRIBERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     subs.push(Subscriber {
         topic: topic_str,
         cb,
@@ -75,6 +83,12 @@ pub unsafe extern "C" fn api_subscribe(
 }
 
 pub fn shutdown() {
-    SERVICES.lock().unwrap().clear();
-    SUBSCRIBERS.lock().unwrap().clear();
+    SERVICES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
+    SUBSCRIBERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
 }

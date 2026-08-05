@@ -25,7 +25,9 @@ pub unsafe extern "C" fn api_hook_create(
             if !original.is_null() {
                 *original = trampoline;
             }
-            let mut hooks = HOOKS.lock().unwrap();
+            let mut hooks = HOOKS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             hooks.insert(target as usize, HookEntry { detour: hook });
             0
         }
@@ -34,7 +36,9 @@ pub unsafe extern "C" fn api_hook_create(
 }
 
 pub unsafe extern "C" fn api_hook_enable(target: *mut c_void) -> i32 {
-    let hooks = HOOKS.lock().unwrap();
+    let hooks = HOOKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     match hooks.get(&(target as usize)) {
         Some(entry) if entry.detour.enable().is_ok() => 0,
         _ => -1,
@@ -42,7 +46,9 @@ pub unsafe extern "C" fn api_hook_enable(target: *mut c_void) -> i32 {
 }
 
 pub unsafe extern "C" fn api_hook_disable(target: *mut c_void) -> i32 {
-    let hooks = HOOKS.lock().unwrap();
+    let hooks = HOOKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     match hooks.get(&(target as usize)) {
         Some(entry) if entry.detour.disable().is_ok() => 0,
         _ => -1,
@@ -50,7 +56,9 @@ pub unsafe extern "C" fn api_hook_disable(target: *mut c_void) -> i32 {
 }
 
 pub unsafe extern "C" fn api_hook_remove(target: *mut c_void) -> i32 {
-    let mut hooks = HOOKS.lock().unwrap();
+    let mut hooks = HOOKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if hooks.remove(&(target as usize)).is_some() {
         0
     } else {
@@ -59,7 +67,9 @@ pub unsafe extern "C" fn api_hook_remove(target: *mut c_void) -> i32 {
 }
 
 pub fn shutdown() {
-    let mut hooks = HOOKS.lock().unwrap();
+    let mut hooks = HOOKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     for (_addr, entry) in hooks.drain() {
         unsafe {
             let _ = entry.detour.disable();

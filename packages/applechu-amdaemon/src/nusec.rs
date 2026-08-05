@@ -1,9 +1,8 @@
-use std::ffi::CStr;
+use std::ffi::{c_void, CStr};
 use std::fs::File;
 use std::io::Read;
+use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::Mutex;
-
-use windows_sys::Win32::Foundation::HANDLE;
 
 use applechu::amdaemon::KeychipConfig;
 use applechu::iohook::{self, Irp, IrpOp};
@@ -38,7 +37,7 @@ const ERROR_DISK_FULL: u32 = 112;
 const ERROR_INVALID_FUNCTION: u32 = 1;
 const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 const E_INVALIDARG: i32 = 0x8007_0057_u32 as i32;
-static mut NUSEC_FD: HANDLE = std::ptr::null_mut();
+static NUSEC_FD: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static STATE: Mutex<NusecState> = Mutex::new(NusecState {
     nearfull: (1 << 16) + 512,
     play_count: 0,
@@ -109,7 +108,7 @@ pub fn init(api: &Api, config: &KeychipConfig) {
         let Some(fd) = iohook::open_nul_fd() else {
             return api.log_warn("Keychip emulator failed to create a device handle");
         };
-        NUSEC_FD = fd;
+        NUSEC_FD.store(fd, Ordering::Release);
         if !iohook::push_handler(handle_irp) {
             return api.log_warn("Keychip emulator failed to register its device handler");
         }
@@ -130,21 +129,25 @@ fn subnet_from_text(value: &str) -> u32 {
 }
 
 pub(crate) fn parse_ipv4(value: &str) -> Option<u32> {
-    let octets = value
-        .split('.')
-        .map(str::parse::<u8>)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    (octets.len() == 4).then(|| {
-        ((octets[0] as u32) << 24)
-            | ((octets[1] as u32) << 16)
-            | ((octets[2] as u32) << 8)
-            | octets[3] as u32
-    })
+    let mut octets = value.split('.').map(str::parse::<u8>);
+    let first = octets.next()?.ok()?;
+    let second = octets.next()?.ok()?;
+    let third = octets.next()?.ok()?;
+    let fourth = octets.next()?.ok()?;
+    if octets.next().is_some() {
+        return None;
+    }
+    Some(
+        (u32::from(first) << 24)
+            | (u32::from(second) << 16)
+            | (u32::from(third) << 8)
+            | u32::from(fourth),
+    )
 }
 
 unsafe fn handle_irp(irp: &mut Irp) -> i32 {
-    if irp.op != IrpOp::Open && irp.fd != NUSEC_FD {
+    let fd = NUSEC_FD.load(Ordering::Acquire);
+    if irp.op != IrpOp::Open && irp.fd != fd {
         return iohook::invoke_next(irp);
     }
     match irp.op {
@@ -152,7 +155,7 @@ unsafe fn handle_irp(irp: &mut Irp) -> i32 {
             if matches_wide(irp.open_filename_w, "\\??\\FddDriver")
                 || matches_ansi(irp.open_filename_a, "\\??\\FddDriver") =>
         {
-            irp.fd = NUSEC_FD;
+            irp.fd = fd;
             log_info("Keychip device opened");
             iohook::S_OK
         }
@@ -215,12 +218,15 @@ unsafe fn handle_ioctl(irp: &mut Irp) -> i32 {
         NUSEC_IOCTL_GET_TRACE_LOG_DATA => get_trace_log_data(irp, &state),
         NUSEC_IOCTL_GET_TRACE_LOG_STATE => write_dwords(
             irp,
-            &[state.trace_head - state.trace_tail, state.trace_tail],
+            &[
+                state.trace_head.wrapping_sub(state.trace_tail),
+                state.trace_tail,
+            ],
         ),
-        NUSEC_IOCTL_GET_NVRAM_AVAILABLE => write_dwords(
-            irp,
-            &[TRACE_LOG_CAPACITY - (state.trace_head - state.trace_tail)],
-        ),
+        NUSEC_IOCTL_GET_NVRAM_AVAILABLE => {
+            let used = state.trace_head.wrapping_sub(state.trace_tail);
+            write_dwords(irp, &[TRACE_LOG_CAPACITY.wrapping_sub(used)])
+        }
         NUSEC_IOCTL_GET_NVRAM_GEOMETRY => write_dwords(irp, &[10, 4096]),
         _ => iohook::hresult_from_win32(ERROR_INVALID_FUNCTION),
     }
@@ -283,8 +289,9 @@ unsafe fn get_trace_log_data(irp: &mut Irp, state: &NusecState) -> i32 {
         return iohook::hresult_from_win32(ERROR_INSUFFICIENT_BUFFER);
     }
     let input = std::slice::from_raw_parts(irp.ioctl_in.cast::<u8>(), 8);
-    let mut position = u32::from_le_bytes(input[..4].try_into().unwrap());
-    let mut count = u32::from_le_bytes(input[4..8].try_into().unwrap());
+    let Some((mut position, mut count)) = parse_trace_request(input) else {
+        return E_INVALIDARG;
+    };
     let required = count as usize * TRACE_LOG_RECORD_SIZE;
     if irp.ioctl_out.is_null() || (irp.ioctl_out_nbytes as usize) < required {
         return iohook::hresult_from_win32(ERROR_INSUFFICIENT_BUFFER);
@@ -305,6 +312,15 @@ unsafe fn get_trace_log_data(irp: &mut Irp, state: &NusecState) -> i32 {
         *irp.out_nbytes = written as u32;
     }
     iohook::S_OK
+}
+
+fn parse_trace_request(input: &[u8]) -> Option<(u32, u32)> {
+    let position = input.get(..4)?;
+    let count = input.get(4..8)?;
+    Some((
+        u32::from_le_bytes([position[0], position[1], position[2], position[3]]),
+        u32::from_le_bytes([count[0], count[1], count[2], count[3]]),
+    ))
 }
 
 unsafe fn read_input_dword(irp: &Irp) -> Option<u32> {
@@ -357,5 +373,23 @@ unsafe fn matches_ansi(value: *const u8, expected: &str) -> bool {
 fn log_info(message: &str) {
     if let Some(api) = applechu::util::api::API.get() {
         api.log_info(message);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_trace_request;
+
+    #[test]
+    fn trace_request_parses_two_little_endian_dwords() {
+        assert_eq!(
+            parse_trace_request(&[1, 2, 3, 4, 5, 6, 7, 8]),
+            Some((0x0403_0201, 0x0807_0605))
+        );
+    }
+
+    #[test]
+    fn trace_request_rejects_truncated_input() {
+        assert_eq!(parse_trace_request(&[0; 7]), None);
     }
 }
