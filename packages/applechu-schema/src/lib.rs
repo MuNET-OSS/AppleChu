@@ -219,29 +219,28 @@ impl Schema {
 
     pub fn default_config_toml(&self) -> String {
         let mut output = String::from(
-            "## AppleChu 默认配置\n## section 存在时启用，注释 section 时关闭\n\nVersion = \"1\"\n",
+            "## AppleChu 默认配置\n## section 存在时启用，注释 section 时关闭\n\nconfig_version = 1\n",
         );
         for section in &self.sections {
             output.push('\n');
             append_comment(&mut output, section.label.zh_or_en());
-            if section.default_on || section.always_enabled {
-                output.push('[');
-            } else {
-                output.push_str("#[");
-            }
+            output.push('[');
             output.push_str(&section.id);
             output.push_str("]\n");
             if let Some(description) = &section.description {
                 append_comment(&mut output, description.zh_or_en());
             }
+            output.push_str("enable = ");
+            output.push_str(if section.default_on {
+                "true\n"
+            } else {
+                "false\n"
+            });
             for entry in &section.entries {
                 append_comment(
                     &mut output,
                     entry.comment.as_ref().and_then(LocalizedText::zh_or_en),
                 );
-                if !entry.emit_default {
-                    output.push('#');
-                }
                 output.push_str(&entry.key);
                 output.push_str(" = ");
                 if let Some(value) = &entry.default {
@@ -439,6 +438,12 @@ fn validate_sections(sections: &[SectionSpec]) -> Result<(), SchemaError> {
         }
         let mut keys = Vec::new();
         for entry in &section.entries {
+            if entry.key.eq_ignore_ascii_case("enable") {
+                return Err(SchemaError::Invalid(format!(
+                    "配置项 {}.enable 由统一功能开关保留",
+                    section.id
+                )));
+            }
             if !keys
                 .iter()
                 .all(|key: &String| !key.eq_ignore_ascii_case(&entry.key))
@@ -616,7 +621,7 @@ fn append_comment(output: &mut String, comment: Option<&str>) {
 
 fn inline_toml(value: &toml::Value) -> String {
     match value {
-        toml::Value::String(value) => format!("\"{}\"", value.replace('"', "\\\"")),
+        toml::Value::String(_) => value.to_string(),
         toml::Value::Integer(value) => value.to_string(),
         toml::Value::Float(value) => value.to_string(),
         toml::Value::Boolean(value) => value.to_string(),
@@ -681,8 +686,11 @@ mod tests {
     }
 
     #[test]
-    fn default_config_uses_section_presence() {
+    fn default_config_contains_explicit_defaults() {
         let config = super::SCHEMA.default_config_toml();
+        let document = config
+            .parse::<toml::Table>()
+            .expect("default config must be valid TOML");
         let amdaemon = config
             .split("[Amdaemon]\n")
             .nth(1)
@@ -691,11 +699,17 @@ mod tests {
             .next()
             .expect("AM Daemon section body must exist");
 
+        assert!(config.starts_with("## AppleChu 默认配置"));
+        assert!(config.contains("config_version = 1"));
+        assert!(amdaemon.starts_with("enable = true\n"));
         assert!(amdaemon.contains("AutoStart = false"));
         assert!(amdaemon.contains("AppendConfigArgs = false"));
-        assert!(config.contains("\n[DisableEncryption]\n"));
-        assert!(config.contains("\n[DisableTLS]\n"));
-        assert!(config.contains("#gameId = \"SDHD\""));
+        assert_eq!(
+            document["DisableEncryption"]["enable"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(document["DisableTLS"]["enable"].as_bool(), Some(true));
+        assert!(config.contains("gameId = \"SDHD\""));
     }
 
     #[test]
