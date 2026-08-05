@@ -67,17 +67,17 @@ crate::config_section! {
         hidden: false,
         comment: "AM 平台 DNS 映射",
         fields: {
-            pub default: String = String::from("localhost"),
+            pub default: String = String::new(),
             comment: "未单独指定时使用的服务器地址";
-            pub router: String = String::from("localhost"),
+            pub router: String = String::new(),
             comment: "店内路由服务器";
-            pub startup: String = String::from("localhost"),
+            pub startup: String = String::new(),
             comment: "启动认证服务器";
-            pub billing: String = String::from("localhost"),
+            pub billing: String = String::new(),
             comment: "计费服务器";
-            pub aimedb: String = String::from("localhost"),
+            pub aimedb: String = String::new(),
             comment: "AimeDB 服务器";
-            pub title: String = String::from("title"),
+            pub title: String = String::new(),
             comment: "标题/其他服务器";
             pub replace_host: bool = false,
             key: "replaceHost",

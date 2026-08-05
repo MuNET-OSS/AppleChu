@@ -101,32 +101,32 @@ label = { zh = "AM 平台 DNS 映射", en = "AM platform DNS mapping" }
     [[config.sections.entries]]
     key = "default"
     type = "string"
-    default = "localhost"
+    default = ""
     label = { zh = "默认服务器", en = "Default server" }
     [[config.sections.entries]]
     key = "router"
     type = "string"
-    default = "localhost"
+    default = ""
     label = { zh = "店内路由服务器", en = "Router server" }
     [[config.sections.entries]]
     key = "startup"
     type = "string"
-    default = "localhost"
+    default = ""
     label = { zh = "启动认证服务器", en = "Startup server" }
     [[config.sections.entries]]
     key = "billing"
     type = "string"
-    default = "localhost"
+    default = ""
     label = { zh = "计费服务器", en = "Billing server" }
     [[config.sections.entries]]
     key = "aimedb"
     type = "string"
-    default = "localhost"
+    default = ""
     label = { zh = "AimeDB 服务器", en = "AimeDB server" }
     [[config.sections.entries]]
     key = "title"
     type = "string"
-    default = "title"
+    default = ""
     label = { zh = "标题服务器", en = "Title server" }
     [[config.sections.entries]]
     key = "replaceHost"

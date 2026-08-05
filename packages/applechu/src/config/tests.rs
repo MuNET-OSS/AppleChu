@@ -180,7 +180,7 @@ fn amdaemon_sections_are_normalized_by_game_proxy() {
 
     assert!(output.contains("[Dns]"));
     assert!(output.contains("default = \"127.0.0.1\""));
-    assert!(output.contains("#router = \"localhost\""));
+    assert!(output.contains("#router = \"\""));
     assert!(!output.contains("[UnknownSection]"));
 }
 
@@ -212,10 +212,10 @@ fn empty_dns_section_is_filled_by_game_proxy() {
     let output = config.to_toml();
 
     assert!(dns.enabled);
-    assert_eq!(dns.default, "localhost");
+    assert!(dns.default.is_empty());
     assert!(output.contains("[Dns]"));
-    assert!(output.contains("#default = \"localhost\""));
-    assert!(output.contains("#title = \"title\""));
+    assert!(output.contains("#default = \"\""));
+    assert!(output.contains("#title = \"\""));
 }
 
 #[test]
