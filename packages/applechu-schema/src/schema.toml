@@ -244,21 +244,29 @@ label = { zh = "系统设置", en = "System" }
     type = "string"
     default = "SP"
     label = { zh = "机台模式", en = "Cabinet mode" }
+    options = [
+        { value = "SP", label = { zh = "SP", en = "SP" } },
+        { value = "CVT", label = { zh = "CVT", en = "CVT" } },
+    ]
     [[config.sections.entries]]
     key = "RefreshRate"
     type = "int"
     default = 60
     label = { zh = "刷新率", en = "Refresh rate" }
+    options = [
+        { value = 60, label = { zh = "60 Hz", en = "60 Hz" } },
+        { value = 120, label = { zh = "120 Hz", en = "120 Hz" } },
+    ]
 
 [[config.sections]]
 id = "General"
 default_enabled = false
-label = { zh = "通用设置", en = "General" }
+label = { zh = "自定义版本号", en = "Custom Version" }
     [[config.sections.entries]]
     key = "version_text"
     type = "string"
     default = ""
-    label = { zh = "自定义版本号", en = "Custom version text" }
+    label = { zh = "内容", en = "Content" }
 
 [[config.sections]]
 id = "Window"

@@ -9,6 +9,12 @@ pub const CONTAINER_VERSION: u16 = 1;
 pub const HEADER_LENGTH: u16 = 64;
 
 #[derive(Clone, Debug)]
+pub struct OptionSpec {
+    pub value: toml::Value,
+    pub label: LocalizedText,
+}
+
+#[derive(Clone, Debug)]
 pub struct EntrySpec {
     pub key: String,
     pub value_type: String,
@@ -16,6 +22,8 @@ pub struct EntrySpec {
     pub min: Option<i64>,
     pub max: Option<i64>,
     pub emit_default: bool,
+    pub hidden: bool,
+    pub options: Vec<OptionSpec>,
     pub comment: Option<LocalizedText>,
     pub description: Option<LocalizedText>,
 }
@@ -479,29 +487,65 @@ fn validate_entry(section: &SectionSpec, entry: &EntrySpec) -> Result<(), Schema
             )));
         }
     }
-    let Some(default) = &entry.default else {
-        return Ok(());
-    };
-    let type_matches = match entry.value_type.as_str() {
-        "bool" => default.is_bool(),
-        "int" => default.is_integer(),
-        "float" => default.is_float() || default.is_integer(),
-        "string" => default.is_str(),
-        "string_array" => default
+    let type_matches = |value: &toml::Value| match entry.value_type.as_str() {
+        "bool" => value.is_bool(),
+        "int" => value.is_integer(),
+        "float" => value.is_float() || value.is_integer(),
+        "string" => value.is_str(),
+        "string_array" => value
             .as_array()
             .is_some_and(|values| values.iter().all(toml::Value::is_str)),
         _ => false,
     };
-    if !type_matches {
-        return Err(SchemaError::Invalid(format!(
-            "默认值类型错误 {}.{}",
-            section.id, entry.key
-        )));
+    if let Some(default) = &entry.default {
+        if !type_matches(default) {
+            return Err(SchemaError::Invalid(format!(
+                "默认值类型错误 {}.{}",
+                section.id, entry.key
+            )));
+        }
+        validate_entry_range(section, entry, default, "默认值")?;
+        if !entry.options.is_empty() && !entry.options.iter().any(|option| option.value == *default)
+        {
+            return Err(SchemaError::Invalid(format!(
+                "默认值不在选项中 {}.{}",
+                section.id, entry.key
+            )));
+        }
     }
-    if let Some(value) = default.as_integer() {
+    for option in &entry.options {
+        if !type_matches(&option.value) {
+            return Err(SchemaError::Invalid(format!(
+                "选项值类型错误 {}.{}",
+                section.id, entry.key
+            )));
+        }
+        validate_entry_range(section, entry, &option.value, "选项值")?;
+    }
+    for (index, option) in entry.options.iter().enumerate() {
+        if entry.options[..index]
+            .iter()
+            .any(|previous| previous.value == option.value)
+        {
+            return Err(SchemaError::Invalid(format!(
+                "重复选项值 {}.{}",
+                section.id, entry.key
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_entry_range(
+    section: &SectionSpec,
+    entry: &EntrySpec,
+    value: &toml::Value,
+    label: &str,
+) -> Result<(), SchemaError> {
+    if let Some(value) = value.as_integer() {
         if entry.min.is_some_and(|min| value < min) || entry.max.is_some_and(|max| value > max) {
             return Err(SchemaError::Invalid(format!(
-                "默认值超出范围 {}.{}",
+                "{label}超出范围 {}.{}",
                 section.id, entry.key
             )));
         }
@@ -557,8 +601,51 @@ fn parse_entries(table: &toml::Table, section: &str) -> Result<Vec<EntrySpec>, S
                     .get("emit_default")
                     .and_then(toml::Value::as_bool)
                     .unwrap_or(false),
+                hidden: entry
+                    .get("hidden")
+                    .map(|value| {
+                        value.as_bool().ok_or_else(|| {
+                            SchemaError::Invalid(format!(
+                                "配置项 {section}.{key}.hidden 必须是布尔值"
+                            ))
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or(false),
+                options: parse_options(entry, section, key)?,
                 comment: LocalizedText::from_value(entry.get("label")),
                 description: LocalizedText::from_value(entry.get("description")),
+            })
+        })
+        .collect()
+}
+
+fn parse_options(
+    entry: &toml::Table,
+    section: &str,
+    key: &str,
+) -> Result<Vec<OptionSpec>, SchemaError> {
+    let Some(raw_options) = entry.get("options") else {
+        return Ok(Vec::new());
+    };
+    let options = raw_options.as_array().ok_or_else(|| {
+        SchemaError::Invalid(format!("配置项 {section}.{key}.options 必须是数组"))
+    })?;
+    options
+        .iter()
+        .enumerate()
+        .map(|(index, raw)| {
+            let option = raw.as_table().ok_or_else(|| {
+                SchemaError::Invalid(format!("配置项 {section}.{key}.options[{index}] 必须是表"))
+            })?;
+            let value = option.get("value").cloned().ok_or_else(|| {
+                SchemaError::Invalid(format!(
+                    "配置项 {section}.{key}.options[{index}] 缺少 value"
+                ))
+            })?;
+            Ok(OptionSpec {
+                value,
+                label: LocalizedText::from_value(option.get("label")).unwrap_or_default(),
             })
         })
         .collect()
@@ -710,6 +797,23 @@ mod tests {
         );
         assert_eq!(document["DisableTLS"]["enable"].as_bool(), Some(true));
         assert!(config.contains("gameId = \"SDHD\""));
+    }
+
+    #[test]
+    fn system_entries_expose_manager_options() {
+        let mode = super::SCHEMA
+            .entry("System", "Mode")
+            .expect("Mode must exist");
+        assert_eq!(mode.options.len(), 2);
+        assert_eq!(mode.options[0].value.as_str(), Some("SP"));
+        assert_eq!(mode.options[1].value.as_str(), Some("CVT"));
+
+        let refresh_rate = super::SCHEMA
+            .entry("System", "RefreshRate")
+            .expect("RefreshRate must exist");
+        assert_eq!(refresh_rate.options.len(), 2);
+        assert_eq!(refresh_rate.options[0].value.as_integer(), Some(60));
+        assert_eq!(refresh_rate.options[1].value.as_integer(), Some(120));
     }
 
     #[test]
