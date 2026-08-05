@@ -241,6 +241,7 @@ pub fn init(api: &Api, config: &Config, section: &AimeSectionConfig) {
 
     let path = config
         .section::<AimeIoConfig>()
+        .filter(|config| config.enabled)
         .map_or_else(String::new, |config| dll_path(&config));
     if !path.is_empty() {
         match unsafe { ExternalAimeIo::load(&path) } {

@@ -80,13 +80,6 @@ impl Config {
         self.valid
     }
 
-    pub fn sync(&self) -> std::io::Result<()> {
-        if !self.valid {
-            return Ok(());
-        }
-        fs::write(self.base_dir.join("AppleChu.toml"), self.to_toml())
-    }
-
     pub fn to_toml(&self) -> String {
         let mut output = String::new();
         append_comment(&mut output, BANNER);
@@ -126,7 +119,7 @@ impl Config {
         output
     }
 
-    fn load(base_dir: &str) -> Self {
+    pub(super) fn load(base_dir: &str) -> Self {
         let path = Path::new(base_dir).join("AppleChu.toml");
         match fs::read_to_string(&path) {
             Ok(source) => match Self::parse(base_dir, &source) {
@@ -134,9 +127,7 @@ impl Config {
                 Err(error) => Self::invalid(base_dir, error.to_string()),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let defaults = applechu_schema::SCHEMA.default_config_toml();
-                Self::parse(base_dir, &defaults)
-                    .unwrap_or_else(|error| Self::invalid(base_dir, error.to_string()))
+                Self::from_table(Path::new(base_dir), &toml::Table::new())
             }
             Err(error) => Self::invalid(base_dir, format!("Failed to read AppleChu.toml: {error}")),
         }
@@ -158,7 +149,10 @@ impl Config {
 
         let mut sections = HashMap::new();
         for descriptor in &descriptors {
-            let loaded = (descriptor.parse)(find_section(root, descriptor.name), &mut diagnostics);
+            let table = (!descriptor.builtin())
+                .then(|| find_section(root, descriptor.name))
+                .flatten();
+            let loaded = (descriptor.parse)(table, &mut diagnostics);
             sections.insert((descriptor.type_id)(), loaded);
         }
 
@@ -203,6 +197,14 @@ fn validate_document(
             continue;
         }
 
+        if key.eq_ignore_ascii_case("config_version") {
+            if value.as_integer() != Some(1) {
+                diagnostics.push(ConfigDiagnostic::error(format!(
+                    "Unsupported config version; expected {CONFIG_VERSION}"
+                )));
+            }
+            continue;
+        }
         if key.eq_ignore_ascii_case("Version") {
             if value.as_str() != Some(CONFIG_VERSION) {
                 diagnostics.push(ConfigDiagnostic::error(format!(
@@ -214,7 +216,7 @@ fn validate_document(
 
         if (descriptors
             .iter()
-            .any(|descriptor| key.eq_ignore_ascii_case(descriptor.name))
+            .any(|descriptor| !descriptor.builtin() && key.eq_ignore_ascii_case(descriptor.name))
             || applechu_schema::section(key).is_some())
             && !value.is_table()
         {
@@ -298,16 +300,17 @@ fn warn_unknown_sections(
     diagnostics: &mut Vec<ConfigDiagnostic>,
 ) {
     for key in root.keys() {
-        if key.eq_ignore_ascii_case("Version")
-            || descriptors
-                .iter()
-                .any(|descriptor| key.eq_ignore_ascii_case(descriptor.name))
+        if key.eq_ignore_ascii_case("config_version")
+            || key.eq_ignore_ascii_case("Version")
+            || descriptors.iter().any(|descriptor| {
+                !descriptor.builtin() && key.eq_ignore_ascii_case(descriptor.name)
+            })
             || applechu_schema::section(key).is_some()
         {
             continue;
         }
         diagnostics.push(ConfigDiagnostic::warning(format!(
-            "Unknown config section {key}; it will be removed during normalization"
+            "Unknown config section {key}; it is ignored"
         )));
     }
 }

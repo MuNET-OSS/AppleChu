@@ -112,7 +112,8 @@ mod tests {
 pub(crate) fn is_sp_mode(config: &Config) -> bool {
     config
         .section::<SystemConfig>()
-        .is_some_and(|config| config.is_sp_mode())
+        .filter(|config| config.enabled)
+        .is_none_or(|config| config.is_sp_mode())
 }
 
 crate::config_section! {

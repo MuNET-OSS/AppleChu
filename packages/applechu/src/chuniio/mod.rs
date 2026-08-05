@@ -62,8 +62,11 @@ static BACKEND: Lazy<Mutex<Option<ChuniIoBackend>>> = Lazy::new(|| Mutex::new(No
 pub fn init(api: &Api, config: &Config, _section: &ExternalChuniIoConfig) {
     let led_config = config
         .section::<LedOutputConfig>()
-        .map_or_else(LedOutputConfig::default, |value| (*value).clone());
-    led_output::init(led_config);
+        .filter(|config| config.enabled)
+        .map(|value| (*value).clone());
+    if let Some(led_config) = led_config {
+        led_output::init(led_config);
+    }
     let (path, single_dll) = chuniio_path(config);
     if !path.is_empty() {
         #[cfg(all(windows, target_pointer_width = "64"))]

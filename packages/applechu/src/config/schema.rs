@@ -64,7 +64,7 @@ impl SectionDescriptor {
 
     /// schema 中没有声明的运行时栏目属于内置实现，不写入玩家配置
     pub fn builtin(&self) -> bool {
-        applechu_schema::section(self.name).is_none()
+        self.hidden() && applechu_schema::section(self.name).is_none()
     }
 
     pub fn comment(&self) -> &str {
@@ -91,9 +91,10 @@ impl LoadedSection {
         table: Option<&toml::Table>,
         value: T,
         explicit_fields: Vec<bool>,
+        diagnostics: &mut Vec<ConfigDiagnostic>,
     ) -> Self {
         let descriptor = T::descriptor();
-        let enabled = section_enabled(table, descriptor.default_on(), descriptor.hidden());
+        let enabled = section_enabled(table, descriptor, diagnostics);
         Self {
             descriptor: T::descriptor(),
             enabled,
@@ -156,8 +157,24 @@ pub fn find_section<'a>(root: &'a toml::Table, name: &str) -> Option<&'a toml::T
         .and_then(toml::Value::as_table)
 }
 
-fn section_enabled(table: Option<&toml::Table>, default_on: bool, hidden: bool) -> bool {
-    table.is_some() || (hidden && default_on)
+fn section_enabled(
+    table: Option<&toml::Table>,
+    descriptor: &SectionDescriptor,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> bool {
+    if descriptor.always_enabled() {
+        return true;
+    }
+    match find_key(table, "enable") {
+        Some(value) => value.as_bool().unwrap_or_else(|| {
+            diagnostics.push(ConfigDiagnostic::warning(format!(
+                "Invalid value or type for {}.enable; using the default",
+                descriptor.name
+            )));
+            descriptor.default_on()
+        }),
+        None => descriptor.default_on(),
+    }
 }
 
 pub fn warn_unknown_keys(
@@ -174,7 +191,7 @@ pub fn warn_unknown_keys(
             continue;
         }
         diagnostics.push(ConfigDiagnostic::warning(format!(
-            "Unknown config entry {section}.{key}; it will be removed during normalization"
+            "Unknown config entry {section}.{key}; it is ignored"
         )));
     }
 }

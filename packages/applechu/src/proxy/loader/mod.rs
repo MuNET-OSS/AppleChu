@@ -49,6 +49,7 @@ pub unsafe fn load_mods() {
     let config = Config::global(&base_dir);
     let enable_console = config
         .section::<crate::system_config::SystemConfig>()
+        .filter(|config| config.enabled)
         .is_none_or(|config| config.enable_console);
     console::init(&mut state, enable_console);
 

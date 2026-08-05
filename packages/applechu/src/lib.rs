@@ -103,9 +103,6 @@ pub extern "C" fn chumod_init(info: *const ChuModInfo, api: *const ChuModAPI) ->
     if !config.is_valid() {
         return -1;
     }
-    if let Err(error) = config.sync() {
-        api.log_warn(&format!("Failed to update AppleChu.toml: {error}"));
-    }
     patches::install_pre_entry_hooks(api, config);
 
     pin_dll(api, "D3DCompiler_43.dll");

@@ -1,5 +1,5 @@
 use super::{Config, DiagnosticLevel};
-use crate::amdaemon::AmdaemonConfig;
+use crate::amdaemon::{AmdaemonConfig, EpayConfig};
 use crate::gfx::d3d9::D3D9ExConfig;
 use crate::system_config::SystemConfig;
 use std::fs;
@@ -33,7 +33,8 @@ fn module_section_is_registered_automatically() {
 #[test]
 fn typed_fields_are_hydrated_from_toml() {
     // Given: 用户显式启用栏目并覆盖两个字段。
-    let source = "Version = \"1\"\n[TestSection]\nanswer = 7\nlabel = \"custom\"\n";
+    let source =
+        "config_version = 1\n[TestSection]\nenable = true\nanswer = 7\nlabel = \"custom\"\n";
 
     // When: TOML 在边界被解析为模块自己的配置类型。
     let config = Config::parse(".", source).expect("测试配置必须有效");
@@ -50,7 +51,7 @@ fn typed_fields_are_hydrated_from_toml() {
 #[test]
 fn canonical_toml_comments_default_values() {
     // Given: 默认关闭的栏目没有出现在用户配置中。
-    let config = Config::parse(".", "Version = \"1\"\n").expect("测试配置必须有效");
+    let config = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
 
     // When: 中央框架从同一份 schema 生成规范 TOML。
     let output = config.to_toml();
@@ -75,7 +76,7 @@ fn device_lost_fix_is_not_a_registered_section() {
 
 #[test]
 fn amdaemon_is_a_container_with_independent_controls() {
-    let source = "Version = \"1\"\n[Amdaemon]\n";
+    let source = "config_version = 1\n[Amdaemon]\n";
     let config = Config::parse(".", source).expect("TOML 语法必须有效");
     let section = config
         .section::<AmdaemonConfig>()
@@ -92,21 +93,22 @@ fn amdaemon_is_a_container_with_independent_controls() {
 
 #[test]
 fn section_state_matches_section_presence() {
-    let absent = Config::parse(".", "Version = \"1\"\n").expect("测试配置必须有效");
+    let absent = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
     assert!(!absent.section::<TestSectionConfig>().unwrap().enabled);
     assert!(
-        !absent
+        absent
             .section::<crate::gfx::WindowConfig>()
             .unwrap()
             .enabled
     );
     assert!(absent.to_toml().contains("#[Window]"));
 
-    let present = Config::parse(".", "Version = \"1\"\n[TestSection]\n").expect("测试配置必须有效");
+    let present = Config::parse(".", "config_version = 1\n[TestSection]\nenable = true\n")
+        .expect("测试配置必须有效");
     assert!(present.section::<TestSectionConfig>().unwrap().enabled);
 
-    let commented = Config::parse(".", "Version = \"1\"\n").expect("测试配置必须有效");
-    assert!(!commented.section::<SystemConfig>().unwrap().enabled);
+    let commented = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
+    assert!(commented.section::<SystemConfig>().unwrap().enabled);
 }
 
 #[test]
@@ -115,6 +117,7 @@ fn d3d9ex_owns_device_lost_recovery() {
     let source = concat!(
         "Version = \"1\"\n",
         "[D3D9Ex]\n",
+        "enable = true\n",
         "device_lost_recover = false\n",
         "fast_restart = false\n",
     );
@@ -202,7 +205,7 @@ fn amdaemon_values_survive_game_side_normalization() {
 
 #[test]
 fn empty_dns_section_is_filled_by_game_proxy() {
-    let config = Config::parse(".", "Version = \"1\"\n[Dns]\n").expect("TOML 语法必须有效");
+    let config = Config::parse(".", "config_version = 1\n[Dns]\n").expect("TOML 语法必须有效");
     let dns = config
         .section::<crate::amdaemon::DnsConfig>()
         .expect("DNS 配置必须完成注入");
@@ -250,7 +253,7 @@ fn required_internal_sections_are_not_emitted() {
 
 #[test]
 fn slider_device_remains_enabled_without_public_section() {
-    let config = Config::parse(".", "Version = \"1\"\n").expect("TOML 语法必须有效");
+    let config = Config::parse(".", "config_version = 1\n").expect("TOML 语法必须有效");
     let slider = config
         .section::<crate::slider::SliderDeviceConfig>()
         .expect("触摸条设备配置必须完成注入");
@@ -277,39 +280,6 @@ fn invalid_version_or_section_shape_rejects_config() {
             .count()
             >= 2
     );
-}
-
-#[test]
-fn sync_writes_canonical_config() {
-    let directory = temporary_directory("sync");
-    fs::create_dir_all(&directory).expect("必须能创建测试目录");
-    let config = Config::parse(&directory, "Version = \"1\"\n[TestSection]\nanswer = 7\n")
-        .expect("测试配置必须有效");
-
-    config.sync().expect("规范配置必须能写入");
-    let output = fs::read_to_string(directory.join("AppleChu.toml")).expect("必须能读回规范配置");
-    fs::remove_dir_all(&directory).expect("必须清理测试目录");
-
-    assert!(output.contains("Version = \"1\""));
-    assert!(output.contains("[TestSection]"));
-    assert!(output.contains("answer = 7"));
-    assert!(!output.contains("DeviceLostFix"));
-}
-
-#[test]
-fn invalid_config_is_not_rewritten() {
-    let directory = temporary_directory("invalid");
-    fs::create_dir_all(&directory).expect("必须能创建测试目录");
-    let path = directory.join("AppleChu.toml");
-    let source = "Version = \"0\"\n";
-    fs::write(&path, source).expect("必须能写入测试配置");
-    let config = Config::parse(&directory, source).expect("TOML 语法必须有效");
-
-    config.sync().expect("拒绝重写不是 IO 错误");
-    let output = fs::read_to_string(&path).expect("必须能读回原始配置");
-    fs::remove_dir_all(&directory).expect("必须清理测试目录");
-
-    assert_eq!(output, source);
 }
 
 #[test]
@@ -366,13 +336,63 @@ fn optional_user_features_are_disabled_by_default() {
 
 #[test]
 fn window_defaults_to_fullscreen() {
-    let config = Config::parse(".", "Version = \"1\"\n[Window]\n").expect("测试配置必须有效");
+    let config = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
     let window = config
         .section::<crate::gfx::WindowConfig>()
         .expect("窗口配置必须完成注入");
 
     assert!(window.enabled);
     assert!(!window.windowed);
+}
+
+#[test]
+fn section_without_enable_uses_its_code_default() {
+    let config = Config::parse(".", "config_version = 1\n[D3D9Ex]\nfast_restart = false\n")
+        .expect("测试配置必须有效");
+    let section = config.section::<D3D9ExConfig>().unwrap();
+
+    assert!(!section.enabled);
+    assert!(!section.fast_restart);
+}
+
+#[test]
+fn explicit_enable_overrides_the_code_default() {
+    let config = Config::parse(
+        ".",
+        "config_version = 1\n[D3D9Ex]\nenable = true\n[System]\nenable = false\n",
+    )
+    .expect("测试配置必须有效");
+
+    assert!(config.section::<D3D9ExConfig>().unwrap().enabled);
+    assert!(!config.section::<SystemConfig>().unwrap().enabled);
+}
+
+#[test]
+fn built_in_section_ignores_user_values() {
+    let config = Config::parse(
+        ".",
+        "config_version = 1\n[Epay]\nenable = false\nhook = false\n",
+    )
+    .expect("测试配置必须有效");
+    let section = config.section::<EpayConfig>().unwrap();
+
+    assert!(section.enabled);
+    assert!(section.hook);
+}
+
+#[test]
+fn loading_does_not_rewrite_user_config() {
+    let directory = temporary_directory("no-writeback");
+    fs::create_dir_all(&directory).expect("必须能创建测试目录");
+    let path = directory.join("AppleChu.toml");
+    let source = "config_version = 1\n\n[UnknownSection]\nvalue = 1\n";
+    fs::write(&path, source).expect("必须能写入测试配置");
+
+    let _ = Config::load(directory.to_str().expect("测试路径必须是 UTF-8"));
+    let output = fs::read_to_string(&path).expect("必须能读回测试配置");
+    fs::remove_dir_all(&directory).expect("必须清理测试目录");
+
+    assert_eq!(output, source);
 }
 
 fn temporary_directory(case: &str) -> std::path::PathBuf {

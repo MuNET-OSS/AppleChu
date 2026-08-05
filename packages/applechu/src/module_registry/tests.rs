@@ -25,11 +25,9 @@ fn init(_api: &Api, _config: &RegistryTestConfig) {
 }
 
 #[test]
-fn config_section_attribute_registers_and_gates_module() {
+fn config_section_attribute_registers_internal_module() {
     // Given: init 只通过属性声明，配置默认关闭。
-    let disabled = Config::parse(".", "Version = \"1\"\n").expect("测试配置必须有效");
-    let enabled =
-        Config::parse(".", "Version = \"1\"\n[RegistryTest]\n").expect("测试配置必须有效");
+    let config = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
 
     // When: 中央模块注册表枚举链接期声明。
     let module = registered_modules()
@@ -40,8 +38,7 @@ fn config_section_attribute_registers_and_gates_module() {
     // Then: 阶段、顺序和配置门控均由生成代码提供。
     assert_eq!(module.stage, InitStage::Late);
     assert_eq!(module.order, 999);
-    assert!(!(module.enabled)(&disabled));
-    assert!((module.enabled)(&enabled));
+    assert!(!(module.enabled)(&config));
     assert!(!CALLED.load(Ordering::Relaxed));
 }
 

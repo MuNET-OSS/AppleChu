@@ -192,7 +192,7 @@ pub fn config_files(base_dir: &str) -> Vec<String> {
     let config = crate::config::Config::global(base_dir);
     config
         .section::<AmdaemonConfig>()
-        .filter(|section| !section.config_files.is_empty())
+        .filter(|section| section.enabled && !section.config_files.is_empty())
         .map_or_else(
             || {
                 DEFAULT_CONFIG_FILES
@@ -207,13 +207,13 @@ pub fn config_files(base_dir: &str) -> Vec<String> {
 pub fn append_config_args(base_dir: &str) -> bool {
     crate::config::Config::global(base_dir)
         .section::<AmdaemonConfig>()
-        .is_some_and(|section| section.append_config_args)
+        .is_some_and(|section| section.enabled && section.append_config_args)
 }
 
 pub fn hide_window(base_dir: &str) -> bool {
     crate::config::Config::global(base_dir)
         .section::<AmdaemonConfig>()
-        .is_some_and(|section| section.hide_window)
+        .is_some_and(|section| section.enabled && section.hide_window)
 }
 
 /// 在游戏侧 winhttp 加载后异步启动 AM Daemon，避免在 DllMain 中调用进程创建 API
@@ -223,7 +223,7 @@ pub fn auto_start(base_dir: &str) {
     let Some(section) = config.section::<AmdaemonConfig>() else {
         return;
     };
-    if !section.auto_start {
+    if !section.enabled || !section.auto_start {
         return;
     }
 
@@ -362,11 +362,6 @@ pub fn initialize(
     }
     if !config.is_valid() {
         return Err("AppleChu.toml is invalid".to_owned());
-    }
-
-    // 手工启动 AM Daemon 时仍需完成最终配置同步
-    if let Err(error) = config.sync() {
-        api.log_warn(&format!("Failed to update AppleChu.toml: {error}"));
     }
 
     crate::module_registry::init_ordered(api, config, module_order);
