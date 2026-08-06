@@ -86,7 +86,7 @@ label = { zh = "虚拟文件系统", en = "Virtual file system" }
     [[config.sections.entries]]
     key = "option"
     type = "string"
-    default = "option"
+    default = "../option"
     label = { zh = "选项资源目录", en = "Option directory" }
     [[config.sections.entries]]
     key = "allowAmfsDownloads"

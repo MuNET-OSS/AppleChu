@@ -27,7 +27,9 @@ use windows_sys::Win32::System::Threading::SetEvent;
 use crate::nusec::{parse_ipv4, subnet_from_config};
 use applechu::amdaemon::{KeychipConfig, NetEnvConfig};
 use applechu::config::Config;
-use applechu::iohook::hook_table::{hook_table_apply, null_module, HookSymbol};
+use applechu::iohook::hook_table::{
+    hook_table_apply, hook_table_apply_ordinals, null_module, HookSymbol, OrdinalHookSymbol,
+};
 use applechu::iohook::proc_addr;
 use applechu::util::api::Api;
 
@@ -130,10 +132,16 @@ pub fn init(api: &Api, config: &Config, section: &NetEnvConfig) {
             patch: hooked_send_to as *const (),
             original: ptr::addr_of_mut!(ORIG_SEND_TO_PTR),
         }];
+        let ws2_ordinals = [OrdinalHookSymbol {
+            ordinal: 20,
+            patch: hooked_send_to as *const (),
+            original: ptr::addr_of_mut!(ORIG_SEND_TO_PTR),
+        }];
         proc_addr::push("iphlpapi.dll", &iphlpapi, sync_originals);
         proc_addr::push("ws2_32.dll", &ws2, sync_originals);
         let patched = hook_table_apply(null_module(), "iphlpapi.dll", &iphlpapi)
-            + hook_table_apply(null_module(), "ws2_32.dll", &ws2);
+            + hook_table_apply(null_module(), "ws2_32.dll", &ws2)
+            + hook_table_apply_ordinals(null_module(), "ws2_32.dll", &ws2_ordinals);
         sync_originals();
         api.log_info(&format!(
             "LAN emulation enabled: IP {}.{}.{}.{}, gateway {}.{}.{}.{}, MAC {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}, {patched} patched entries",
@@ -209,6 +217,11 @@ unsafe extern "system" fn hooked_get_adapters_info(
     fill_ip_addr_string(&mut (*adapter).DhcpServer, network.router);
     (*adapter).LeaseObtained = unix_time() - 3600;
     (*adapter).LeaseExpires = unix_time() + 86400;
+    log_info(&format!(
+        "LAN adapter requested: IP {}, gateway {}",
+        ipv4_text(network.interface),
+        ipv4_text(network.router)
+    ));
     0
 }
 
@@ -234,6 +247,12 @@ unsafe extern "system" fn hooked_get_best_route(
     (*route).Anonymous2 = MIB_IPFORWARDROW_1 {
         ForwardProto: MIB_IPPROTO_NETMGMT,
     };
+    log_info(&format!(
+        "LAN route requested: {} -> {} via {}",
+        ipv4_text(u32::from_be(source)),
+        ipv4_text(u32::from_be(destination)),
+        ipv4_text(network.router)
+    ));
     0
 }
 
@@ -304,12 +323,17 @@ unsafe extern "system" fn hooked_icmp_send_echo_2(
     (*pong).Status = IP_SUCCESS;
     (*pong).RoundTripTime = 1;
     (*pong).Reserved = 1;
+    log_info(&format!(
+        "LAN ping simulated: {}",
+        ipv4_text(u32::from_be(destination))
+    ));
     if !event.is_null() {
         if SetEvent(event) != 0 {
             applechu::iohook::set_last_error(ERROR_IO_PENDING);
         }
         return 0;
     }
+    applechu::iohook::set_last_error(0);
     1
 }
 
@@ -338,6 +362,11 @@ unsafe extern "system" fn hooked_send_to(
     }
     let mut replacement = *original_destination;
     replacement.sin_addr.S_un.S_addr = network.broadcast.to_be();
+    log_info(&format!(
+        "LAN broadcast redirected: {} -> {}",
+        ipv4_text(u32::from_be(old_broadcast)),
+        ipv4_text(network.broadcast)
+    ));
     original(
         socket,
         buffer,
@@ -501,6 +530,16 @@ fn log_info(message: &str) {
 
 fn octet(value: u32, shift: u32) -> u8 {
     (value >> shift) as u8
+}
+
+fn ipv4_text(value: u32) -> String {
+    format!(
+        "{}.{}.{}.{}",
+        octet(value, 24),
+        octet(value, 16),
+        octet(value, 8),
+        octet(value, 0)
+    )
 }
 
 fn unix_time() -> i64 {

@@ -81,7 +81,6 @@ pub static CONFIG_SECTIONS: [SectionDescriptor];
 pub struct LoadedSection {
     pub descriptor: &'static SectionDescriptor,
     pub enabled: bool,
-    pub explicit: bool,
     value: Arc<dyn Any + Send + Sync>,
     explicit_fields: Vec<bool>,
 }
@@ -91,14 +90,12 @@ impl LoadedSection {
         table: Option<&toml::Table>,
         value: T,
         explicit_fields: Vec<bool>,
-        diagnostics: &mut Vec<ConfigDiagnostic>,
     ) -> Self {
         let descriptor = T::descriptor();
-        let enabled = section_enabled(table, descriptor, diagnostics);
+        let enabled = section_enabled(table, descriptor);
         Self {
             descriptor: T::descriptor(),
             enabled,
-            explicit: table.is_some(),
             value: Arc::new(value),
             explicit_fields,
         }
@@ -157,24 +154,11 @@ pub fn find_section<'a>(root: &'a toml::Table, name: &str) -> Option<&'a toml::T
         .and_then(toml::Value::as_table)
 }
 
-fn section_enabled(
-    table: Option<&toml::Table>,
-    descriptor: &SectionDescriptor,
-    diagnostics: &mut Vec<ConfigDiagnostic>,
-) -> bool {
+fn section_enabled(table: Option<&toml::Table>, descriptor: &SectionDescriptor) -> bool {
     if descriptor.always_enabled() {
         return true;
     }
-    match find_key(table, "enable") {
-        Some(value) => value.as_bool().unwrap_or_else(|| {
-            diagnostics.push(ConfigDiagnostic::warning(format!(
-                "Invalid value or type for {}.enable; using the default",
-                descriptor.name
-            )));
-            descriptor.default_on()
-        }),
-        None => descriptor.default_on(),
-    }
+    table.is_some() || (descriptor.builtin() && descriptor.default_on())
 }
 
 pub fn warn_unknown_keys(

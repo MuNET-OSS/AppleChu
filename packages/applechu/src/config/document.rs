@@ -97,10 +97,10 @@ impl Config {
             }
             output.push('\n');
             append_comment(&mut output, descriptor.comment());
-            if !loaded.explicit {
-                output.push_str("#[");
-            } else {
+            if loaded.enabled {
                 output.push('[');
+            } else {
+                output.push_str("#[");
             }
             output.push_str(descriptor.name);
             output.push_str("]\n");
@@ -127,7 +127,22 @@ impl Config {
                 Err(error) => Self::invalid(base_dir, error.to_string()),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Self::from_table(Path::new(base_dir), &toml::Table::new())
+                let mut defaults = toml::Table::new();
+                for descriptor in Self::registered_sections() {
+                    if !descriptor.builtin() && descriptor.default_on() {
+                        defaults.insert(
+                            descriptor.name.to_owned(),
+                            toml::Value::Table(toml::Table::new()),
+                        );
+                    }
+                }
+                let mut config = Self::from_table(Path::new(base_dir), &defaults);
+                if let Err(error) = fs::write(&path, config.to_toml()) {
+                    config.diagnostics.push(ConfigDiagnostic::warning(format!(
+                        "Failed to create AppleChu.toml: {error}"
+                    )));
+                }
+                config
             }
             Err(error) => Self::invalid(base_dir, format!("Failed to read AppleChu.toml: {error}")),
         }

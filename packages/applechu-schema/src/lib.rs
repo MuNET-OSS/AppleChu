@@ -227,28 +227,29 @@ impl Schema {
 
     pub fn default_config_toml(&self) -> String {
         let mut output = String::from(
-            "## AppleChu 默认配置\n## section 存在时启用，注释 section 时关闭\n\nconfig_version = 1\n",
+            "## AppleChu 默认配置\n## section 存在时启用，注释 section 时关闭\n\nVersion = \"1\"\n",
         );
         for section in &self.sections {
             output.push('\n');
             append_comment(&mut output, section.label.zh_or_en());
+            let enabled = section.default_on || section.always_enabled;
+            if !enabled {
+                output.push('#');
+            }
             output.push('[');
             output.push_str(&section.id);
             output.push_str("]\n");
             if let Some(description) = &section.description {
                 append_comment(&mut output, description.zh_or_en());
             }
-            output.push_str("enable = ");
-            output.push_str(if section.default_on {
-                "true\n"
-            } else {
-                "false\n"
-            });
             for entry in &section.entries {
                 append_comment(
                     &mut output,
                     entry.comment.as_ref().and_then(LocalizedText::zh_or_en),
                 );
+                if !enabled || !entry.emit_default {
+                    output.push('#');
+                }
                 output.push_str(&entry.key);
                 output.push_str(" = ");
                 if let Some(value) = &entry.default {
@@ -448,7 +449,7 @@ fn validate_sections(sections: &[SectionSpec]) -> Result<(), SchemaError> {
         for entry in &section.entries {
             if entry.key.eq_ignore_ascii_case("enable") {
                 return Err(SchemaError::Invalid(format!(
-                    "配置项 {}.enable 由统一功能开关保留",
+                    "配置项 {}.enable 不符合 section 状态模型",
                     section.id
                 )));
             }
@@ -773,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn default_config_contains_explicit_defaults() {
+    fn default_config_matches_section_state_model() {
         let config = super::SCHEMA.default_config_toml();
         let document = config
             .parse::<toml::Table>()
@@ -782,22 +783,21 @@ mod tests {
             .split("[Amdaemon]\n")
             .nth(1)
             .expect("AM Daemon section must be emitted")
-            .split("\n[System]")
+            .split("\n[PCBID]")
             .next()
             .expect("AM Daemon section body must exist");
 
         assert!(config.starts_with("## AppleChu 默认配置"));
-        assert!(config.contains("config_version = 1"));
-        assert!(amdaemon.starts_with("enable = true\n"));
+        assert!(config.contains("Version = \"1\""));
+        assert!(!config.contains("enable ="));
         assert!(amdaemon.contains("AutoStart = false"));
         assert!(amdaemon.contains("AppendConfigArgs = false"));
-        assert!(amdaemon.contains("ConfigFiles = [\"config_*.json\"]"));
-        assert_eq!(
-            document["DisableEncryption"]["enable"].as_bool(),
-            Some(true)
-        );
-        assert_eq!(document["DisableTLS"]["enable"].as_bool(), Some(true));
-        assert!(config.contains("gameId = \"SDHD\""));
+        assert!(amdaemon.contains("#ConfigFiles = [\"config_*.json\"]"));
+        assert!(document["DisableEncryption"].as_table().is_some());
+        assert!(document["DisableTLS"].as_table().is_some());
+        assert!(document.get("D3D9Ex").is_none());
+        assert!(config.contains("#[D3D9Ex]"));
+        assert!(config.contains("#gameId = \"SDHD\""));
     }
 
     #[test]

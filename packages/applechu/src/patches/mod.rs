@@ -6,6 +6,7 @@ pub mod fast_restart;
 pub mod free_play;
 pub mod net_log;
 pub mod network;
+pub mod release_tag;
 pub mod skip_map_anim;
 pub mod skip_startup;
 pub mod timers;
@@ -18,6 +19,7 @@ use crate::util::memory::PatchMemory;
 
 pub fn apply_pre_tls<M: PatchMemory>(memory: &M, config: &Config) {
     network::apply_early(memory, config);
+    release_tag::apply_early(memory);
     custom_version::apply_early(memory, config);
     skip_startup::apply_early(memory, config);
     free_play::apply_early(memory, config);

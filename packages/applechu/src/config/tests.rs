@@ -33,8 +33,7 @@ fn module_section_is_registered_automatically() {
 #[test]
 fn typed_fields_are_hydrated_from_toml() {
     // Given: 用户显式启用栏目并覆盖两个字段。
-    let source =
-        "config_version = 1\n[TestSection]\nenable = true\nanswer = 7\nlabel = \"custom\"\n";
+    let source = "config_version = 1\n[TestSection]\nanswer = 7\nlabel = \"custom\"\n";
 
     // When: TOML 在边界被解析为模块自己的配置类型。
     let config = Config::parse(".", source).expect("测试配置必须有效");
@@ -97,19 +96,19 @@ fn section_state_matches_section_presence() {
     let absent = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
     assert!(!absent.section::<TestSectionConfig>().unwrap().enabled);
     assert!(
-        absent
+        !absent
             .section::<crate::gfx::WindowConfig>()
             .unwrap()
             .enabled
     );
     assert!(absent.to_toml().contains("#[Window]"));
 
-    let present = Config::parse(".", "config_version = 1\n[TestSection]\nenable = true\n")
-        .expect("测试配置必须有效");
+    let present =
+        Config::parse(".", "config_version = 1\n[TestSection]\n").expect("测试配置必须有效");
     assert!(present.section::<TestSectionConfig>().unwrap().enabled);
 
     let commented = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
-    assert!(commented.section::<SystemConfig>().unwrap().enabled);
+    assert!(!commented.section::<SystemConfig>().unwrap().enabled);
 }
 
 #[test]
@@ -118,7 +117,6 @@ fn d3d9ex_owns_device_lost_recovery() {
     let source = concat!(
         "Version = \"1\"\n",
         "[D3D9Ex]\n",
-        "enable = true\n",
         "device_lost_recover = false\n",
         "fast_restart = false\n",
     );
@@ -229,7 +227,7 @@ fn required_internal_sections_are_not_emitted() {
         "[PCBID]\n",
         "serialNo = \"ACAE01A99999999\"\n",
         "[VFS]\n",
-        "option = \"option\"\n",
+        "option = \"../option\"\n",
     );
     let config = Config::parse(".", source).expect("TOML 语法必须有效");
     let output = config.to_toml();
@@ -342,27 +340,23 @@ fn window_defaults_to_fullscreen() {
         .section::<crate::gfx::WindowConfig>()
         .expect("窗口配置必须完成注入");
 
-    assert!(window.enabled);
+    assert!(!window.enabled);
     assert!(!window.windowed);
 }
 
 #[test]
-fn section_without_enable_uses_its_code_default() {
+fn section_presence_enables_a_feature() {
     let config = Config::parse(".", "config_version = 1\n[D3D9Ex]\nfast_restart = false\n")
         .expect("测试配置必须有效");
     let section = config.section::<D3D9ExConfig>().unwrap();
 
-    assert!(!section.enabled);
+    assert!(section.enabled);
     assert!(!section.fast_restart);
 }
 
 #[test]
-fn explicit_enable_overrides_the_code_default() {
-    let config = Config::parse(
-        ".",
-        "config_version = 1\n[D3D9Ex]\nenable = true\n[System]\nenable = false\n",
-    )
-    .expect("测试配置必须有效");
+fn missing_section_disables_a_default_feature() {
+    let config = Config::parse(".", "config_version = 1\n[D3D9Ex]\n").expect("测试配置必须有效");
 
     assert!(config.section::<D3D9ExConfig>().unwrap().enabled);
     assert!(!config.section::<SystemConfig>().unwrap().enabled);
@@ -370,11 +364,8 @@ fn explicit_enable_overrides_the_code_default() {
 
 #[test]
 fn built_in_section_ignores_user_values() {
-    let config = Config::parse(
-        ".",
-        "config_version = 1\n[Epay]\nenable = false\nhook = false\n",
-    )
-    .expect("测试配置必须有效");
+    let config =
+        Config::parse(".", "config_version = 1\n[Epay]\nhook = false\n").expect("测试配置必须有效");
     let section = config.section::<EpayConfig>().unwrap();
 
     assert!(section.enabled);
@@ -394,6 +385,77 @@ fn loading_does_not_rewrite_user_config() {
     fs::remove_dir_all(&directory).expect("必须清理测试目录");
 
     assert_eq!(output, source);
+}
+
+#[test]
+fn loading_creates_missing_user_config() {
+    let directory = temporary_directory("create-missing");
+    fs::create_dir_all(&directory).expect("必须能创建测试目录");
+    let path = directory.join("AppleChu.toml");
+
+    let config = Config::load(directory.to_str().expect("测试路径必须是 UTF-8"));
+    let output = fs::read_to_string(&path).expect("必须生成默认配置");
+    fs::remove_dir_all(&directory).expect("必须清理测试目录");
+
+    assert!(config.is_valid());
+    assert!(output.contains("Version = \"1\""));
+    assert!(output.contains("#[TestSection]"));
+    assert!(output.contains("#answer = 42"));
+    assert!(output.contains("[DisableEncryption]\n"));
+    assert!(output.contains("[DisableTLS]\n"));
+    assert!(
+        config
+            .section::<crate::patches::network::DisableEncryptionConfig>()
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        config
+            .section::<crate::patches::network::DisableTlsConfig>()
+            .unwrap()
+            .enabled
+    );
+
+    let document = output
+        .parse::<toml::Table>()
+        .expect("生成的配置必须是有效 TOML");
+    for key in ["AutoStart", "AppendConfigArgs", "windowed"] {
+        assert!(!document.contains_key(key), "{key} 不应出现在根栏目");
+    }
+    let disable_tls = document
+        .get("DisableTLS")
+        .and_then(toml::Value::as_table)
+        .expect("DisableTLS 必须是有效栏目");
+    assert!(!disable_tls.contains_key("default"));
+    assert!(!disable_tls.contains_key("aimedb"));
+
+    let reparsed = Config::parse(&directory, &output).expect("生成的配置必须能重新解析");
+    assert!(reparsed.is_valid());
+    assert!(reparsed.diagnostics().iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("Unknown config section AutoStart")
+            && !diagnostic
+                .message
+                .contains("Unknown config section AppendConfigArgs")
+            && !diagnostic
+                .message
+                .contains("Unknown config section windowed")
+            && !diagnostic.message.contains("DisableTLS.aimedb")
+            && !diagnostic.message.contains("DisableTLS.default")
+    }));
+    assert!(
+        reparsed
+            .section::<crate::patches::network::DisableEncryptionConfig>()
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        reparsed
+            .section::<crate::patches::network::DisableTlsConfig>()
+            .unwrap()
+            .enabled
+    );
 }
 
 fn temporary_directory(case: &str) -> std::path::PathBuf {

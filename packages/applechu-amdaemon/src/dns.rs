@@ -100,19 +100,7 @@ static mut ORIG_CONNECT_PTR: *const () = std::ptr::null();
 
 #[applechu_macros::config_section(stage = Platform, order = 30)]
 pub fn init(api: &Api, config: &DnsConfig) {
-    let mut resolved = config.clone();
-    if resolved.router == "localhost" && resolved.default != "localhost" {
-        resolved.router = resolved.default.clone();
-    }
-    if resolved.startup == "localhost" && resolved.default != "localhost" {
-        resolved.startup = resolved.default.clone();
-    }
-    if resolved.billing == "localhost" && resolved.default != "localhost" {
-        resolved.billing = resolved.default.clone();
-    }
-    if resolved.aimedb == "localhost" && resolved.default != "localhost" {
-        resolved.aimedb = resolved.default.clone();
-    }
+    let resolved = resolve_config(config);
     let _ = CONFIG.set(resolved.clone());
     unsafe {
         let dns = dns_symbols();
@@ -147,6 +135,21 @@ pub fn init(api: &Api, config: &DnsConfig) {
             patched + port_patched
         ));
     }
+}
+
+fn resolve_config(config: &DnsConfig) -> DnsConfig {
+    let mut resolved = config.clone();
+    for target in [
+        &mut resolved.router,
+        &mut resolved.startup,
+        &mut resolved.billing,
+        &mut resolved.aimedb,
+    ] {
+        if target.is_empty() {
+            target.clone_from(&resolved.default);
+        }
+    }
+    resolved
 }
 
 /// 为平台 Hook 阶段之后加载的 DLL 应用 DNS 重定向
@@ -656,6 +659,32 @@ unsafe fn original<T>(slot: &AtomicUsize) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_host_fills_unspecified_service_hosts() {
+        let config = DnsConfig {
+            default: "play.example.com".to_owned(),
+            aimedb: "aime.example.com".to_owned(),
+            ..DnsConfig::default()
+        };
+
+        let resolved = resolve_config(&config);
+
+        assert_eq!(resolved.router, "play.example.com");
+        assert_eq!(resolved.startup, "play.example.com");
+        assert_eq!(resolved.billing, "play.example.com");
+        assert_eq!(resolved.aimedb, "aime.example.com");
+    }
+
+    #[test]
+    fn empty_default_keeps_unspecified_service_hosts_empty() {
+        let resolved = resolve_config(&DnsConfig::default());
+
+        assert!(resolved.router.is_empty());
+        assert!(resolved.startup.is_empty());
+        assert!(resolved.billing.is_empty());
+        assert!(resolved.aimedb.is_empty());
+    }
 
     #[test]
     fn matches_exact_names_and_subdomains() {

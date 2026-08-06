@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use once_cell::sync::OnceCell;
 
@@ -10,6 +11,8 @@ use crate::platform::{path_hook, winapi};
 use crate::util::api::Api;
 
 static CONFIG: OnceCell<VfsConfig> = OnceCell::new();
+static OPTION_API_LOGGED: AtomicBool = AtomicBool::new(false);
+static OPTION_PATH_LOGGED: AtomicBool = AtomicBool::new(false);
 
 const VFS_NTHOME: &str = "c:\\documents and settings\\appuser";
 const VFS_W10HOME: &str = "c:\\users\\appuser";
@@ -39,7 +42,7 @@ crate::config_section! {
             comment: "AMFS 目录";
             pub appdata: String = String::from("appdata"),
             comment: "APPDATA 目录";
-            pub option: String = String::from("option"),
+            pub option: String = String::from("../option"),
             comment: "选项资源目录";
             pub allow_amfs_downloads: bool = false,
             key: "allowAmfsDownloads",
@@ -72,7 +75,12 @@ pub(crate) fn init(api: &Api, config: &Config, section: &VfsSectionConfig) {
 
     proc_addr::push_get_proc_override("amdaemon_api.dll", option_proc_override);
 
-    api.log_info("Virtual file system ready");
+    if let Some(config) = CONFIG.get() {
+        api.log_info(&format!(
+            "Virtual file system ready: option={}",
+            config.option
+        ));
+    }
 }
 
 fn option_proc_override(_module: usize, name: &str) -> Option<*const ()> {
@@ -92,6 +100,9 @@ unsafe extern "system" fn hooked_get_app_root_path() -> *mut u16 {
 
 unsafe extern "system" fn hooked_get_option_mount_root_path() -> *mut u16 {
     CONFIG.get().map_or(std::ptr::null_mut(), |config| {
+        if !OPTION_API_LOGGED.swap(true, Ordering::AcqRel) {
+            log_info(&format!("Option mount requested: {}", config.option));
+        }
         owned_wide_path(&config.option)
     })
 }
@@ -163,7 +174,23 @@ fn join_root(root: &str, tail: &str) -> PathBuf {
 }
 
 fn vfs_path_transform(path: &str) -> Option<String> {
-    resolve_path(path).map(|path| path.to_string_lossy().into_owned())
+    let resolved = resolve_path(path)?.to_string_lossy().into_owned();
+    let normalized = winapi::normalize_path(path);
+    if (normalized == VFS_OPTION
+        || normalized.starts_with(&format!("{VFS_OPTION}\\"))
+        || normalized == VFS_APM
+        || normalized.starts_with(&format!("{VFS_APM}\\")))
+        && !OPTION_PATH_LOGGED.swap(true, Ordering::AcqRel)
+    {
+        log_info(&format!("Option path redirected: {path} -> {resolved}"));
+    }
+    Some(resolved)
+}
+
+fn log_info(message: &str) {
+    if let Some(api) = crate::util::api::API.get() {
+        api.log_info(message);
+    }
 }
 
 pub fn root_cstring(kind: &str) -> Option<CString> {
