@@ -9,7 +9,7 @@ const RELEASE_TAG_BUCKET_PATTERN: &str = concat!(
     "8B 44 24 04 83 F8 15 77 08 8B 04 85 ",
     "?? ?? ?? ?? C3 B8 17 00 00 00 C3 CC CC CC CC CC"
 );
-
+// SBGA 程序员真是坏
 const ACTIVE_PREFIX_LEN: usize = 7;
 const BUCKET_PREFIX_LEN: usize = 4;
 const ACTIVE_TABLE_OFFSET: usize = 15;
