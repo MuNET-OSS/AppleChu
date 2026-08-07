@@ -60,6 +60,7 @@ pub struct SectionSpec {
     pub order: usize,
     pub default_on: bool,
     pub always_enabled: bool,
+    pub community: bool,
     pub hidden: bool,
     pub label: LocalizedText,
     pub description: Option<LocalizedText>,
@@ -180,6 +181,7 @@ impl Schema {
                 order: index,
                 default_on,
                 always_enabled,
+                community: bool_field(table, "community")?.unwrap_or(false),
                 hidden: table
                     .get("hidden")
                     .and_then(toml::Value::as_bool)
@@ -738,6 +740,9 @@ mod tests {
         let decoded = decode_acmani(&blob).expect("acmani must decode");
         assert_eq!(decoded.manifest, schema.manifest_toml().unwrap());
         assert_eq!(decoded.default_config, schema.default_config_toml());
+        assert!(schema
+            .section("Unlocker")
+            .is_some_and(|section| section.community));
 
         let emitted = schema
             .manifest_toml()

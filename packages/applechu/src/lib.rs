@@ -34,6 +34,7 @@ mod proxy;
 mod schema_embed;
 mod slider;
 mod system_config;
+mod unlocker;
 pub mod util;
 mod ux;
 mod vfd;
