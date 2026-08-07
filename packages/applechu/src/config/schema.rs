@@ -90,9 +90,10 @@ impl LoadedSection {
         table: Option<&toml::Table>,
         value: T,
         explicit_fields: Vec<bool>,
+        diagnostics: &mut Vec<ConfigDiagnostic>,
     ) -> Self {
         let descriptor = T::descriptor();
-        let enabled = section_enabled(table, descriptor);
+        let enabled = section_enabled(table, descriptor, diagnostics);
         Self {
             descriptor: T::descriptor(),
             enabled,
@@ -154,11 +155,24 @@ pub fn find_section<'a>(root: &'a toml::Table, name: &str) -> Option<&'a toml::T
         .and_then(toml::Value::as_table)
 }
 
-fn section_enabled(table: Option<&toml::Table>, descriptor: &SectionDescriptor) -> bool {
+fn section_enabled(
+    table: Option<&toml::Table>,
+    descriptor: &SectionDescriptor,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> bool {
     if descriptor.always_enabled() {
         return true;
     }
-    table.is_some() || (descriptor.builtin() && descriptor.default_on())
+    match find_key(table, "enable") {
+        Some(value) => value.as_bool().unwrap_or_else(|| {
+            diagnostics.push(ConfigDiagnostic::warning(format!(
+                "Invalid value or type for {}.enable; using the default",
+                descriptor.name
+            )));
+            descriptor.default_on()
+        }),
+        None => descriptor.default_on(),
+    }
 }
 
 pub fn warn_unknown_keys(

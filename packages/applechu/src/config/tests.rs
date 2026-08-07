@@ -33,7 +33,8 @@ fn module_section_is_registered_automatically() {
 #[test]
 fn typed_fields_are_hydrated_from_toml() {
     // Given: 用户显式启用栏目并覆盖两个字段。
-    let source = "config_version = 1\n[TestSection]\nanswer = 7\nlabel = \"custom\"\n";
+    let source =
+        "config_version = 1\n[TestSection]\nenable = true\nanswer = 7\nlabel = \"custom\"\n";
 
     // When: TOML 在边界被解析为模块自己的配置类型。
     let config = Config::parse(".", source).expect("测试配置必须有效");
@@ -56,7 +57,8 @@ fn canonical_toml_comments_default_values() {
     let output = config.to_toml();
 
     // Then: 栏目和默认字段都作为可直接取消注释的示例输出。
-    assert!(output.contains("#[TestSection]"));
+    assert!(output.contains("[TestSection]"));
+    assert!(output.contains("enable = false"));
     assert!(output.contains("#answer = 42"));
     assert!(output.contains("#label = \"default\""));
 }
@@ -92,23 +94,23 @@ fn amdaemon_is_a_container_with_independent_controls() {
 }
 
 #[test]
-fn section_state_matches_section_presence() {
+fn section_state_uses_code_defaults_and_explicit_overrides() {
     let absent = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
     assert!(!absent.section::<TestSectionConfig>().unwrap().enabled);
     assert!(
-        !absent
+        absent
             .section::<crate::gfx::WindowConfig>()
             .unwrap()
             .enabled
     );
-    assert!(absent.to_toml().contains("#[Window]"));
+    assert!(absent.to_toml().contains("[Window]"));
 
-    let present =
-        Config::parse(".", "config_version = 1\n[TestSection]\n").expect("测试配置必须有效");
+    let present = Config::parse(".", "config_version = 1\n[TestSection]\nenable = true\n")
+        .expect("测试配置必须有效");
     assert!(present.section::<TestSectionConfig>().unwrap().enabled);
 
     let commented = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
-    assert!(!commented.section::<SystemConfig>().unwrap().enabled);
+    assert!(commented.section::<SystemConfig>().unwrap().enabled);
 }
 
 #[test]
@@ -233,32 +235,34 @@ fn required_internal_sections_are_not_emitted() {
     let output = config.to_toml();
 
     for name in [
-        "Clock",
-        "Misc",
-        "AMVideo",
-        "DVD",
-        "Epay",
-        "OpenSsl",
-        "Hwmon",
-        "Hwreset",
-        "HookMode",
-        "SliderDevice",
+        "Clock", "Misc", "AMVideo", "DVD", "Epay", "OpenSsl", "Hwmon", "Hwreset", "HookMode",
     ] {
         assert!(!output.contains(&format!("[{name}]")));
     }
     assert!(output.contains("[PCBID]"));
     assert!(output.contains("[VFS]"));
+    assert!(output.contains("[SliderDevice]"));
 }
 
 #[test]
-fn slider_device_remains_enabled_without_public_section() {
+fn slider_device_is_public_and_enabled_by_default() {
     let config = Config::parse(".", "config_version = 1\n").expect("TOML 语法必须有效");
     let slider = config
         .section::<crate::slider::SliderDeviceConfig>()
         .expect("触摸条设备配置必须完成注入");
 
     assert!(slider.enabled);
-    assert!(!config.to_toml().contains("[SliderDevice]"));
+    assert!(config.to_toml().contains("[SliderDevice]"));
+    assert!(config.to_toml().contains("enable = true"));
+
+    let disabled = Config::parse(".", "config_version = 1\n[SliderDevice]\nenable = false\n")
+        .expect("TOML 语法必须有效");
+    assert!(
+        !disabled
+            .section::<crate::slider::SliderDeviceConfig>()
+            .expect("触摸条设备配置必须完成注入")
+            .enabled
+    );
 }
 
 #[test]
@@ -340,23 +344,27 @@ fn window_defaults_to_fullscreen() {
         .section::<crate::gfx::WindowConfig>()
         .expect("窗口配置必须完成注入");
 
-    assert!(!window.enabled);
+    assert!(window.enabled);
     assert!(!window.windowed);
 }
 
 #[test]
-fn section_presence_enables_a_feature() {
+fn section_without_enable_uses_its_code_default() {
     let config = Config::parse(".", "config_version = 1\n[D3D9Ex]\nfast_restart = false\n")
         .expect("测试配置必须有效");
     let section = config.section::<D3D9ExConfig>().unwrap();
 
-    assert!(section.enabled);
+    assert!(!section.enabled);
     assert!(!section.fast_restart);
 }
 
 #[test]
-fn missing_section_disables_a_default_feature() {
-    let config = Config::parse(".", "config_version = 1\n[D3D9Ex]\n").expect("测试配置必须有效");
+fn explicit_enable_overrides_code_defaults() {
+    let config = Config::parse(
+        ".",
+        "config_version = 1\n[D3D9Ex]\nenable = true\n[System]\nenable = false\n",
+    )
+    .expect("测试配置必须有效");
 
     assert!(config.section::<D3D9ExConfig>().unwrap().enabled);
     assert!(!config.section::<SystemConfig>().unwrap().enabled);
@@ -398,11 +406,7 @@ fn loading_creates_missing_user_config() {
     fs::remove_dir_all(&directory).expect("必须清理测试目录");
 
     assert!(config.is_valid());
-    assert!(output.contains("Version = \"1\""));
-    assert!(output.contains("#[TestSection]"));
-    assert!(output.contains("#answer = 42"));
-    assert!(output.contains("[DisableEncryption]\n"));
-    assert!(output.contains("[DisableTLS]\n"));
+    assert_eq!(output, "config_version = 1\n");
     assert!(
         config
             .section::<crate::patches::network::DisableEncryptionConfig>()
@@ -419,15 +423,13 @@ fn loading_creates_missing_user_config() {
     let document = output
         .parse::<toml::Table>()
         .expect("生成的配置必须是有效 TOML");
-    for key in ["AutoStart", "AppendConfigArgs", "windowed"] {
-        assert!(!document.contains_key(key), "{key} 不应出现在根栏目");
-    }
-    let disable_tls = document
-        .get("DisableTLS")
-        .and_then(toml::Value::as_table)
-        .expect("DisableTLS 必须是有效栏目");
-    assert!(!disable_tls.contains_key("default"));
-    assert!(!disable_tls.contains_key("aimedb"));
+    assert_eq!(document.len(), 1);
+    assert_eq!(
+        document
+            .get("config_version")
+            .and_then(toml::Value::as_integer),
+        Some(1)
+    );
 
     let reparsed = Config::parse(&directory, &output).expect("生成的配置必须能重新解析");
     assert!(reparsed.is_valid());

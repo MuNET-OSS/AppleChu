@@ -95,13 +95,14 @@ macro_rules! config_section {
                 $crate::config::schema::warn_unknown_keys(
                     table,
                     $section,
-                    &[$($crate::__config_key!($field $(, $key)?),)*],
+                    &["enable", $($crate::__config_key!($field $(, $key)?),)*],
                     diagnostics,
                 );
                 $crate::config::schema::LoadedSection::new::<Self>(
                     table,
                     value,
                     explicit_fields,
+                    diagnostics,
                 )
             }
 
@@ -125,9 +126,8 @@ macro_rules! config_section {
                         output,
                         $crate::__config_key!($field $(, $key)?),
                         &value.$field,
-                        loaded.enabled
-                            && (explicit_fields.next().copied().unwrap_or(false)
-                                || $crate::__config_emit_default!($($emit_default)?)),
+                        explicit_fields.next().copied().unwrap_or(false)
+                            || $crate::__config_emit_default!($($emit_default)?),
                     );
                 )*
             }

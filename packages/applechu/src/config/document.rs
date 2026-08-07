@@ -16,9 +16,8 @@ const BANNER: &str = r#"
 
 - 井号 # 开头的行为注释，被注释掉的内容不会生效
     - 被注释的配置内容使用一个井号 #，说明文字使用两个井号 ##
-- 将默认关闭的栏目取消注释即可启用
-- 栏目存在时启用，注释栏目时关闭
-- 配置文件会在启动时按当前程序中的声明重新生成
+- 功能开关统一使用 enable = true/false
+- 未填写的配置使用程序默认值
 "#;
 
 static GLOBAL_CONFIG: OnceLock<Config> = OnceLock::new();
@@ -84,9 +83,7 @@ impl Config {
         let mut output = String::new();
         append_comment(&mut output, BANNER);
         output.push('\n');
-        output.push_str("Version = \"");
-        output.push_str(CONFIG_VERSION);
-        output.push_str("\"\n");
+        output.push_str("config_version = 1\n");
 
         for descriptor in Self::registered_sections() {
             let Some(loaded) = self.sections.get(&(descriptor.type_id)()) else {
@@ -97,13 +94,11 @@ impl Config {
             }
             output.push('\n');
             append_comment(&mut output, descriptor.comment());
-            if loaded.enabled {
-                output.push('[');
-            } else {
-                output.push_str("#[");
-            }
+            output.push('[');
             output.push_str(descriptor.name);
             output.push_str("]\n");
+            output.push_str("enable = ");
+            output.push_str(if loaded.enabled { "true\n" } else { "false\n" });
 
             (descriptor.serialize_fields)(loaded, &mut output);
         }
@@ -127,17 +122,8 @@ impl Config {
                 Err(error) => Self::invalid(base_dir, error.to_string()),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let mut defaults = toml::Table::new();
-                for descriptor in Self::registered_sections() {
-                    if !descriptor.builtin() && descriptor.default_on() {
-                        defaults.insert(
-                            descriptor.name.to_owned(),
-                            toml::Value::Table(toml::Table::new()),
-                        );
-                    }
-                }
-                let mut config = Self::from_table(Path::new(base_dir), &defaults);
-                if let Err(error) = fs::write(&path, config.to_toml()) {
+                let mut config = Self::from_table(Path::new(base_dir), &toml::Table::new());
+                if let Err(error) = fs::write(&path, "config_version = 1\n") {
                     config.diagnostics.push(ConfigDiagnostic::warning(format!(
                         "Failed to create AppleChu.toml: {error}"
                     )));
@@ -275,6 +261,7 @@ fn validate_registry(
             let schema_keys = schema
                 .entries
                 .iter()
+                .filter(|entry| !entry.key.eq_ignore_ascii_case("enable"))
                 .map(|entry| entry.key.as_str())
                 .collect::<Vec<_>>();
             let missing = descriptor

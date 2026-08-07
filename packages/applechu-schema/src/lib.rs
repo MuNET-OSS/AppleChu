@@ -114,7 +114,7 @@ impl From<toml::ser::Error> for SchemaError {
 impl Schema {
     pub fn parse(source: impl Into<String>) -> Result<Self, SchemaError> {
         let source = source.into();
-        let document = source.parse::<toml::Value>()?;
+        let mut document = source.parse::<toml::Value>()?;
         let root = document
             .as_table()
             .ok_or_else(|| SchemaError::Invalid("schema 根必须是 TOML 表".to_owned()))?;
@@ -175,17 +175,26 @@ impl Schema {
                 .first()
                 .map(|(_, value)| *value)
                 .unwrap_or(always_enabled);
-            let entries = parse_entries(table, id)?;
+            let hidden = table
+                .get("hidden")
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(false);
+            let mut entries = parse_entries(table, id)?;
+            if !hidden
+                && !always_enabled
+                && !entries
+                    .iter()
+                    .any(|entry| entry.key.eq_ignore_ascii_case("enable"))
+            {
+                entries.insert(0, enable_entry(default_on));
+            }
             sections.push(SectionSpec {
                 id: id.to_owned(),
                 order: index,
                 default_on,
                 always_enabled,
                 community: bool_field(table, "community")?.unwrap_or(false),
-                hidden: table
-                    .get("hidden")
-                    .and_then(toml::Value::as_bool)
-                    .unwrap_or(false),
+                hidden,
                 label: LocalizedText::from_value(table.get("label")).unwrap_or_default(),
                 description: LocalizedText::from_value(table.get("description")),
                 entries,
@@ -193,6 +202,7 @@ impl Schema {
         }
         validate_sections(&sections)?;
         validate_groups(root, &sections)?;
+        inject_enable_entries(&mut document, &sections)?;
         Ok(Self {
             source,
             document,
@@ -229,15 +239,11 @@ impl Schema {
 
     pub fn default_config_toml(&self) -> String {
         let mut output = String::from(
-            "## AppleChu 默认配置\n## section 存在时启用，注释 section 时关闭\n\nVersion = \"1\"\n",
+            "## AppleChu 默认配置\n## 未填写的配置使用程序默认值\n\nconfig_version = 1\n",
         );
         for section in &self.sections {
             output.push('\n');
             append_comment(&mut output, section.label.zh_or_en());
-            let enabled = section.default_on || section.always_enabled;
-            if !enabled {
-                output.push('#');
-            }
             output.push('[');
             output.push_str(&section.id);
             output.push_str("]\n");
@@ -249,7 +255,7 @@ impl Schema {
                     &mut output,
                     entry.comment.as_ref().and_then(LocalizedText::zh_or_en),
                 );
-                if !enabled || !entry.emit_default {
+                if !entry.emit_default {
                     output.push('#');
                 }
                 output.push_str(&entry.key);
@@ -449,12 +455,6 @@ fn validate_sections(sections: &[SectionSpec]) -> Result<(), SchemaError> {
         }
         let mut keys = Vec::new();
         for entry in &section.entries {
-            if entry.key.eq_ignore_ascii_case("enable") {
-                return Err(SchemaError::Invalid(format!(
-                    "配置项 {}.enable 不符合 section 状态模型",
-                    section.id
-                )));
-            }
             if !keys
                 .iter()
                 .all(|key: &String| !key.eq_ignore_ascii_case(&entry.key))
@@ -467,6 +467,104 @@ fn validate_sections(sections: &[SectionSpec]) -> Result<(), SchemaError> {
             validate_entry(section, entry)?;
             keys.push(entry.key.clone());
         }
+        let enable = section
+            .entries
+            .iter()
+            .find(|entry| entry.key.eq_ignore_ascii_case("enable"));
+        if section.hidden || section.always_enabled {
+            if enable.is_some() {
+                return Err(SchemaError::Invalid(format!(
+                    "内置配置栏目 {} 不应公开 enable",
+                    section.id
+                )));
+            }
+        } else if !enable.is_some_and(|entry| {
+            entry.value_type == "bool"
+                && entry.default.as_ref().and_then(toml::Value::as_bool) == Some(section.default_on)
+        }) {
+            return Err(SchemaError::Invalid(format!(
+                "配置栏目 {} 缺少正确的 enable 默认值",
+                section.id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn enable_entry(default_on: bool) -> EntrySpec {
+    EntrySpec {
+        key: "enable".to_owned(),
+        value_type: "bool".to_owned(),
+        default: Some(toml::Value::Boolean(default_on)),
+        min: None,
+        max: None,
+        emit_default: true,
+        hidden: false,
+        options: Vec::new(),
+        comment: Some(LocalizedText {
+            zh: Some("启用".to_owned()),
+            en: Some("Enable".to_owned()),
+        }),
+        description: None,
+    }
+}
+
+fn inject_enable_entries(
+    document: &mut toml::Value,
+    sections: &[SectionSpec],
+) -> Result<(), SchemaError> {
+    let raw_sections = document
+        .as_table_mut()
+        .and_then(|root| root.get_mut("config"))
+        .and_then(toml::Value::as_table_mut)
+        .and_then(|config| config.get_mut("sections"))
+        .and_then(toml::Value::as_array_mut)
+        .ok_or_else(|| SchemaError::Invalid("schema 缺少 config.sections".to_owned()))?;
+
+    for (raw, section) in raw_sections.iter_mut().zip(sections) {
+        let Some(enable) = section
+            .entries
+            .iter()
+            .find(|entry| entry.key.eq_ignore_ascii_case("enable"))
+        else {
+            continue;
+        };
+        let table = raw
+            .as_table_mut()
+            .ok_or_else(|| SchemaError::Invalid(format!("配置栏目 {} 必须是表", section.id)))?;
+        let entries = table
+            .entry("entries")
+            .or_insert_with(|| toml::Value::Array(Vec::new()))
+            .as_array_mut()
+            .ok_or_else(|| {
+                SchemaError::Invalid(format!("配置栏目 {}.entries 必须是数组", section.id))
+            })?;
+        if entries.iter().any(|entry| {
+            entry
+                .as_table()
+                .and_then(|entry| entry.get("key"))
+                .and_then(toml::Value::as_str)
+                .is_some_and(|key| key.eq_ignore_ascii_case("enable"))
+        }) {
+            continue;
+        }
+
+        let mut label = toml::Table::new();
+        label.insert("zh".to_owned(), toml::Value::String("启用".to_owned()));
+        label.insert("en".to_owned(), toml::Value::String("Enable".to_owned()));
+        let mut entry = toml::Table::new();
+        entry.insert("key".to_owned(), toml::Value::String(enable.key.clone()));
+        entry.insert(
+            "type".to_owned(),
+            toml::Value::String(enable.value_type.clone()),
+        );
+        entry.insert(
+            "default".to_owned(),
+            enable.default.clone().expect("enable 必须包含代码默认值"),
+        );
+        entry.insert("emit_default".to_owned(), toml::Value::Boolean(true));
+        entry.insert("label".to_owned(), toml::Value::Table(label));
+        entries.insert(0, toml::Value::Table(entry));
     }
     Ok(())
 }
@@ -793,16 +891,23 @@ mod tests {
             .expect("AM Daemon section body must exist");
 
         assert!(config.starts_with("## AppleChu 默认配置"));
-        assert!(config.contains("Version = \"1\""));
-        assert!(!config.contains("enable ="));
+        assert!(config.contains("config_version = 1"));
+        assert!(amdaemon.contains("enable = true"));
         assert!(amdaemon.contains("AutoStart = false"));
         assert!(amdaemon.contains("AppendConfigArgs = false"));
         assert!(amdaemon.contains("#ConfigFiles = [\"config_*.json\"]"));
         assert!(document["DisableEncryption"].as_table().is_some());
         assert!(document["DisableTLS"].as_table().is_some());
-        assert!(document.get("D3D9Ex").is_none());
-        assert!(config.contains("#[D3D9Ex]"));
+        assert_eq!(document["D3D9Ex"]["enable"].as_bool(), Some(false));
+        assert!(config.contains("[D3D9Ex]"));
         assert!(config.contains("#gameId = \"SDHD\""));
+        assert_eq!(
+            super::SCHEMA
+                .entry("SliderDevice", "enable")
+                .and_then(|entry| entry.default.as_ref())
+                .and_then(toml::Value::as_bool),
+            Some(true)
+        );
     }
 
     #[test]
@@ -827,22 +932,14 @@ mod tests {
         let config = super::SCHEMA.default_config_toml();
 
         for name in [
-            "Clock",
-            "Misc",
-            "AMVideo",
-            "DVD",
-            "Epay",
-            "OpenSsl",
-            "Hwmon",
-            "Hwreset",
-            "HookMode",
-            "SliderDevice",
+            "Clock", "Misc", "AMVideo", "DVD", "Epay", "OpenSsl", "Hwmon", "Hwreset", "HookMode",
         ] {
             assert!(super::SCHEMA.section(name).is_none());
             assert!(!config.contains(&format!("[{name}]")));
         }
         assert!(config.contains("[PCBID]"));
         assert!(config.contains("[VFS]"));
+        assert!(config.contains("[SliderDevice]"));
     }
 
     #[test]

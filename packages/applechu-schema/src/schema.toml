@@ -16,7 +16,7 @@ groups = [
     { id = "display", label = { zh = "显示", en = "Display" }, sections = ["Window", "D3D9Ex", "Unlock120fps", "Bypass1080p", "Bypass120hz", "DpiAware", "FpsDisplay", "FrameLock"] },
     { id = "audio", label = { zh = "音频", en = "Audio" }, sections = ["ForceSharedAudio", "Force2chAudio"] },
     { id = "network", label = { zh = "网络", en = "Network" }, sections = ["DisableEncryption", "DisableTLS", "NetLog", "NationalMatch"] },
-    { id = "io", label = { zh = "IO", en = "IO" }, sections = ["ChuniIo", "AimeIo", "Buttons", "Air", "Slider", "Led", "Io4", "Aime", "Led15093", "Vfd"] },
+    { id = "io", label = { zh = "IO", en = "IO" }, sections = ["ChuniIo", "AimeIo", "Buttons", "Air", "Slider", "Led", "Io4", "SliderDevice", "Aime", "Led15093", "Vfd"] },
     { id = "compatibility", label = { zh = "兼容", en = "Compatibility" }, sections = ["BypassAppUser"] },
 ]
 
@@ -761,6 +761,11 @@ label = { zh = "触摸条键位", en = "Slider keys" }
     type = "int"
     default = 83
     label = { zh = "Cell 32", en = "Cell 32" }
+
+[[config.sections]]
+id = "SliderDevice"
+default_enabled = true
+label = { zh = "触摸条设备模拟", en = "Slider device emulation" }
 
 [[config.sections]]
 id = "Led"
