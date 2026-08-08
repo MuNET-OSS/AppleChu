@@ -60,7 +60,7 @@ crate::config_section! {
         order: 185,
         default_on: false,
         always_enabled: false,
-        hidden: false,
+        hidden: true,
         comment: "全国对战 TCP 中继",
         fields: {}
     }
@@ -68,6 +68,11 @@ crate::config_section! {
 
 #[applechu_macros::config_section(stage = Late, order = 10)]
 pub fn init(api: &Api, _config: &NationalMatchConfig) {
+    const ENABLED: bool = false;
+    if !ENABLED {
+        return;
+    }
+
     let _ = STATE.set(State {
         reflector: Mutex::new(None),
         reflector_addr: Mutex::new(None),

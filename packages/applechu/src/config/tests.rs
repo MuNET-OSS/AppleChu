@@ -1,6 +1,5 @@
 use super::{Config, DiagnosticLevel};
 use crate::amdaemon::{AmdaemonConfig, EpayConfig};
-use crate::gfx::d3d9::D3D9ExConfig;
 use crate::system_config::SystemConfig;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -64,18 +63,6 @@ fn canonical_toml_comments_default_values() {
 }
 
 #[test]
-fn device_lost_fix_is_not_a_registered_section() {
-    // Given: D3D9Ex 是设备丢失恢复功能的唯一配置所有者。
-    // When: 枚举完整配置 schema。
-    let sections = Config::registered_sections();
-
-    // Then: 旧 DeviceLostFix 栏目不会继续泄漏到用户配置。
-    assert!(!sections
-        .iter()
-        .any(|section| section.name.eq_ignore_ascii_case("DeviceLostFix")));
-}
-
-#[test]
 fn amdaemon_is_a_container_with_independent_controls() {
     let source = "config_version = 1\n[Amdaemon]\n";
     let config = Config::parse(".", source).expect("TOML 语法必须有效");
@@ -111,30 +98,6 @@ fn section_state_uses_code_defaults_and_explicit_overrides() {
 
     let commented = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
     assert!(commented.section::<SystemConfig>().unwrap().enabled);
-}
-
-#[test]
-fn d3d9ex_owns_device_lost_recovery() {
-    // Given: 设备丢失恢复只配置在 D3D9Ex 中。
-    let source = concat!(
-        "Version = \"1\"\n",
-        "[D3D9Ex]\n",
-        "device_lost_recover = false\n",
-        "fast_restart = false\n",
-    );
-
-    // When: 配置被注入并重新序列化。
-    let config = Config::parse(".", source).expect("测试配置必须有效");
-    let section = config
-        .section::<D3D9ExConfig>()
-        .expect("D3D9Ex 必须完成注入");
-    let output = config.to_toml();
-
-    // Then: 两个 D3D9 行为来自同一类型，输出不再生成旧栏目。
-    assert!(!section.device_lost_recover);
-    assert!(!section.fast_restart);
-    assert!(output.contains("device_lost_recover = false"));
-    assert!(!output.contains("[DeviceLostFix]"));
 }
 
 #[test]
@@ -268,7 +231,7 @@ fn slider_device_is_public_and_enabled_by_default() {
 #[test]
 fn invalid_version_or_section_shape_rejects_config() {
     // Given: 文件版本不受支持，且已知栏目不是 TOML 表。
-    let source = "Version = \"0\"\nD3D9Ex = true\n";
+    let source = "Version = \"0\"\nWindow = true\n";
 
     // When: 中央框架完成结构校验。
     let config = Config::parse(".", source).expect("TOML 语法必须有效");
@@ -318,7 +281,6 @@ fn refresh_rate_uses_hertz_in_user_config() {
 #[test]
 fn optional_user_features_are_disabled_by_default() {
     let disabled = [
-        "D3D9Ex",
         "FreePlay",
         "SkipStartup",
         "DisableTimer",
@@ -349,24 +311,10 @@ fn window_defaults_to_fullscreen() {
 }
 
 #[test]
-fn section_without_enable_uses_its_code_default() {
-    let config = Config::parse(".", "config_version = 1\n[D3D9Ex]\nfast_restart = false\n")
-        .expect("测试配置必须有效");
-    let section = config.section::<D3D9ExConfig>().unwrap();
-
-    assert!(!section.enabled);
-    assert!(!section.fast_restart);
-}
-
-#[test]
 fn explicit_enable_overrides_code_defaults() {
-    let config = Config::parse(
-        ".",
-        "config_version = 1\n[D3D9Ex]\nenable = true\n[System]\nenable = false\n",
-    )
-    .expect("测试配置必须有效");
+    let config = Config::parse(".", "config_version = 1\n[System]\nenable = false\n")
+        .expect("测试配置必须有效");
 
-    assert!(config.section::<D3D9ExConfig>().unwrap().enabled);
     assert!(!config.section::<SystemConfig>().unwrap().enabled);
 }
 

@@ -898,8 +898,6 @@ mod tests {
         assert!(amdaemon.contains("#ConfigFiles = [\"config_*.json\"]"));
         assert!(document["DisableEncryption"].as_table().is_some());
         assert!(document["DisableTLS"].as_table().is_some());
-        assert_eq!(document["D3D9Ex"]["enable"].as_bool(), Some(false));
-        assert!(config.contains("[D3D9Ex]"));
         assert!(config.contains("#gameId = \"SDHD\""));
         assert_eq!(
             super::SCHEMA

@@ -53,7 +53,7 @@ use crate::util::api::{ChuModAPI, ChuModInfo};
 #[cfg(target_arch = "x86")]
 const NAME: &[u8] = b"AppleChu\0";
 #[cfg(target_arch = "x86")]
-const VERSION: &[u8] = b"1.0.0\0";
+const VERSION: &[u8] = b"2.0.0\0";
 #[cfg(target_arch = "x86")]
 const MIN_LOADER_VERSION: &[u8] = b"1.0.0\0";
 

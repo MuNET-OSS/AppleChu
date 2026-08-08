@@ -242,26 +242,6 @@ fn unlock_track_clamp_is_patched_for_250() {
 }
 
 #[test]
-fn fast_restart_is_patched_by_early_pipeline() {
-    // Given: D3D9Ex 快速重启的目标函数和失败分支仍为原始指令。
-    let mut image = vec![0x90; 128];
-    image[8..24].copy_from_slice(&[
-        0xE8, 0x43, 0, 0, 0, 0x84, 0xC0, 0x74, 0xDB, 0x8D, 0x8B, 0x10, 0, 0, 0, 0xE8,
-    ]);
-    image[80..83].copy_from_slice(&[0x55, 0x8B, 0xEC]);
-    image[96..102].copy_from_slice(&[0xC2, 0x83, 0xF8, 0x07, 0x74, 0x20]);
-    let memory = FakeMemory::new(image);
-
-    // When: DLL_PROCESS_ATTACH 执行 D3D9Ex early patch。
-    patches::apply_pre_tls(&memory, &config("[D3D9Ex]\nfast_restart=true"));
-
-    // Then: 目标函数与失败分支在游戏入口点前同时完成改写。
-    let image = memory.image.borrow();
-    assert_eq!(&image[80..83], &[0xB0, 0x01, 0xC3]);
-    assert_eq!(image[100], 0xEB);
-}
-
-#[test]
 fn custom_version_is_patched_by_early_pipeline() {
     // Given: 版本字符串包含稳定的 X-VERSE 后缀，配置提供自定义文字。
     let mut image = vec![0x90; 224];

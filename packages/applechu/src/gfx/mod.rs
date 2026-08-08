@@ -1,4 +1,3 @@
-pub mod d3d9;
 pub mod monitor;
 pub mod windowed;
 

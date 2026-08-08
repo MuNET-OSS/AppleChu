@@ -1,7 +1,7 @@
 [mod]
 id = "applesaber.applechu"
 name = "AppleChu"
-version = "1.0.0"
+version = "2.0.0"
 authors = ["Applesaber"]
 description = { zh = "CHUNITHM Mod", en = "CHUNITHM Mod" }
 homepage = "https://github.com/MuNET-OSS/AppleChu"
@@ -13,9 +13,9 @@ game_versions = ["2.45"]
 groups = [
     { id = "common", label = { zh = "常用", en = "Common" }, sections = ["Amdaemon", "System", "General", "SkipStartup", "FreePlay", "DisableTimer", "SkipMapAnimation"] },
     { id = "gameplay", label = { zh = "游戏", en = "Gameplay" }, sections = ["Unlocker", "UnlockTracks", "CustomTimers", "Autoplay"] },
-    { id = "display", label = { zh = "显示", en = "Display" }, sections = ["Window", "D3D9Ex", "Unlock120fps", "Bypass1080p", "Bypass120hz", "DpiAware", "FpsDisplay", "FrameLock"] },
+    { id = "display", label = { zh = "显示", en = "Display" }, sections = ["Window", "Unlock120fps", "Bypass1080p", "Bypass120hz", "DpiAware", "FpsDisplay", "FrameLock"] },
     { id = "audio", label = { zh = "音频", en = "Audio" }, sections = ["ForceSharedAudio", "Force2chAudio"] },
-    { id = "network", label = { zh = "网络", en = "Network" }, sections = ["DisableEncryption", "DisableTLS", "NetLog", "NationalMatch"] },
+    { id = "network", label = { zh = "网络", en = "Network" }, sections = ["DisableEncryption", "DisableTLS", "NetLog"] },
     { id = "io", label = { zh = "IO", en = "IO" }, sections = ["ChuniIo", "AimeIo", "Buttons", "Air", "Slider", "Led", "Io4", "SliderDevice", "Aime", "Led15093", "Vfd"] },
     { id = "compatibility", label = { zh = "兼容", en = "Compatibility" }, sections = ["BypassAppUser"] },
 ]
@@ -290,21 +290,6 @@ label = { zh = "显示设置", en = "Display settings" }
     label = { zh = "显示器编号", en = "Monitor index" }
 
 [[config.sections]]
-id = "D3D9Ex"
-default_enabled = false
-label = { zh = "D3D9Ex 与设备丢失恢复", en = "D3D9Ex and device recovery" }
-    [[config.sections.entries]]
-    key = "device_lost_recover"
-    type = "bool"
-    default = true
-    label = { zh = "设备丢失后自动恢复", en = "Recover lost device" }
-    [[config.sections.entries]]
-    key = "fast_restart"
-    type = "bool"
-    default = true
-    label = { zh = "快速重启补丁", en = "Fast restart" }
-
-[[config.sections]]
 id = "SkipStartup"
 default_enabled = false
 label = { zh = "跳过启动画面", en = "Skip startup" }
@@ -467,11 +452,6 @@ label = { zh = "关闭 TLS", en = "Disable TLS" }
 id = "NetLog"
 default_enabled = false
 label = { zh = "网络请求日志", en = "Network request log" }
-
-[[config.sections]]
-id = "NationalMatch"
-default_enabled = false
-label = { zh = "全国对战 TCP 中继", en = "National match TCP relay" }
 
 [[config.sections]]
 id = "BypassAppUser"

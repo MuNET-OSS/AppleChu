@@ -48,7 +48,6 @@ fn built_in_modules_are_discovered_in_stage_order() {
     let expected = [
         ("gfx::windowed::init", InitStage::Graphics, 10),
         ("gfx::monitor::init", InitStage::Graphics, 20),
-        ("gfx::d3d9::init", InitStage::Graphics, 30),
         ("platform::dvd::init", InitStage::PlatformCore, 5),
         ("iohook::proc_addr::init", InitStage::PlatformCore, 10),
         ("platform::reg_hook::init", InitStage::PlatformCore, 20),
