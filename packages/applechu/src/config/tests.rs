@@ -354,7 +354,10 @@ fn loading_creates_missing_user_config() {
     fs::remove_dir_all(&directory).expect("必须清理测试目录");
 
     assert!(config.is_valid());
-    assert_eq!(output, "config_version = 1\n");
+    assert!(output.contains("config_version = 1\n"));
+    assert!(output.contains("[Amdaemon]\n"));
+    assert!(output.contains("[SliderDevice]\n"));
+    assert!(output.contains("[DisableTLS]\n"));
     assert!(
         config
             .section::<crate::patches::network::DisableEncryptionConfig>()
@@ -371,13 +374,14 @@ fn loading_creates_missing_user_config() {
     let document = output
         .parse::<toml::Table>()
         .expect("生成的配置必须是有效 TOML");
-    assert_eq!(document.len(), 1);
     assert_eq!(
         document
             .get("config_version")
             .and_then(toml::Value::as_integer),
         Some(1)
     );
+    assert!(document.contains_key("Amdaemon"));
+    assert!(document.contains_key("SliderDevice"));
 
     let reparsed = Config::parse(&directory, &output).expect("生成的配置必须能重新解析");
     assert!(reparsed.is_valid());

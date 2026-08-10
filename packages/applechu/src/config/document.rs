@@ -122,8 +122,12 @@ impl Config {
                 Err(error) => Self::invalid(base_dir, error.to_string()),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let mut config = Self::from_table(Path::new(base_dir), &toml::Table::new());
-                if let Err(error) = fs::write(&path, "config_version = 1\n") {
+                let defaults = applechu_schema::SCHEMA.default_config_toml();
+                let mut config = match Self::parse(base_dir, &defaults) {
+                    Ok(config) => config,
+                    Err(error) => Self::invalid(base_dir, error.to_string()),
+                };
+                if let Err(error) = fs::write(&path, defaults) {
                     config.diagnostics.push(ConfigDiagnostic::warning(format!(
                         "Failed to create AppleChu.toml: {error}"
                     )));
