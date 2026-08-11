@@ -10,7 +10,7 @@ pub const HEADER_LENGTH: u16 = 64;
 pub const DEFAULT_CONFIG_HEADER: &str = r#"## 这是 AppleChu 的 TOML 配置文件
 ##
 ## - 井号 # 开头的行为注释，被注释掉的内容不会生效
-##     - 被注释的配置内容使用一个井号 #，说明文字使用两个井号 ##
+## - 被注释的配置内容使用一个井号 #，说明文字使用两个井号 ##
 ## - 功能开关统一使用 enable = true/false
 ## - 未填写的配置使用程序默认值
 
