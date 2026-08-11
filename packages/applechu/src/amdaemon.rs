@@ -5,10 +5,31 @@ use crate::iohook::hook_table::{hook_table_apply, null_module, HookSymbol};
 use crate::util::api::{Api, StandaloneLogger, API};
 
 #[cfg(windows)]
-use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(windows)]
 use std::sync::{Mutex, OnceLock};
+
+#[cfg(windows)]
+use std::ffi::OsStr;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(windows)]
+use std::ptr::{null, null_mut};
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{
+    CloseHandle, GetLastError, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
+#[cfg(windows)]
+use windows_sys::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+};
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::{
+    CreateProcessW, GetExitCodeProcess, ResumeThread, TerminateProcess, WaitForSingleObject,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, STARTUPINFOW,
+};
 
 const CONFIG_FILE_PATTERN: &str = "config_*.json";
 const STANDARD_CONFIG_ORDER: [&str; 6] = [
@@ -23,8 +44,62 @@ const STANDARD_CONFIG_ORDER: [&str; 6] = [
 pub const INHERIT_CONSOLE_ENV: &str = "APPLECHU_AMDAEMON_INHERIT_CONSOLE";
 
 #[cfg(windows)]
-static AUTO_STARTED_CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
+static AUTO_STARTED_CHILD: OnceLock<Mutex<Option<AutoStartedChild>>> = OnceLock::new();
+#[cfg(windows)]
 static TERMINATE_AUTO_STARTED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(windows)]
+struct AutoStartedChild {
+    process: usize,
+    job: usize,
+}
+
+#[cfg(windows)]
+impl AutoStartedChild {
+    fn process_handle(&self) -> HANDLE {
+        self.process as HANDLE
+    }
+
+    fn job_handle(&self) -> HANDLE {
+        self.job as HANDLE
+    }
+
+    fn try_wait(&mut self) -> Option<u32> {
+        let status = unsafe { WaitForSingleObject(self.process_handle(), 0) };
+        if status == WAIT_TIMEOUT {
+            return None;
+        }
+        let mut exit_code = 1;
+        if status == WAIT_OBJECT_0 {
+            let _ = unsafe { GetExitCodeProcess(self.process_handle(), &mut exit_code) };
+        }
+        Some(exit_code)
+    }
+
+    fn stop(&mut self) {
+        unsafe {
+            if self.job != 0 {
+                let _ = TerminateJobObject(self.job_handle(), 1);
+                let _ = WaitForSingleObject(self.process_handle(), 5_000);
+            } else {
+                let _ = TerminateProcess(self.process_handle(), 1);
+                let _ = WaitForSingleObject(self.process_handle(), 5_000);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for AutoStartedChild {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.process_handle());
+            if self.job != 0 {
+                let _ = CloseHandle(self.job_handle());
+            }
+        }
+    }
+}
 
 crate::config_section! {
     pub(crate) struct AmdaemonConfig => AMDAEMON_CONFIG_SECTION {
@@ -296,8 +371,8 @@ pub fn auto_start(base_dir: &str) {
 
         if let Some(child) = guard.as_mut() {
             match child.try_wait() {
-                Ok(None) => return,
-                Ok(Some(_)) | Err(_) => *guard = None,
+                None => return,
+                Some(_) => *guard = None,
             }
         }
 
@@ -307,16 +382,21 @@ pub fn auto_start(base_dir: &str) {
         } else {
             base_dir.join(executable_path)
         };
-        let mut command = Command::new(&executable_path);
-        command.current_dir(&base_dir).arg("-c");
-        command.args(&config_files);
-        command.env(INHERIT_CONSOLE_ENV, "1");
-
-        match command.spawn() {
+        match spawn_auto_started(
+            &executable_path,
+            &base_dir,
+            &config_files,
+            terminate_on_exit,
+        ) {
             Ok(child) => {
                 log_info(&format!(
-                    "AM Daemon started with output attached to the game console: {}",
-                    executable_path.display()
+                    "AM Daemon started with output attached to the game console: {}{}",
+                    executable_path.display(),
+                    if terminate_on_exit {
+                        " (job managed)"
+                    } else {
+                        ""
+                    }
                 ));
                 *guard = Some(child);
             }
@@ -326,6 +406,183 @@ pub fn auto_start(base_dir: &str) {
             )),
         }
     });
+}
+
+#[cfg(windows)]
+fn spawn_auto_started(
+    executable: &std::path::Path,
+    base_dir: &std::path::Path,
+    config_files: &[String],
+    terminate_on_exit: bool,
+) -> Result<AutoStartedChild, String> {
+    let mut application = wide_path(executable);
+    let mut command_line = wide_command_line(executable, config_files);
+    let mut environment = wide_environment();
+    let current_directory = wide_path(base_dir);
+    let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+    let creation_flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
+
+    let created = unsafe {
+        CreateProcessW(
+            application.as_mut_ptr(),
+            command_line.as_mut_ptr(),
+            null(),
+            null(),
+            0,
+            creation_flags,
+            environment.as_mut_ptr().cast(),
+            current_directory.as_ptr(),
+            &startup,
+            &mut process_info,
+        )
+    };
+    if created == 0 {
+        return Err(format!("CreateProcessW failed ({})", unsafe {
+            GetLastError()
+        }));
+    }
+
+    let job = if terminate_on_exit {
+        let job = unsafe { CreateJobObjectW(null(), null()) };
+        if job.is_null() {
+            let error = unsafe { GetLastError() };
+            unsafe {
+                let _ = TerminateProcess(process_info.hProcess, 1);
+                let _ = CloseHandle(process_info.hThread);
+                let _ = CloseHandle(process_info.hProcess);
+            }
+            return Err(format!("CreateJobObjectW failed ({error})"));
+        }
+
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        } != 0;
+        let assigned =
+            configured && unsafe { AssignProcessToJobObject(job, process_info.hProcess) } != 0;
+        if !assigned {
+            let error = unsafe { GetLastError() };
+            unsafe {
+                let _ = TerminateProcess(process_info.hProcess, 1);
+                let _ = CloseHandle(process_info.hThread);
+                let _ = CloseHandle(process_info.hProcess);
+                let _ = CloseHandle(job);
+            }
+            return Err(format!("AM Daemon job setup failed ({error})"));
+        }
+        job
+    } else {
+        null_mut()
+    };
+
+    if unsafe { ResumeThread(process_info.hThread) } == u32::MAX {
+        let error = unsafe { GetLastError() };
+        unsafe {
+            if !job.is_null() {
+                let _ = TerminateJobObject(job, 1);
+            } else {
+                let _ = TerminateProcess(process_info.hProcess, 1);
+            }
+            let _ = CloseHandle(process_info.hThread);
+            let _ = CloseHandle(process_info.hProcess);
+            if !job.is_null() {
+                let _ = CloseHandle(job);
+            }
+        }
+        return Err(format!("ResumeThread failed ({error})"));
+    }
+
+    unsafe {
+        let _ = CloseHandle(process_info.hThread);
+    }
+
+    Ok(AutoStartedChild {
+        process: process_info.hProcess as usize,
+        job: job as usize,
+    })
+}
+
+#[cfg(windows)]
+fn wide_path(path: &std::path::Path) -> Vec<u16> {
+    path.as_os_str().encode_wide().chain(Some(0)).collect()
+}
+
+#[cfg(windows)]
+fn wide_command_line(executable: &std::path::Path, config_files: &[String]) -> Vec<u16> {
+    let mut arguments = vec![
+        quote_windows_arg(&executable.to_string_lossy()),
+        "-c".to_owned(),
+    ];
+    arguments.extend(config_files.iter().map(|file| quote_windows_arg(file)));
+    OsStr::new(&arguments.join(" "))
+        .encode_wide()
+        .chain(Some(0))
+        .collect()
+}
+
+#[cfg(windows)]
+fn quote_windows_arg(value: &str) -> String {
+    if !value.is_empty()
+        && !value
+            .chars()
+            .any(|character| character.is_whitespace() || character == '"')
+    {
+        return value.to_owned();
+    }
+    let mut quoted = String::from("\"");
+    let mut slashes = 0;
+    for character in value.chars() {
+        match character {
+            '\\' => slashes += 1,
+            '"' => {
+                quoted.extend(std::iter::repeat_n('\\', slashes * 2 + 1));
+                quoted.push('"');
+                slashes = 0;
+            }
+            _ => {
+                quoted.extend(std::iter::repeat_n('\\', slashes));
+                quoted.push(character);
+                slashes = 0;
+            }
+        }
+    }
+    quoted.extend(std::iter::repeat_n('\\', slashes * 2));
+    quoted.push('"');
+    quoted
+}
+
+#[cfg(windows)]
+fn wide_environment() -> Vec<u16> {
+    let mut entries = std::env::vars_os()
+        .filter(|(key, _)| {
+            !key.to_string_lossy()
+                .eq_ignore_ascii_case(INHERIT_CONSOLE_ENV)
+        })
+        .map(|(key, value)| {
+            let mut entry = key;
+            entry.push("=");
+            entry.push(value);
+            entry
+        })
+        .collect::<Vec<_>>();
+    let mut inherit_console = OsStr::new(INHERIT_CONSOLE_ENV).to_os_string();
+    inherit_console.push("=1");
+    entries.push(inherit_console);
+    let mut environment = Vec::new();
+    for entry in entries {
+        environment.extend(entry.encode_wide());
+        environment.push(0);
+    }
+    environment.push(0);
+    environment
 }
 
 #[cfg(not(windows))]
@@ -343,8 +600,7 @@ pub fn stop_auto_started() {
         return;
     };
     if let Some(mut child) = guard.take() {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.stop();
         log_info("Stopped the automatically started AM Daemon");
     }
 }
