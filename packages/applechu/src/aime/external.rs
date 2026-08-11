@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::sync::OnceLock;
 
-use windows_sys::Win32::Foundation::HMODULE;
+use windows_sys::Win32::Foundation::{GetLastError, HMODULE};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
 fn string_to_wide(value: &str) -> Vec<u16> {
@@ -81,7 +81,10 @@ impl ExternalAimeIo {
         let wide = string_to_wide(path);
         let module = LoadLibraryW(wide.as_ptr());
         if module.is_null() {
-            return Err(format!("LoadLibraryW failed for {path}"));
+            return Err(format!(
+                "LoadLibraryW failed for {path}, Win32 error {}",
+                GetLastError()
+            ));
         }
 
         let api_version = resolve(module, b"aime_io_get_api_version\0")

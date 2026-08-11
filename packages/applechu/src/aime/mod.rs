@@ -7,16 +7,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
 
+#[cfg(target_arch = "x86_64")]
 use crate::config::Config;
 use crate::iohook::uart;
 use crate::iohook::{self, Irp, IrpOp};
+#[cfg(target_arch = "x86_64")]
 use crate::util::api::Api;
 
 pub mod external;
 mod sg_nfc;
 
 use self::external::{AimeIoVfdState, ExternalAimeIo};
-use self::sg_nfc::{SgNfcConfig, SgNfcDevice};
+#[cfg(target_arch = "x86_64")]
+use self::sg_nfc::SgNfcConfig;
+use self::sg_nfc::SgNfcDevice;
 
 const ERROR_ACCESS_DENIED: u32 = 5;
 const ERROR_INVALID_FUNCTION: u32 = 1;
@@ -141,23 +145,32 @@ impl AimeReader {
     pub fn poll(&mut self) -> i32 {
         self.aime_id = None;
         self.felica_id = None;
-        if !self.radio_on || !is_scan_key_down(self.config.scan_key) {
+        if !self.radio_on {
             return iohook::S_OK;
         }
 
-        if let Some(status) = external_call(|external| unsafe { external.poll() }) {
+        // 外部 AimeIO 自行处理读卡状态与热插拔，不受键盘刷卡键限制
+        if let Ok(guard) = EXTERNAL.lock() {
+            let Some(external) = guard.as_ref() else {
+                return self.poll_builtin();
+            };
+            let status = unsafe { external.poll() };
             if status < 0 {
                 return status;
             }
-            if let Ok(guard) = EXTERNAL.lock() {
-                if let Some(external) = guard.as_ref() {
-                    // 先尝试 Aime，再尝试 FeliCa，getter 不应再次 poll
-                    self.aime_id = unsafe { external.get_aime_id() };
-                    if self.aime_id.is_none() {
-                        self.felica_id = unsafe { external.get_felica_id() };
-                    }
-                }
+            // SG NFC 先识别 FeliCa，再识别传统 Aime
+            self.felica_id = unsafe { external.get_felica_id() };
+            if self.felica_id.is_none() {
+                self.aime_id = unsafe { external.get_aime_id() };
             }
+            return iohook::S_OK;
+        }
+
+        iohook::E_FAIL
+    }
+
+    fn poll_builtin(&mut self) -> i32 {
+        if !is_scan_key_down(self.config.scan_key) {
             return iohook::S_OK;
         }
 
@@ -232,6 +245,7 @@ impl AimeReader {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[applechu_macros::config_section(stage = Device, order = 60)]
 pub fn init(api: &Api, config: &Config, section: &AimeSectionConfig) {
     let cfg = load_config(section, config.base_dir());
@@ -239,10 +253,18 @@ pub fn init(api: &Api, config: &Config, section: &AimeSectionConfig) {
     let port = if is_sp { cfg.sp_port } else { cfg.cvt_port };
     let gen = reader_generation(cfg.gen, is_sp);
 
+    let base_dir = config.base_dir();
     let path = config
         .section::<AimeIoConfig>()
         .filter(|config| config.enabled)
-        .map_or_else(String::new, |config| dll_path(&config));
+        .map_or_else(String::new, |aime_io| {
+            let path = dll_path(&aime_io);
+            if path.is_empty() {
+                path
+            } else {
+                resolve_path(base_dir, &path).to_string_lossy().into_owned()
+            }
+        });
     if !path.is_empty() {
         match unsafe { ExternalAimeIo::load(&path) } {
             Ok(external) => {
