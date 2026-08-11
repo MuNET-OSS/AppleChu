@@ -7,6 +7,15 @@ use std::fmt;
 const MAGIC: &[u8; 8] = b"ACMANI\0\0";
 pub const CONTAINER_VERSION: u16 = 1;
 pub const HEADER_LENGTH: u16 = 64;
+pub const DEFAULT_CONFIG_HEADER: &str = r#"## 这是 AppleChu 的 TOML 配置文件
+##
+## - 井号 # 开头的行为注释，被注释掉的内容不会生效
+##     - 被注释的配置内容使用一个井号 #，说明文字使用两个井号 ##
+## - 功能开关统一使用 enable = true/false
+## - 未填写的配置使用程序默认值
+
+config_version = 1
+"#;
 
 #[derive(Clone, Debug)]
 pub struct OptionSpec {
@@ -238,9 +247,7 @@ impl Schema {
     }
 
     pub fn default_config_toml(&self) -> String {
-        let mut output = String::from(
-            "## AppleChu 默认配置\n## 未填写的配置使用程序默认值\n\nconfig_version = 1\n",
-        );
+        let mut output = String::from(DEFAULT_CONFIG_HEADER);
         for section in &self.sections {
             output.push('\n');
             append_comment(&mut output, section.label.zh_or_en());
@@ -890,7 +897,7 @@ mod tests {
             .next()
             .expect("AM Daemon section body must exist");
 
-        assert!(config.starts_with("## AppleChu 默认配置"));
+        assert!(config.starts_with("## 这是 AppleChu 的 TOML 配置文件"));
         assert!(config.contains("config_version = 1"));
         assert!(amdaemon.contains("enable = true"));
         assert!(amdaemon.contains("AutoStart = false"));

@@ -101,6 +101,19 @@ fn section_state_uses_code_defaults_and_explicit_overrides() {
 }
 
 #[test]
+fn empty_section_keeps_explicit_enabled_state_when_serialized() {
+    let source = "config_version = 1\n[BypassAppUser]\nenable = true\n";
+    let config = Config::parse(".", source).expect("测试配置必须有效");
+    let output = config.to_toml();
+    let reparsed = Config::parse(".", &output).expect("序列化配置必须有效");
+
+    assert!(output.contains("[BypassAppUser]\nenable = true"));
+    assert!(reparsed
+        .to_toml()
+        .contains("[BypassAppUser]\nenable = true"));
+}
+
+#[test]
 fn unknown_entries_are_reported_and_removed() {
     // Given: 配置含有一个未知字段和一个未知栏目。
     let source = concat!(
