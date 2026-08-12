@@ -53,6 +53,7 @@ pub struct EntrySpec {
     pub emit_default: bool,
     pub emit_comment: bool,
     pub hidden: bool,
+    pub advanced: bool,
     pub options: Vec<OptionSpec>,
     pub comment: Option<LocalizedText>,
     pub description: Option<LocalizedText>,
@@ -486,6 +487,7 @@ fn enable_entry(default_on: bool) -> EntrySpec {
         emit_default: true,
         emit_comment: true,
         hidden: false,
+        advanced: false,
         options: Vec::new(),
         comment: Some(LocalizedText {
             zh: Some("启用".to_owned()),
@@ -734,6 +736,17 @@ fn parse_entries(table: &toml::Table, section: &str) -> Result<Vec<EntrySpec>, S
                         value.as_bool().ok_or_else(|| {
                             SchemaError::Invalid(format!(
                                 "配置项 {section}.{key}.hidden 必须是布尔值"
+                            ))
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or(false),
+                advanced: entry
+                    .get("advanced")
+                    .map(|value| {
+                        value.as_bool().ok_or_else(|| {
+                            SchemaError::Invalid(format!(
+                                "配置项 {section}.{key}.advanced 必须是布尔值"
                             ))
                         })
                     })

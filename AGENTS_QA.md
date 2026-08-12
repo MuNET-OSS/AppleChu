@@ -10,3 +10,4 @@
 
 - Cargo build script 的 `OUT_DIR` 目录层级会随目标与 profile 改变；定位 profile 目录时应查找固定的 `build` 目录边界，不能依赖 `ancestors().nth(...)`。
 - Windows PowerShell 不保证提供 `ConvertFrom-Toml`；配置 TOML 校验应优先使用项目自身的 Rust 解析测试。
+- `applechu-schema-export` 依次接收 Rust 源目录和输出目录，不能只传输出目录。

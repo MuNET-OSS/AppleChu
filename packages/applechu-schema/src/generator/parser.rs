@@ -27,6 +27,7 @@ pub(super) struct FieldDecl {
     pub default: Expr,
     pub key: Option<LitStr>,
     pub emit_default: bool,
+    pub advanced: bool,
     pub schema_type: Option<LitStr>,
     pub schema_default: Option<Expr>,
     pub min: Option<Expr>,
@@ -120,6 +121,7 @@ impl Parse for FieldDecl {
         input.parse::<Token![,]>()?;
         let mut key = None;
         let mut emit_default = false;
+        let mut advanced = false;
         let mut schema_type = None;
         let mut schema_default = None;
         let mut min = None;
@@ -133,6 +135,7 @@ impl Parse for FieldDecl {
             match metadata.to_string().as_str() {
                 "key" => key = Some(input.parse()?),
                 "emit_default" => emit_default = input.parse::<LitBool>()?.value,
+                "advanced" => advanced = input.parse::<LitBool>()?.value,
                 "schema_type" => schema_type = Some(input.parse()?),
                 "schema_default" => schema_default = Some(input.parse()?),
                 "min" => min = Some(input.parse()?),
@@ -156,6 +159,7 @@ impl Parse for FieldDecl {
                         default,
                         key,
                         emit_default,
+                        advanced,
                         schema_type,
                         schema_default,
                         min,

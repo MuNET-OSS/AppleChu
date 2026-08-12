@@ -37,6 +37,7 @@ crate::config_section! {
         comment: "系统设置",
         fields: {
             pub enable_console: bool = true,
+            advanced: true,
             description: "关闭后沿用启动进程的标准输出流",
             description_en: "Reuse the launcher's standard output stream when disabled",
             comment: "是否创建新的控制台窗口";
@@ -70,6 +71,25 @@ impl SystemConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+
+    #[test]
+    fn advanced_entry_is_omitted_until_explicitly_configured() {
+        // Given: 高级项未填写，以及显式填写同一高级项的两份配置。
+        let absent = Config::parse(".", "ConfigVersion = 1\n").expect("测试配置必须有效");
+        let explicit = Config::parse(".", "ConfigVersion = 1\n[System]\nenable_console = false\n")
+            .expect("测试配置必须有效");
+
+        // When: 配置被规范化保存。
+        let absent_output = absent.to_toml();
+        let explicit_output = explicit.to_toml();
+
+        // Then: 默认配置隐藏高级项，显式值则使用规范键名保留。
+        assert!(!absent_output.contains("EnableConsole"));
+        assert!(!absent_output.contains("是否创建新的控制台窗口"));
+        assert!(explicit_output.contains("EnableConsole = false"));
+        assert!(!explicit_output.contains("enable_console"));
+    }
 
     #[test]
     fn cabinet_mode_selects_its_fixed_refresh_rate() {

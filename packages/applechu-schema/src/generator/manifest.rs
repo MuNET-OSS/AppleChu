@@ -156,6 +156,9 @@ fn field_value(field: &FieldDecl) -> Result<toml::Value, SchemaError> {
         "emit_default".to_owned(),
         toml::Value::Boolean(field.emit_default),
     );
+    if field.advanced {
+        table.insert("advanced".to_owned(), toml::Value::Boolean(true));
+    }
     table.insert(
         "label".to_owned(),
         localized(&field.comment.value(), Some(&canonical_key)),

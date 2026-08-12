@@ -28,6 +28,9 @@ impl Schema {
                 append_comment(&mut output, description.zh_or_en());
             }
             for entry in &section.entries {
+                if entry.advanced {
+                    continue;
+                }
                 if entry.emit_comment {
                     append_comment(
                         &mut output,
