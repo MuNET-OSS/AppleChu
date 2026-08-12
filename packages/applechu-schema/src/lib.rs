@@ -1,22 +1,15 @@
+mod example;
 mod generator;
 
 use sha2::{Digest, Sha256};
 use std::fmt;
 
+pub use example::{DEFAULT_CONFIG_HEADER, EXAMPLE_CONFIG_FILE};
 pub use generator::generate_from_rust_dir;
 
 const MAGIC: &[u8; 8] = b"ACMANI\0\0";
 pub const CONTAINER_VERSION: u16 = 1;
 pub const HEADER_LENGTH: u16 = 64;
-pub const DEFAULT_CONFIG_HEADER: &str = r#"## 这是 AppleChu 的 TOML 配置文件
-##
-## - 井号 # 开头的行为注释，被注释掉的内容不会生效
-## - 被注释的配置内容使用一个井号 #，说明文字使用两个井号 ##
-## - 功能开关统一使用 Enable = true/false
-## - 未填写的配置使用程序默认值
-
-ConfigVersion = 1
-"#;
 
 pub fn canonical_key(key: &str) -> String {
     let mut output = String::with_capacity(key.len());
@@ -274,40 +267,6 @@ impl Schema {
 
     pub fn manifest_toml(&self) -> Result<String, toml::ser::Error> {
         toml::to_string_pretty(&self.document)
-    }
-
-    pub fn default_config_toml(&self) -> String {
-        let mut output = String::from(DEFAULT_CONFIG_HEADER);
-        for section in &self.sections {
-            output.push('\n');
-            append_comment(&mut output, section.label.zh_or_en());
-            output.push('[');
-            output.push_str(&section.id);
-            output.push_str("]\n");
-            if let Some(description) = &section.description {
-                append_comment(&mut output, description.zh_or_en());
-            }
-            for entry in &section.entries {
-                if entry.emit_comment {
-                    append_comment(
-                        &mut output,
-                        entry.comment.as_ref().and_then(LocalizedText::zh_or_en),
-                    );
-                }
-                if !entry.emit_default {
-                    output.push('#');
-                }
-                output.push_str(&canonical_key(&entry.key));
-                output.push_str(" = ");
-                if let Some(value) = &entry.default {
-                    output.push_str(&inline_toml(value));
-                } else {
-                    output.push_str("\"\"");
-                }
-                output.push('\n');
-            }
-        }
-        output
     }
 
     pub fn encode_acmani(&self) -> Result<Vec<u8>, SchemaError> {
@@ -860,26 +819,6 @@ fn validate_groups(root: &toml::Table, sections: &[SectionSpec]) -> Result<(), S
         }
     }
     Ok(())
-}
-
-fn append_comment(output: &mut String, comment: Option<&str>) {
-    let Some(comment) = comment else { return };
-    for line in comment.lines() {
-        output.push_str("## ");
-        output.push_str(line.trim());
-        output.push('\n');
-    }
-}
-
-fn inline_toml(value: &toml::Value) -> String {
-    match value {
-        toml::Value::String(_) => value.to_string(),
-        toml::Value::Integer(value) => value.to_string(),
-        toml::Value::Float(value) => value.to_string(),
-        toml::Value::Boolean(value) => value.to_string(),
-        toml::Value::Datetime(value) => value.to_string(),
-        toml::Value::Array(_) | toml::Value::Table(_) => value.to_string(),
-    }
 }
 
 #[cfg(test)]

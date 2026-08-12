@@ -88,7 +88,7 @@ AppleChu 内置一套与 segatools 配置和 API 完全兼容的游戏侧 IO 仿
 
 需要 Rust nightly 工具链与 `i686-pc-windows-msvc` 和 `x86_64-pc-windows-msvc` 目标：
 
-配置 schema 由 `config_section!` Rust 声明在构建时自动生成并嵌入 `winhttp.dll` 的 `.acmani` section，无需维护独立 schema 文件。
+配置 schema 由 `config_section!` Rust 声明在构建时自动生成并嵌入 `winhttp.dll` 的 `.acmani` section，无需维护独立 schema 文件。构建同时输出带完整注释的 `AppleChu.example.toml` 示例配置。
 
 ```bash
 rustup target add i686-pc-windows-msvc
@@ -101,6 +101,7 @@ cargo build --release --target x86_64-pc-windows-msvc -p applechu-amdaemon
 
 ```text
 target/i686-pc-windows-msvc/release/winhttp.dll
+target/i686-pc-windows-msvc/release/AppleChu.example.toml
 target/x86_64-pc-windows-msvc/release/winmm.dll
 ```
 

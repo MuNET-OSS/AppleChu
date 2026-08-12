@@ -8,6 +8,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR must be available")?);
     let schema = applechu_schema::generate_from_rust_dir("src")?;
     fs::write(output.join("schema.toml"), schema.manifest_toml()?)?;
+    let artifact_directory = output
+        .ancestors()
+        .find(|directory| directory.file_name().is_some_and(|name| name == "build"))
+        .and_then(|directory| directory.parent())
+        .ok_or("OUT_DIR must contain Cargo's build directory")?;
+    schema.write_example_config(artifact_directory)?;
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows")
         || std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("x86")

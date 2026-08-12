@@ -14,5 +14,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&output)?;
     let schema = applechu_schema::generate_from_rust_dir(source)?;
     fs::write(output.join("acmani.bin"), schema.encode_acmani()?)?;
+    schema.write_example_config(output)?;
     Ok(())
 }

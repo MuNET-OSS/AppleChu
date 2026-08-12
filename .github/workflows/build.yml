@@ -56,13 +56,15 @@ jobs:
         run: cargo build --release -p applechu-amdaemon --target x86_64-pc-windows-msvc
 
       - name: Verify embedded schema
-        run: cargo run -p applechu-schema --bin verify_pe --target x86_64-pc-windows-msvc -- target/i686-pc-windows-msvc/release/winhttp.dll
+        run: cargo run -p applechu-schema --bin verify_pe --target x86_64-pc-windows-msvc -- target/i686-pc-windows-msvc/release/winhttp.dll target/i686-pc-windows-msvc/release/AppleChu.example.toml
 
       - name: Upload game-side proxy
         uses: actions/upload-artifact@v4
         with:
           name: winhttp.dll
-          path: target/i686-pc-windows-msvc/release/winhttp.dll
+          path: |
+            target/i686-pc-windows-msvc/release/winhttp.dll
+            target/i686-pc-windows-msvc/release/AppleChu.example.toml
 
       - name: Upload AM Daemon proxy
         uses: actions/upload-artifact@v4
@@ -87,3 +89,4 @@ jobs:
           files: |
             winhttp.dll
             winmm.dll
+            AppleChu.example.toml
