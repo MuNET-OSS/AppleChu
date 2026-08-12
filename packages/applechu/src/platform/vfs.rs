@@ -35,8 +35,7 @@ crate::config_section! {
         order: 970,
         default_on: true,
         always_enabled: false,
-        hidden: true,
-        export: true,
+        hidden: false,
         comment: "虚拟文件系统",
         fields: {
             pub amfs: String = String::from("amfs"),

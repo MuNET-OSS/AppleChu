@@ -4,6 +4,7 @@ use crate::system_config::SystemConfig;
 
 mod amdaemon;
 mod loading;
+mod platform;
 
 crate::config_section! {
     pub struct TestSectionConfig => TEST_SECTION {

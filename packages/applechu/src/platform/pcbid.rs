@@ -19,8 +19,7 @@ crate::config_section! {
         order: 960,
         default_on: true,
         always_enabled: false,
-        hidden: true,
-        export: true,
+        hidden: false,
         comment: "机台序列号模拟",
         fields: {
             pub serial_no: String = String::from("ACAE01A99999999"),
