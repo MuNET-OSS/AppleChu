@@ -207,8 +207,11 @@ pub fn append_comment(output: &mut String, comment: &str) {
 }
 
 pub fn append_field_comment(output: &mut String, section: &str, key: &str, fallback: &str) {
-    let comment = applechu_schema::SCHEMA
-        .entry(section, key)
+    let entry = applechu_schema::SCHEMA.entry(section, key);
+    if entry.is_some_and(|entry| !entry.emit_comment) {
+        return;
+    }
+    let comment = entry
         .and_then(|entry| entry.comment.as_ref())
         .and_then(|comment| comment.zh_or_en())
         .unwrap_or(fallback);

@@ -84,25 +84,8 @@ crate::config_section! {
             pub proxy_flag: u8 = 2,
             key: "proxyFlag",
             comment: "读卡代理标志";
-        }
-    }
-}
-
-crate::config_section! {
-    pub(crate) struct AimeIoConfig => AIME_IO_CONFIG_SECTION {
-        section: "AimeIo",
-        order: 301,
-        default_on: true,
-        always_enabled: false,
-        hidden: false,
-        comment: "外部 Aime IO DLL",
-        fields: {
-            pub path: String = String::new(),
-            comment: "所有架构共用的 DLL 路径";
-            pub path32: String = String::new(),
-            comment: "32 位 DLL 路径";
-            pub path64: String = String::new(),
-            comment: "64 位 DLL 路径";
+            pub iodll: String = String::new(),
+            comment: "外部 Aime IO DLL 路径";
         }
     }
 }
@@ -253,18 +236,13 @@ pub fn init(api: &Api, config: &Config, section: &AimeSectionConfig) {
     let port = if is_sp { cfg.sp_port } else { cfg.cvt_port };
     let gen = reader_generation(cfg.gen, is_sp);
 
-    let base_dir = config.base_dir();
-    let path = config
-        .section::<AimeIoConfig>()
-        .filter(|config| config.enabled)
-        .map_or_else(String::new, |aime_io| {
-            let path = dll_path(&aime_io);
-            if path.is_empty() {
-                path
-            } else {
-                resolve_path(base_dir, &path).to_string_lossy().into_owned()
-            }
-        });
+    let path = if section.iodll.is_empty() {
+        String::new()
+    } else {
+        resolve_path(config.base_dir(), &section.iodll)
+            .to_string_lossy()
+            .into_owned()
+    };
     if !path.is_empty() {
         match unsafe { ExternalAimeIo::load(&path) } {
             Ok(external) => {
@@ -482,18 +460,6 @@ where
 {
     let guard = EXTERNAL.lock().ok()?;
     guard.as_ref().map(call)
-}
-
-fn dll_path(config: &AimeIoConfig) -> String {
-    let arch_path = if cfg!(target_pointer_width = "64") {
-        &config.path64
-    } else {
-        &config.path32
-    };
-    if !arch_path.is_empty() {
-        return arch_path.clone();
-    }
-    config.path.clone()
 }
 
 fn resolve_path(base_dir: impl AsRef<Path>, path: &str) -> PathBuf {

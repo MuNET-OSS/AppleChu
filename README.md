@@ -75,18 +75,14 @@ AppleChu 内置一套与 segatools 配置和 API 完全兼容的游戏侧 IO 仿
 | 模块 | 配置段 | 说明 |
 | --- | --- | --- |
 | 控制器 IO DLL | `[ChuniIo]` | 加载外部 `chuniio` DLL，支持 `path` / `path32` / `path64` |
-| 读卡器 IO DLL | `[AimeIo]` | 加载外部 `aimeio` DLL |
-| 按键输入 | `[Buttons]` | Test / Service / 投币 / AIR 模拟键位 |
-| AIR 输入 | `[Air]` | AIR 1-6 键位映射 |
-| 触摸条键位 | `[Slider]` | 键盘模拟触摸条（Cell 1-32） |
-| IO4 仿真 | `[Io4]` | 内置 IO4 主控仿真 |
+| IO4 仿真 | `[Io4]` | 内置 IO4 主控仿真及按钮、AIR、触摸条键位映射 |
 | 触摸条仿真 | `[SliderDevice]` | 内置触摸条设备仿真 |
-| Aime 读卡器 | `[Aime]` | 从 `aime.txt` / `felica.txt` 读卡，支持扫卡键 |
+| Aime 读卡器 | `[Aime]` | 从 `aime.txt` / `felica.txt` 读卡，支持扫卡键及外部 `iodll` |
 | LED15093 灯板 | `[Led15093]` | LED15093 灯板仿真 |
 | VFD 显示板 | `[Vfd]` | VFD 显示板仿真 |
 
 > [!IMPORTANT]
-> 键位值为 Windows 虚拟键码（VK code）。若同时配置了外部 `[ChuniIo]` / `[AimeIo]` DLL，则优先使用外部 DLL
+> 键位值为 Windows 虚拟键码（VK code）。若配置了外部 `[ChuniIo]` DLL 或 `[Aime].iodll`，则优先使用外部 DLL
 
 ## 构建
 

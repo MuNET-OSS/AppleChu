@@ -196,6 +196,59 @@ fn slider_device_is_public_and_enabled_by_default() {
 }
 
 #[test]
+fn io4_owns_keyboard_input_mapping() {
+    // Given: IO4 栏目覆盖按钮、红外和触摸条映射。
+    let source = concat!(
+        "config_version = 1\n",
+        "[Io4]\n",
+        "test = 65\n",
+        "air1 = 66\n",
+        "cell1 = 67\n",
+        "[Aime]\n",
+        "iodll = \"aimeio.dll\"\n",
+    );
+
+    // When: 配置在边界完成解析。
+    let config = Config::parse(".", source).expect("测试配置必须有效");
+    let io4 = config
+        .section::<crate::io4::Io4Config>()
+        .expect("IO4 配置必须完成注入");
+    let chuniio = crate::chuniio::config::ChuniIoConfig::load(&config);
+    let aime = config
+        .section::<crate::aime::AimeSectionConfig>()
+        .expect("Aime 配置必须完成注入");
+
+    // Then: IO4 类型直接持有所有输入映射。
+    assert_eq!(io4.test, 65);
+    assert_eq!(io4.air1, 66);
+    assert_eq!(io4.cell1, 67);
+    assert_eq!(chuniio.vk_test, 65);
+    assert_eq!(chuniio.vk_ir[0], 66);
+    assert_eq!(chuniio.vk_cell[0], 67);
+    assert_eq!(aime.iodll, "aimeio.dll");
+}
+
+#[test]
+fn canonical_io_config_has_no_legacy_sections_or_repeated_comments() {
+    // Given: 使用全部默认值的配置。
+    let config = Config::parse(".", "config_version = 1\n").expect("测试配置必须有效");
+
+    // When: 生成规范 TOML。
+    let output = config.to_toml();
+
+    // Then: IO 字段只属于 Io4/Aime，连续映射只说明第一个字段。
+    assert!(!output.contains("[Buttons]"));
+    assert!(!output.contains("[Air]"));
+    assert!(!output.contains("[Slider]"));
+    assert!(!output.contains("[AimeIo]"));
+    assert!(output.contains("#iodll = \"\""));
+    assert!(output.contains("## AIR 1\n#air1"));
+    assert!(!output.contains("## AIR 2"));
+    assert!(output.contains("## Cell 1\n#cell1"));
+    assert!(!output.contains("## Cell 2"));
+}
+
+#[test]
 fn invalid_version_or_section_shape_rejects_config() {
     // Given: 文件版本不受支持，且已知栏目不是 TOML 表。
     let source = "Version = \"0\"\nWindow = true\n";

@@ -31,6 +31,7 @@ pub struct EntrySpec {
     pub min: Option<i64>,
     pub max: Option<i64>,
     pub emit_default: bool,
+    pub emit_comment: bool,
     pub hidden: bool,
     pub options: Vec<OptionSpec>,
     pub comment: Option<LocalizedText>,
@@ -258,10 +259,12 @@ impl Schema {
                 append_comment(&mut output, description.zh_or_en());
             }
             for entry in &section.entries {
-                append_comment(
-                    &mut output,
-                    entry.comment.as_ref().and_then(LocalizedText::zh_or_en),
-                );
+                if entry.emit_comment {
+                    append_comment(
+                        &mut output,
+                        entry.comment.as_ref().and_then(LocalizedText::zh_or_en),
+                    );
+                }
                 if !entry.emit_default {
                     output.push('#');
                 }
@@ -506,6 +509,7 @@ fn enable_entry(default_on: bool) -> EntrySpec {
         min: None,
         max: None,
         emit_default: true,
+        emit_comment: true,
         hidden: false,
         options: Vec::new(),
         comment: Some(LocalizedText {
@@ -709,6 +713,17 @@ fn parse_entries(table: &toml::Table, section: &str) -> Result<Vec<EntrySpec>, S
                     .get("emit_default")
                     .and_then(toml::Value::as_bool)
                     .unwrap_or(false),
+                emit_comment: entry
+                    .get("emit_comment")
+                    .map(|value| {
+                        value.as_bool().ok_or_else(|| {
+                            SchemaError::Invalid(format!(
+                                "配置项 {section}.{key}.emit_comment 必须是布尔值"
+                            ))
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or(true),
                 hidden: entry
                     .get("hidden")
                     .map(|value| {
