@@ -70,6 +70,13 @@ impl Config {
         self.valid
     }
 
+    pub(crate) fn sync(&self) -> std::io::Result<()> {
+        if !self.valid {
+            return Ok(());
+        }
+        fs::write(self.base_dir.join("AppleChu.toml"), self.to_toml())
+    }
+
     pub fn to_toml(&self) -> String {
         let mut output = String::from(applechu_schema::DEFAULT_CONFIG_HEADER);
 
@@ -106,30 +113,15 @@ impl Config {
         let path = Path::new(base_dir).join("AppleChu.toml");
         match fs::read_to_string(&path) {
             Ok(source) => match Self::parse(base_dir, &source) {
-                Ok(mut config) => {
-                    if config.is_valid() {
-                        if let Err(error) = fs::write(&path, config.to_toml()) {
-                            config.diagnostics.push(ConfigDiagnostic::warning(format!(
-                                "Failed to update AppleChu.toml: {error}"
-                            )));
-                        }
-                    }
-                    config
-                }
+                Ok(config) => config,
                 Err(error) => Self::invalid(base_dir, error.to_string()),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let defaults = applechu_schema::SCHEMA.default_config_toml();
-                let mut config = match Self::parse(base_dir, &defaults) {
+                match Self::parse(base_dir, &defaults) {
                     Ok(config) => config,
                     Err(error) => Self::invalid(base_dir, error.to_string()),
-                };
-                if let Err(error) = fs::write(&path, defaults) {
-                    config.diagnostics.push(ConfigDiagnostic::warning(format!(
-                        "Failed to create AppleChu.toml: {error}"
-                    )));
                 }
-                config
             }
             Err(error) => Self::invalid(base_dir, format!("Failed to read AppleChu.toml: {error}")),
         }
