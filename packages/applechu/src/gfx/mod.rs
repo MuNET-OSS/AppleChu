@@ -8,6 +8,7 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
+        group: "display",
         comment: "显示设置",
         fields: {
             pub windowed: bool = false,
@@ -15,6 +16,7 @@ crate::config_section! {
             pub framed: bool = true,
             comment: "显示窗口边框";
             pub monitor: i32 = 0,
+            min: 0,
             comment: "显示器编号";
         }
     }

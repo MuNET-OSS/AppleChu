@@ -9,6 +9,7 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "compatibility",
         comment: "绕过 AppUser 检测",
         fields: {}
     }
@@ -21,6 +22,7 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "display",
         comment: "绕过 120Hz 检测",
         fields: {}
     }
@@ -33,6 +35,7 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "display",
         comment: "绕过 1080P 检测",
         fields: {}
     }

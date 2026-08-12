@@ -54,6 +54,9 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
+        group: "network",
+        description: "私服联网需要开启",
+        description_en: "Required for private servers",
         comment: "关闭网络加密，私服需要",
         fields: {}
     }
@@ -66,6 +69,7 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
+        group: "network",
         comment: "关闭 TLS，私服需要",
         fields: {}
     }

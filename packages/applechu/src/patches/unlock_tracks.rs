@@ -14,9 +14,12 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "gameplay",
         comment: "解锁曲数上限",
         fields: {
             pub max: i32 = 3,
+            min: 1,
+            max: 99,
             comment: "每局最大曲数";
         }
     }

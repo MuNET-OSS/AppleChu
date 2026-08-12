@@ -1,8 +1,9 @@
-mod sections;
+mod generator;
 
-use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
 use std::fmt;
+
+pub use generator::generate_from_rust_dir;
 
 const MAGIC: &[u8; 8] = b"ACMANI\0\0";
 pub const CONTAINER_VERSION: u16 = 1;
@@ -336,16 +337,6 @@ impl Schema {
         blob[header + manifest.len()..].copy_from_slice(&default_config);
         Ok(blob)
     }
-}
-
-pub static SCHEMA: Lazy<Schema> = Lazy::new(|| match Schema::parse(sections::SOURCE.to_owned()) {
-    Ok(schema) => schema,
-    // 内嵌 schema 同时由 build.rs 校验，运行到这里失败表示构建产物损坏
-    Err(error) => panic!("AppleChu schema 无效: {error}"),
-});
-
-pub fn section(id: &str) -> Option<&'static SectionSpec> {
-    SCHEMA.section(id)
 }
 
 pub fn decode_acmani(blob: &[u8]) -> Result<Acmani<'_>, SchemaError> {
@@ -893,16 +884,77 @@ fn inline_toml(value: &toml::Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_acmani, decode_pe_acmani, Schema, CONTAINER_VERSION, HEADER_LENGTH};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{
+        decode_acmani, decode_pe_acmani, generate_from_rust_dir, Schema, CONTAINER_VERSION,
+        HEADER_LENGTH,
+    };
     use sha2::Digest;
+
+    fn generated_schema() -> Schema {
+        generate_from_rust_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../applechu/src"))
+            .expect("Rust config declarations must generate schema")
+    }
+
+    #[test]
+    fn rust_declaration_generates_schema_without_manifest_source() {
+        // Given: 临时 Rust 源码只声明配置类型和字段元数据。
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time must be valid")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "applechu-schema-generator-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).expect("fixture directory must be created");
+        fs::write(
+            directory.join("fixture.rs"),
+            r#"
+                crate::config_section! {
+                    struct FixtureConfig => FIXTURE_CONFIG_SECTION {
+                        section: "Fixture",
+                        order: 1,
+                        default_on: false,
+                        always_enabled: false,
+                        hidden: false,
+                        group: "display",
+                        comment: "Fixture",
+                        fields: {
+                            version_number: i32 = 3,
+                            min: 1,
+                            max: 9,
+                            comment: "Version text";
+                        }
+                    }
+                }
+            "#,
+        )
+        .expect("fixture source must be written");
+
+        // When: 构建生成器扫描 Rust 声明。
+        let schema = generate_from_rust_dir(&directory).expect("fixture schema must generate");
+        fs::remove_dir_all(&directory).expect("fixture directory must be removed");
+
+        // Then: manifest 和默认配置都直接包含规范化后的声明内容。
+        let entry = schema
+            .entry("Fixture", "VersionNumber")
+            .expect("generated entry must exist");
+        assert_eq!(entry.value_type, "int");
+        assert_eq!(
+            entry.default.as_ref().and_then(toml::Value::as_integer),
+            Some(3)
+        );
+        assert_eq!(entry.min, Some(1));
+        assert_eq!(entry.max, Some(9));
+        assert!(schema.default_config_toml().contains("#VersionNumber = 3"));
+    }
 
     #[test]
     fn bundled_schema_round_trips_and_emits_v1() {
-        let schema = Schema::parse(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/schema.toml"
-        )))
-        .expect("schema must parse");
+        let schema = generated_schema();
         let blob = schema.encode_acmani().expect("acmani must encode");
         assert_eq!(&blob[..8], b"ACMANI\0\0");
         assert_eq!(u16::from_le_bytes([blob[8], blob[9]]), CONTAINER_VERSION);
@@ -951,7 +1003,8 @@ mod tests {
 
     #[test]
     fn default_config_matches_section_state_model() {
-        let config = super::SCHEMA.default_config_toml();
+        let schema = generated_schema();
+        let config = schema.default_config_toml();
         let document = config
             .parse::<toml::Table>()
             .expect("default config must be valid TOML");
@@ -959,7 +1012,7 @@ mod tests {
             .split("[Amdaemon]\n")
             .nth(1)
             .expect("AM Daemon section must be emitted")
-            .split("\n[PCBID]")
+            .split("\n[")
             .next()
             .expect("AM Daemon section body must exist");
 
@@ -973,7 +1026,7 @@ mod tests {
         assert!(document["DisableTLS"].as_table().is_some());
         assert!(config.contains("#GameId = \"SDHD\""));
         assert_eq!(
-            super::SCHEMA
+            schema
                 .entry("SliderDevice", "enable")
                 .and_then(|entry| entry.default.as_ref())
                 .and_then(toml::Value::as_bool),
@@ -983,14 +1036,13 @@ mod tests {
 
     #[test]
     fn system_entries_expose_manager_options() {
-        let mode = super::SCHEMA
-            .entry("System", "Mode")
-            .expect("Mode must exist");
+        let schema = generated_schema();
+        let mode = schema.entry("System", "Mode").expect("Mode must exist");
         assert_eq!(mode.options.len(), 2);
         assert_eq!(mode.options[0].value.as_str(), Some("SP"));
         assert_eq!(mode.options[1].value.as_str(), Some("CVT"));
 
-        let refresh_rate = super::SCHEMA
+        let refresh_rate = schema
             .entry("System", "RefreshRate")
             .expect("RefreshRate must exist");
         assert_eq!(refresh_rate.options.len(), 2);
@@ -1000,12 +1052,13 @@ mod tests {
 
     #[test]
     fn default_config_omits_required_internal_sections() {
-        let config = super::SCHEMA.default_config_toml();
+        let schema = generated_schema();
+        let config = schema.default_config_toml();
 
         for name in [
             "Clock", "Misc", "AMVideo", "DVD", "Epay", "OpenSsl", "Hwmon", "Hwreset", "HookMode",
         ] {
-            assert!(super::SCHEMA.section(name).is_none());
+            assert!(schema.section(name).is_none());
             assert!(!config.contains(&format!("[{name}]")));
         }
         assert!(config.contains("[PCBID]"));
@@ -1026,11 +1079,7 @@ mod tests {
 
     #[test]
     fn v1_rejects_tampered_header_length_hash_and_utf8() {
-        let schema = Schema::parse(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/schema.toml"
-        )))
-        .expect("schema must parse");
+        let schema = generated_schema();
         let blob = schema.encode_acmani().expect("acmani must encode");
 
         let mut bad_magic = blob.clone();
@@ -1056,11 +1105,7 @@ mod tests {
 
     #[test]
     fn pe_requires_exactly_one_valid_acmani_section() {
-        let schema = Schema::parse(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/schema.toml"
-        )))
-        .expect("schema must parse");
+        let schema = generated_schema();
         let blob = schema.encode_acmani().expect("acmani must encode");
         let raw_size = (blob.len() + 0x1FF) & !0x1FF;
         let mut pe = vec![0u8; 0x200 + raw_size];

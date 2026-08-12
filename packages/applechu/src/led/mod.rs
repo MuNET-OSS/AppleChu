@@ -46,6 +46,7 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
+        group: "io",
         comment: "15093 LED 控制板模拟",
         fields: {
             pub port0: u32 = 0,

@@ -33,7 +33,7 @@
 
 ## 配置
 
-所有功能通过游戏目录下的 `AppleChu.toml` 控制。每个功能 section 使用统一的 `enable = true/false` 开关，缺失的 section 和字段都会使用代码默认值。用户文件只保存覆盖项，程序不会因 schema 变化自动重写已有配置。
+所有功能通过游戏目录下的 `AppleChu.toml` 控制。每个功能 section 使用统一的 `Enable = true/false` 开关，缺失的 section 和字段都会使用代码默认值。用户文件只保存覆盖项，程序不会因 schema 变化自动重写已有配置。
 
 > [!NOTE]
 > 如需图形化编辑，可使用 [ChuChartManager](https://github.com/MuNET-OSS/ChuChartManager)
@@ -87,6 +87,8 @@ AppleChu 内置一套与 segatools 配置和 API 完全兼容的游戏侧 IO 仿
 ## 构建
 
 需要 Rust nightly 工具链与 `i686-pc-windows-msvc` 和 `x86_64-pc-windows-msvc` 目标：
+
+配置 schema 由 `config_section!` Rust 声明在构建时自动生成并嵌入 `winhttp.dll` 的 `.acmani` section，无需维护独立 schema 文件。
 
 ```bash
 rustup target add i686-pc-windows-msvc

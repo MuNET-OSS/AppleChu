@@ -24,9 +24,14 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "gameplay",
+        description: "只屏蔽成绩数据，角色/设置/地图进度正常保存",
+        description_en: "Only blocks score data, settings/progress saved normally",
         comment: "自动游玩",
         fields: {
             pub hotkey: String = String::from("Home"),
+            description: "支持 Home、Insert、F1 或虚拟键码",
+            description_en: "Supports Home, Insert, F1, or a virtual-key code",
             comment: "自动游玩切换按键";
         }
     }

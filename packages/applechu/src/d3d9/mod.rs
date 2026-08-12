@@ -42,6 +42,9 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "display",
+        description: "需要 d3d9 proxy",
+        description_en: "Requires d3d9.dll proxy",
         comment: "FPS 显示",
         fields: {}
     }
@@ -54,9 +57,14 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "display",
+        description: "需要 d3d9 proxy",
+        description_en: "Requires d3d9.dll proxy",
         comment: "帧率锁定",
         fields: {
             pub fps: u32 = 60,
+            min: 1,
+            max: 240,
             comment: "目标帧率";
         }
     }

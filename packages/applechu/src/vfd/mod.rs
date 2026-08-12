@@ -13,6 +13,7 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
+        group: "io",
         comment: "VFD 显示板模拟，仅 SP 模式",
         fields: {
             pub port: u32 = 0,

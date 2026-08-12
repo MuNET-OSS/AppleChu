@@ -39,6 +39,7 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "network",
         comment: "网络请求日志",
         fields: {}
     }

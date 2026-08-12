@@ -9,6 +9,7 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "display",
         comment: "解锁 120fps",
         fields: {}
     }

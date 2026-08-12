@@ -50,25 +50,26 @@ pub struct SectionDescriptor {
 
 impl SectionDescriptor {
     pub fn default_on(&self) -> bool {
-        applechu_schema::section(self.name).map_or(self.default_on, |section| section.default_on)
+        crate::schema_embed::section(self.name)
+            .map_or(self.default_on, |section| section.default_on)
     }
 
     pub fn always_enabled(&self) -> bool {
-        applechu_schema::section(self.name)
+        crate::schema_embed::section(self.name)
             .map_or(self.always_enabled, |section| section.always_enabled)
     }
 
     pub fn hidden(&self) -> bool {
-        applechu_schema::section(self.name).map_or(self.hidden, |section| section.hidden)
+        crate::schema_embed::section(self.name).map_or(self.hidden, |section| section.hidden)
     }
 
     /// schema 中没有声明的运行时栏目属于内置实现，不写入玩家配置
     pub fn builtin(&self) -> bool {
-        self.hidden() && applechu_schema::section(self.name).is_none()
+        self.hidden() && crate::schema_embed::section(self.name).is_none()
     }
 
     pub fn comment(&self) -> &str {
-        applechu_schema::section(self.name)
+        crate::schema_embed::section(self.name)
             .and_then(|section| section.label.zh_or_en())
             .unwrap_or(self.comment)
     }
@@ -210,7 +211,7 @@ pub fn append_comment(output: &mut String, comment: &str) {
 }
 
 pub fn append_field_comment(output: &mut String, section: &str, key: &str, fallback: &str) {
-    let entry = applechu_schema::SCHEMA.entry(section, key);
+    let entry = crate::schema_embed::SCHEMA.entry(section, key);
     if entry.is_some_and(|entry| !entry.emit_comment) {
         return;
     }

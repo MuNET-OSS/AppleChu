@@ -2,9 +2,12 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=../applechu-schema/src");
-    println!("cargo:rerun-if-changed=../applechu-schema/src/schema.toml");
+    println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=build.rs");
+
+    let output = PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR must be available")?);
+    let schema = applechu_schema::generate_from_rust_dir("src")?;
+    fs::write(output.join("schema.toml"), schema.manifest_toml()?)?;
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows")
         || std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("x86")
@@ -12,8 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let output = PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR must be available")?);
-    let blob = applechu_schema::SCHEMA.encode_acmani()?;
+    let blob = schema.encode_acmani()?;
     fs::write(output.join("acmani.bin"), blob)?;
 
     let runtime_dll = r"C:\Windows\System32\winhttp.dll";

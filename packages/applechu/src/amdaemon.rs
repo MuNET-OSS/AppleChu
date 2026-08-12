@@ -123,6 +123,7 @@ crate::config_section! {
             emit_default: true,
             comment: "无完整 -c 参数时补充 JSON 配置";
             pub config_files: Vec<String> = vec![CONFIG_FILE_PATTERN.to_owned()],
+            schema_default: ["config_*.json"],
             comment: "AM Daemon JSON 配置文件列表";
         }
     }

@@ -33,6 +33,7 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
+        group: "io",
         comment: "灯光输出",
         fields: {
             pub cab_pipe: bool = true,

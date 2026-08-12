@@ -13,6 +13,7 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
+        group: "io",
         comment: "触摸条设备模拟",
         fields: {}
     }

@@ -29,13 +29,20 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "gameplay",
         comment: "自定义计时器",
         fields: {
             pub map_select: i8 = 60,
+            min: -128,
+            max: 127,
             comment: "地图选择计时";
             pub ticket_select: i8 = 60,
+            min: -128,
+            max: 127,
             comment: "票券选择计时";
             pub course_select: i8 = 60,
+            min: -128,
+            max: 127,
             comment: "课程选择计时";
         }
     }

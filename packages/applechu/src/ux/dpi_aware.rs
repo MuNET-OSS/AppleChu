@@ -9,6 +9,7 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "display",
         comment: "启用 Per-Monitor V2 DPI 感知",
         fields: {}
     }

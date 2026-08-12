@@ -38,6 +38,11 @@ macro_rules! config_section {
             default_on: $default_on:expr,
             always_enabled: $always_enabled:expr,
             hidden: $hidden:expr,
+            $(export: $export:expr,)?
+            $(group: $group:literal,)?
+            $(community: $community:expr,)?
+            $(description: $description:literal,)?
+            $(description_en: $description_en:literal,)?
             comment: $comment:literal,
             fields: {
                 $(
@@ -45,6 +50,13 @@ macro_rules! config_section {
                     $field_vis:vis $field:ident : $ty:ty = $default:expr,
                     $(key: $key:literal,)?
                     $(emit_default: $emit_default:expr,)?
+                    $(schema_type: $schema_type:literal,)?
+                    $(schema_default: $schema_default:expr,)?
+                    $(min: $min:expr,)?
+                    $(max: $max:expr,)?
+                    $(options: [$($option:expr),* $(,)?],)?
+                    $(description: $field_description:literal,)?
+                    $(description_en: $field_description_en:literal,)?
                     comment: $field_comment:literal;
                 )*
             }

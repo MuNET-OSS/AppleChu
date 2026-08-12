@@ -38,7 +38,7 @@ pub(super) fn validate_document(
 
         if (descriptors.iter().any(|descriptor| {
             !descriptor.builtin() && applechu_schema::keys_equal(key, descriptor.name)
-        }) || applechu_schema::section(key).is_some())
+        }) || crate::schema_embed::section(key).is_some())
             && !value.is_table()
         {
             diagnostics.push(ConfigDiagnostic::error(format!(
@@ -67,7 +67,7 @@ pub(super) fn validate_registry(
                 descriptor.name
             )));
         }
-        if let Some(schema) = applechu_schema::section(descriptor.name) {
+        if let Some(schema) = crate::schema_embed::section(descriptor.name) {
             validate_schema_metadata(descriptor, schema, diagnostics);
         }
     }
@@ -135,7 +135,7 @@ pub(super) fn warn_unknown_sections(
             || descriptors.iter().any(|descriptor| {
                 !descriptor.builtin() && applechu_schema::keys_equal(key, descriptor.name)
             })
-            || applechu_schema::section(key).is_some()
+            || crate::schema_embed::section(key).is_some()
         {
             continue;
         }

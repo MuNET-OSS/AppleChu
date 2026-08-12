@@ -60,12 +60,20 @@ crate::config_section! {
         comment: "系统设置",
         fields: {
             pub enable_console: bool = true,
+            description: "关闭后沿用启动进程的标准输出流",
+            description_en: "Reuse the launcher's standard output stream when disabled",
             comment: "是否创建新的控制台窗口";
             pub lan_slave: bool = false,
             comment: "店内联机从机模式";
             pub mode: CabinetMode = CabinetMode::Sp,
+            schema_type: "string",
+            schema_default: "SP",
+            options: ["SP", "CVT"],
             comment: "机台模式：SP 或 CVT";
             pub refresh_rate: RefreshRate = RefreshRate::Hz60,
+            schema_type: "int",
+            schema_default: 60,
+            options: [60, 120],
             comment: "显示器刷新率：60 或 120";
         }
     }

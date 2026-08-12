@@ -92,8 +92,10 @@ impl Config {
             output.push('[');
             output.push_str(descriptor.name);
             output.push_str("]\n");
-            output.push_str("Enable = ");
-            output.push_str(if loaded.enabled { "true\n" } else { "false\n" });
+            if !descriptor.hidden() && !descriptor.always_enabled() {
+                output.push_str("Enable = ");
+                output.push_str(if loaded.enabled { "true\n" } else { "false\n" });
+            }
 
             (descriptor.serialize_fields)(loaded, &mut output);
         }
@@ -117,7 +119,7 @@ impl Config {
                 Err(error) => Self::invalid(base_dir, error.to_string()),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let defaults = applechu_schema::SCHEMA.default_config_toml();
+                let defaults = crate::schema_embed::SCHEMA.default_config_toml();
                 match Self::parse(base_dir, &defaults) {
                     Ok(config) => config,
                     Err(error) => Self::invalid(base_dir, error.to_string()),
@@ -153,7 +155,7 @@ impl Config {
         let preserved_sections = root
             .iter()
             .filter(|(name, value)| {
-                let schema = applechu_schema::section(name);
+                let schema = crate::schema_embed::section(name);
                 schema.is_some()
                     && value.is_table()
                     && !descriptors

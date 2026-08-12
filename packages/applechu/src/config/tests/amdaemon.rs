@@ -76,4 +76,14 @@ fn required_internal_sections_are_not_emitted() {
     assert!(output.contains("[PCBID]"));
     assert!(output.contains("[VFS]"));
     assert!(output.contains("[SliderDevice]"));
+    assert!(!output
+        .split("[PCBID]")
+        .nth(1)
+        .unwrap()
+        .starts_with("\nEnable"));
+    assert!(!output
+        .split("[VFS]")
+        .nth(1)
+        .unwrap()
+        .starts_with("\nEnable"));
 }

@@ -49,6 +49,7 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
+        group: "io",
         comment: "Aime 读卡器模拟",
         fields: {
             // 两种机台默认使用 COM4，同时保留分模式覆盖项

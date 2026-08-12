@@ -24,6 +24,7 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
+        group: "io",
         comment: "外部 ChuniIO DLL",
         fields: {
             pub path: String = String::new(),

@@ -30,7 +30,6 @@ mod patches;
 pub mod platform;
 #[cfg(target_arch = "x86")]
 mod proxy;
-#[cfg(target_arch = "x86")]
 mod schema_embed;
 mod slider;
 mod system_config;

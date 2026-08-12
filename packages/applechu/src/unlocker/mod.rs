@@ -59,6 +59,10 @@ crate::config_section! {
         default_on: false,
         always_enabled: false,
         hidden: false,
+        group: "gameplay",
+        community: true,
+        description: "在内存中解锁内容，不修改资源文件",
+        description_en: "Unlocks content in memory without modifying resource files",
         comment: "解锁游戏内容（内存改写 XML，不修改磁盘文件）",
         fields: {
             pub unlock_chara: bool = true,
