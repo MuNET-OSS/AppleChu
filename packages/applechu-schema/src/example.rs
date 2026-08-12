@@ -127,5 +127,8 @@ mod tests {
         assert!(!example.contains("EnableConsole"));
         assert!(full.contains("#EnableConsole = true"));
         assert!(full.contains("#AppendConfigArgs = true"));
+        assert!(example.contains("#Test = 0x70"));
+        assert!(example.contains("#Hotkey = 0x24"));
+        assert!(full.contains("#Scan = 0x0D"));
     }
 }

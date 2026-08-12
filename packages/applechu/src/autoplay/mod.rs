@@ -14,7 +14,7 @@ pub fn was_used() -> bool {
     false
 }
 
-use crate::config::Config;
+use crate::config::{Config, VirtualKey};
 use crate::util::api::Api;
 
 crate::config_section! {
@@ -29,7 +29,7 @@ crate::config_section! {
         description_en: "Only blocks score data, settings/progress saved normally",
         comment: "自动游玩",
         fields: {
-            pub hotkey: String = String::from("Home"),
+            pub hotkey: VirtualKey = VirtualKey::new(0x24),
             description: "支持 Home、Insert、F1 或虚拟键码",
             description_en: "Supports Home, Insert, F1, or a virtual-key code",
             comment: "自动游玩切换按键";
@@ -45,7 +45,7 @@ crate::config_section! {
 pub fn init_all(api: &Api, config: &AutoplayConfig) {
     #[cfg(target_arch = "x86")]
     {
-        autoplay::init(api, &config.hotkey);
+        autoplay::init(api, config.hotkey.code());
         autoplay::init_upload_guard(api);
     }
     #[cfg(not(target_arch = "x86"))]

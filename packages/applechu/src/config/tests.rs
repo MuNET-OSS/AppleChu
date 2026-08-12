@@ -237,13 +237,48 @@ fn io4_owns_keyboard_input_mapping() {
         .expect("Aime 配置必须完成注入");
 
     // Then: IO4 类型直接持有所有输入映射。
-    assert_eq!(io4.test, 65);
-    assert_eq!(io4.air1, 66);
-    assert_eq!(io4.cell1, 67);
+    assert_eq!(io4.test.code(), 65);
+    assert_eq!(io4.air1.code(), 66);
+    assert_eq!(io4.cell1.code(), 67);
     assert_eq!(chuniio.vk_test, 65);
     assert_eq!(chuniio.vk_ir[0], 66);
     assert_eq!(chuniio.vk_cell[0], 67);
     assert_eq!(aime.iodll, "aimeio.dll");
+}
+
+#[test]
+fn virtual_keys_accept_names_and_normalize_to_hex() {
+    // Given: 键位同时使用键名、旧十进制整数和十六进制整数。
+    let source = concat!(
+        "ConfigVersion = 1\n",
+        "[Io4]\n",
+        "Test = \"F2\"\n",
+        "Service = 32\n",
+        "Coin = 0x72\n",
+        "[Aime]\n",
+        "Scan = \"Space\"\n",
+        "[Autoplay]\n",
+        "Hotkey = \"Insert\"\n",
+    );
+
+    // When: 配置经过读取和规范化保存。
+    let config = Config::parse(".", source).expect("测试配置必须有效");
+    let output = config.to_toml();
+
+    // Then: 所有输入都转换为确定的虚拟键码，并统一使用十六进制。
+    let io4 = config
+        .section::<crate::io4::Io4Config>()
+        .expect("IO4 配置必须完成注入");
+    let aime = config
+        .section::<crate::aime::AimeSectionConfig>()
+        .expect("Aime 配置必须完成注入");
+    assert_eq!(io4.test.code(), 0x71);
+    assert_eq!(aime.scan.code(), 0x20);
+    assert!(output.contains("Test = 0x71"));
+    assert!(output.contains("Service = 0x20"));
+    assert!(output.contains("Coin = 0x72"));
+    assert!(output.contains("Scan = 0x20"));
+    assert!(output.contains("Hotkey = 0x2D"));
 }
 
 #[test]

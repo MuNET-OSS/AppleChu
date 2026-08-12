@@ -38,9 +38,8 @@ extern "system" {
 }
 const VK_HOME: i32 = 0x24;
 
-pub fn init(api: &Api, hotkey: &str) {
+pub fn init(api: &Api, hotkey: i32) {
     let _ = API_HANDLE.set(*api);
-    let hotkey = parse_hotkey(hotkey).unwrap_or(VK_HOME);
     HOTKEY.store(hotkey, Ordering::Relaxed);
     RUNNING.store(true, Ordering::Relaxed);
 
@@ -461,53 +460,6 @@ fn jump_target(text: &[u8], text_base: usize, target: usize) -> Option<usize> {
     }
     let rel = read_le_i32(text, offset.checked_add(1)?)?;
     Some(target.wrapping_add(5).wrapping_add(rel as usize))
-}
-
-fn parse_hotkey(value: &str) -> Option<i32> {
-    let key = value.trim();
-    if key.is_empty() {
-        return None;
-    }
-    if let Some(hex) = key.strip_prefix("0x").or_else(|| key.strip_prefix("0X")) {
-        return i32::from_str_radix(hex, 16).ok().filter(|value| *value > 0);
-    }
-    if let Ok(value) = key.parse::<i32>() {
-        return (value > 0).then_some(value);
-    }
-
-    let normalized = key
-        .trim_start_matches("VK_")
-        .replace([' ', '-', '_'], "")
-        .to_ascii_uppercase();
-    match normalized.as_str() {
-        "BACKSPACE" | "BACK" => Some(0x08),
-        "TAB" => Some(0x09),
-        "ENTER" | "RETURN" => Some(0x0D),
-        "SHIFT" => Some(0x10),
-        "CTRL" | "CONTROL" => Some(0x11),
-        "ALT" | "MENU" => Some(0x12),
-        "PAUSE" => Some(0x13),
-        "CAPSLOCK" | "CAPITAL" => Some(0x14),
-        "ESC" | "ESCAPE" => Some(0x1B),
-        "SPACE" => Some(0x20),
-        "PAGEUP" | "PRIOR" => Some(0x21),
-        "PAGEDOWN" | "NEXT" => Some(0x22),
-        "END" => Some(0x23),
-        "HOME" => Some(VK_HOME),
-        "LEFT" => Some(0x25),
-        "UP" => Some(0x26),
-        "RIGHT" => Some(0x27),
-        "DOWN" => Some(0x28),
-        "INSERT" => Some(0x2D),
-        "DELETE" | "DEL" => Some(0x2E),
-        key if key.len() == 1 => key.as_bytes().first().copied().map(i32::from),
-        key if key.starts_with('F') => key[1..]
-            .parse::<i32>()
-            .ok()
-            .filter(|value| (1..=24).contains(value))
-            .map(|value| 0x70 + value - 1),
-        _ => None,
-    }
 }
 
 fn hotkey_name(vk: i32) -> String {

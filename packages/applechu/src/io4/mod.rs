@@ -13,7 +13,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
 };
 
-use crate::config::Config;
+use crate::config::{Config, VirtualKey};
 use crate::iohook::{self, Irp, IrpOp};
 use crate::util::api::Api;
 
@@ -30,62 +30,62 @@ crate::config_section! {
             pub foreground: bool = true,
             advanced: true,
             comment: "仅在游戏窗口位于前台时读取输入";
-            pub test: i32 = 0x70,
-            comment: "测试按钮虚拟键码";
-            pub service: i32 = 0x71,
-            comment: "服务按钮虚拟键码";
-            pub coin: i32 = 0x72,
-            comment: "投币按钮虚拟键码";
-            pub ir: i32 = 0x20,
+            pub test: VirtualKey = VirtualKey::new(0x70),
+            comment: "测试按钮按键";
+            pub service: VirtualKey = VirtualKey::new(0x71),
+            comment: "服务按钮按键";
+            pub coin: VirtualKey = VirtualKey::new(0x72),
+            comment: "投币按钮按键";
+            pub ir: VirtualKey = VirtualKey::new(0x20),
             advanced: true,
-            comment: "红外模拟虚拟键码";
-            pub air1: i32 = b'4' as i32,
+            comment: "红外模拟按键";
+            pub air1: VirtualKey = VirtualKey::new(b'4'),
             advanced: true,
             comment: "红外传感器按键";
-            pub air2: i32 = b'5' as i32,
+            pub air2: VirtualKey = VirtualKey::new(b'5'),
             advanced: true;
-            pub air3: i32 = b'6' as i32,
+            pub air3: VirtualKey = VirtualKey::new(b'6'),
             advanced: true;
-            pub air4: i32 = b'7' as i32,
+            pub air4: VirtualKey = VirtualKey::new(b'7'),
             advanced: true;
-            pub air5: i32 = b'8' as i32,
+            pub air5: VirtualKey = VirtualKey::new(b'8'),
             advanced: true;
-            pub air6: i32 = b'9' as i32,
+            pub air6: VirtualKey = VirtualKey::new(b'9'),
             advanced: true;
-            pub cell1: i32 = b'L' as i32,
+            pub cell1: VirtualKey = VirtualKey::new(b'L'),
             advanced: true,
             comment: "触摸板按键";
-            pub cell2: i32 = b'L' as i32, advanced: true;
-            pub cell3: i32 = b'L' as i32, advanced: true;
-            pub cell4: i32 = b'L' as i32, advanced: true;
-            pub cell5: i32 = b'K' as i32, advanced: true;
-            pub cell6: i32 = b'K' as i32, advanced: true;
-            pub cell7: i32 = b'K' as i32, advanced: true;
-            pub cell8: i32 = b'K' as i32, advanced: true;
-            pub cell9: i32 = b'J' as i32, advanced: true;
-            pub cell10: i32 = b'J' as i32, advanced: true;
-            pub cell11: i32 = b'J' as i32, advanced: true;
-            pub cell12: i32 = b'J' as i32, advanced: true;
-            pub cell13: i32 = b'H' as i32, advanced: true;
-            pub cell14: i32 = b'H' as i32, advanced: true;
-            pub cell15: i32 = b'H' as i32, advanced: true;
-            pub cell16: i32 = b'H' as i32, advanced: true;
-            pub cell17: i32 = b'G' as i32, advanced: true;
-            pub cell18: i32 = b'G' as i32, advanced: true;
-            pub cell19: i32 = b'G' as i32, advanced: true;
-            pub cell20: i32 = b'G' as i32, advanced: true;
-            pub cell21: i32 = b'F' as i32, advanced: true;
-            pub cell22: i32 = b'F' as i32, advanced: true;
-            pub cell23: i32 = b'F' as i32, advanced: true;
-            pub cell24: i32 = b'F' as i32, advanced: true;
-            pub cell25: i32 = b'D' as i32, advanced: true;
-            pub cell26: i32 = b'D' as i32, advanced: true;
-            pub cell27: i32 = b'D' as i32, advanced: true;
-            pub cell28: i32 = b'D' as i32, advanced: true;
-            pub cell29: i32 = b'S' as i32, advanced: true;
-            pub cell30: i32 = b'S' as i32, advanced: true;
-            pub cell31: i32 = b'S' as i32, advanced: true;
-            pub cell32: i32 = b'S' as i32, advanced: true;
+            pub cell2: VirtualKey = VirtualKey::new(b'L'), advanced: true;
+            pub cell3: VirtualKey = VirtualKey::new(b'L'), advanced: true;
+            pub cell4: VirtualKey = VirtualKey::new(b'L'), advanced: true;
+            pub cell5: VirtualKey = VirtualKey::new(b'K'), advanced: true;
+            pub cell6: VirtualKey = VirtualKey::new(b'K'), advanced: true;
+            pub cell7: VirtualKey = VirtualKey::new(b'K'), advanced: true;
+            pub cell8: VirtualKey = VirtualKey::new(b'K'), advanced: true;
+            pub cell9: VirtualKey = VirtualKey::new(b'J'), advanced: true;
+            pub cell10: VirtualKey = VirtualKey::new(b'J'), advanced: true;
+            pub cell11: VirtualKey = VirtualKey::new(b'J'), advanced: true;
+            pub cell12: VirtualKey = VirtualKey::new(b'J'), advanced: true;
+            pub cell13: VirtualKey = VirtualKey::new(b'H'), advanced: true;
+            pub cell14: VirtualKey = VirtualKey::new(b'H'), advanced: true;
+            pub cell15: VirtualKey = VirtualKey::new(b'H'), advanced: true;
+            pub cell16: VirtualKey = VirtualKey::new(b'H'), advanced: true;
+            pub cell17: VirtualKey = VirtualKey::new(b'G'), advanced: true;
+            pub cell18: VirtualKey = VirtualKey::new(b'G'), advanced: true;
+            pub cell19: VirtualKey = VirtualKey::new(b'G'), advanced: true;
+            pub cell20: VirtualKey = VirtualKey::new(b'G'), advanced: true;
+            pub cell21: VirtualKey = VirtualKey::new(b'F'), advanced: true;
+            pub cell22: VirtualKey = VirtualKey::new(b'F'), advanced: true;
+            pub cell23: VirtualKey = VirtualKey::new(b'F'), advanced: true;
+            pub cell24: VirtualKey = VirtualKey::new(b'F'), advanced: true;
+            pub cell25: VirtualKey = VirtualKey::new(b'D'), advanced: true;
+            pub cell26: VirtualKey = VirtualKey::new(b'D'), advanced: true;
+            pub cell27: VirtualKey = VirtualKey::new(b'D'), advanced: true;
+            pub cell28: VirtualKey = VirtualKey::new(b'D'), advanced: true;
+            pub cell29: VirtualKey = VirtualKey::new(b'S'), advanced: true;
+            pub cell30: VirtualKey = VirtualKey::new(b'S'), advanced: true;
+            pub cell31: VirtualKey = VirtualKey::new(b'S'), advanced: true;
+            pub cell32: VirtualKey = VirtualKey::new(b'S'), advanced: true;
         }
     }
 }

@@ -2,9 +2,11 @@ mod document;
 pub mod schema;
 mod validation;
 pub mod value;
+mod virtual_key;
 
 pub use document::Config;
 pub use schema::{ConfigDiagnostic, ConfigSection, DiagnosticLevel};
+pub use virtual_key::VirtualKey;
 
 #[doc(hidden)]
 #[macro_export]

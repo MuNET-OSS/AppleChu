@@ -246,6 +246,6 @@ pub fn append_entry<T: ConfigValue>(output: &mut String, key: &str, value: &T, e
     }
     output.push_str(&applechu_schema::canonical_key(key));
     output.push_str(" = ");
-    output.push_str(&value.to_toml().to_string());
+    output.push_str(&value.to_toml_literal());
     output.push('\n');
 }

@@ -1,6 +1,10 @@
 pub trait ConfigValue: Clone + Send + Sync + 'static {
     fn parse(value: &toml::Value) -> Option<Self>;
     fn to_toml(&self) -> toml::Value;
+
+    fn to_toml_literal(&self) -> String {
+        self.to_toml().to_string()
+    }
 }
 
 impl<T: ConfigValue> ConfigValue for Option<T> {
@@ -12,6 +16,13 @@ impl<T: ConfigValue> ConfigValue for Option<T> {
         self.as_ref()
             .map(ConfigValue::to_toml)
             .unwrap_or(toml::Value::Boolean(false))
+    }
+
+    fn to_toml_literal(&self) -> String {
+        self.as_ref().map_or_else(
+            || toml::Value::Boolean(false).to_string(),
+            ConfigValue::to_toml_literal,
+        )
     }
 }
 

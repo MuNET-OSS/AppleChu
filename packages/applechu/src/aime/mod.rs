@@ -9,6 +9,7 @@ use once_cell::sync::Lazy;
 
 #[cfg(target_arch = "x86_64")]
 use crate::config::Config;
+use crate::config::VirtualKey;
 use crate::iohook::uart;
 use crate::iohook::{self, Irp, IrpOp};
 #[cfg(target_arch = "x86_64")]
@@ -76,9 +77,9 @@ crate::config_section! {
             pub felica_gen: bool = false,
             advanced: true,
             comment: "缺少 felica.txt 卡号时自动生成";
-            pub scan: i32 = 0x0D,
+            pub scan: VirtualKey = VirtualKey::new(0x0D),
             advanced: true,
-            comment: "读卡按键的虚拟键码";
+            comment: "读卡按键";
             // 0 表示按机台模式选择：CVT=Gen2，SP=Gen3
             pub gen: u8 = 0,
             advanced: true,
@@ -438,7 +439,7 @@ fn load_config(config: &AimeSectionConfig, base_dir: impl AsRef<Path>) -> AimeCo
         authdata_path: resolve_path(base_dir.as_ref(), &config.authdata_path),
         aime_gen: config.aime_gen,
         felica_gen: config.felica_gen,
-        scan_key: config.scan,
+        scan_key: config.scan.code(),
         gen: config.gen,
         proxy_flag: config.proxy_flag,
     }
