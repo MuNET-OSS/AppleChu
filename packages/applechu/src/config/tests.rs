@@ -80,7 +80,8 @@ fn canonical_toml_uses_pascal_case_keys() {
 
     // Then: 根键、开关和 Rust snake_case 字段统一保存为 PascalCase。
     assert!(output.contains("ConfigVersion = 1"));
-    assert!(output.contains("[General]\nEnable = true"));
+    assert!(output.contains("[CustomVersionText]\nEnable = true"));
+    assert!(!output.contains("[General]"));
     assert!(output.contains("VersionText = \"2.50\""));
     assert!(!output.contains("config_version ="));
     assert!(!output.contains("versionText ="));

@@ -55,7 +55,7 @@ const FILE_END: u32 = 2;
 crate::config_section! {
     pub(crate) struct UnlockerConfig => UNLOCKER_CONFIG_SECTION {
         section: "Unlocker",
-        order: 400,
+        order: 200,
         default_on: false,
         always_enabled: false,
         hidden: false,

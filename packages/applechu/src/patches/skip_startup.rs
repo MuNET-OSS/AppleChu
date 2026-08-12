@@ -5,7 +5,7 @@ use crate::util::memory::PatchMemory;
 crate::config_section! {
     pub(crate) struct SkipStartupConfig => SKIP_STARTUP_CONFIG_SECTION {
         section: "SkipStartup",
-        order: 130,
+        order: 150,
         default_on: false,
         always_enabled: false,
         hidden: false,

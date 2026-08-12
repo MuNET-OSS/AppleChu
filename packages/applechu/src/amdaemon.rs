@@ -104,7 +104,7 @@ impl Drop for AutoStartedChild {
 crate::config_section! {
     pub(crate) struct AmdaemonConfig => AMDAEMON_CONFIG_SECTION {
         section: "Amdaemon",
-        order: 5,
+        order: 20,
         default_on: true,
         always_enabled: false,
         hidden: false,
@@ -132,7 +132,7 @@ crate::config_section! {
 crate::config_section! {
     pub struct AllowLocalhostConfig => ALLOW_LOCALHOST_CONFIG_SECTION {
         section: "AllowLocalhost",
-        order: 6,
+        order: 35,
         default_on: false,
         always_enabled: false,
         hidden: false,
@@ -144,7 +144,7 @@ crate::config_section! {
 crate::config_section! {
     pub struct CreditFreezeConfig => CREDIT_FREEZE_CONFIG_SECTION {
         section: "CreditFreeze",
-        order: 7,
+        order: 140,
         default_on: false,
         always_enabled: false,
         hidden: false,
@@ -156,7 +156,7 @@ crate::config_section! {
 crate::config_section! {
     pub struct DnsConfig => DNS_CONFIG_SECTION {
         section: "Dns",
-        order: 980,
+        order: 30,
         default_on: true,
         always_enabled: false,
         hidden: false,
@@ -189,7 +189,7 @@ crate::config_section! {
 crate::config_section! {
     pub struct KeychipConfig => KEYCHIP_CONFIG_SECTION {
         section: "Keychip",
-        order: 970,
+        order: 40,
         default_on: true,
         always_enabled: false,
         hidden: false,
@@ -221,7 +221,7 @@ crate::config_section! {
 crate::config_section! {
     pub struct NetEnvConfig => NETENV_CONFIG_SECTION {
         section: "NetEnv",
-        order: 975,
+        order: 370,
         default_on: true,
         always_enabled: false,
         hidden: false,

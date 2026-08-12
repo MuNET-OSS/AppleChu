@@ -5,7 +5,7 @@ use crate::util::memory::PatchMemory;
 crate::config_section! {
     pub(crate) struct ForceSharedAudioConfig => FORCE_SHARED_AUDIO_CONFIG_SECTION {
         section: "ForceSharedAudio",
-        order: 270,
+        order: 210,
         default_on: false,
         always_enabled: false,
         hidden: false,
@@ -20,7 +20,7 @@ crate::config_section! {
 crate::config_section! {
     pub(crate) struct Force2chAudioConfig => FORCE_2CH_AUDIO_CONFIG_SECTION {
         section: "Force2chAudio",
-        order: 280,
+        order: 220,
         default_on: false,
         always_enabled: false,
         hidden: false,

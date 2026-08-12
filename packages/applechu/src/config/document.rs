@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::schema::{
-    append_comment, find_section, ConfigDiagnostic, ConfigSection, DiagnosticLevel, LoadedSection,
-    SectionDescriptor, SectionRef, CONFIG_SECTIONS,
+    append_comment, find_section_for, ConfigDiagnostic, ConfigSection, DiagnosticLevel,
+    LoadedSection, SectionDescriptor, SectionRef, CONFIG_SECTIONS,
 };
 use super::validation::{validate_document, validate_registry, warn_unknown_sections};
 
@@ -146,7 +146,7 @@ impl Config {
         let mut sections = HashMap::new();
         for descriptor in &descriptors {
             let table = (!descriptor.builtin())
-                .then(|| find_section(root, descriptor.name))
+                .then(|| find_section_for(root, descriptor))
                 .flatten();
             let loaded = (descriptor.parse)(table, &mut diagnostics);
             sections.insert((descriptor.type_id)(), loaded);
@@ -160,7 +160,7 @@ impl Config {
                     && value.is_table()
                     && !descriptors
                         .iter()
-                        .any(|descriptor| applechu_schema::keys_equal(descriptor.name, name))
+                        .any(|descriptor| descriptor.matches_name(name))
             })
             .filter_map(|(name, value)| value.as_table().map(|table| (name.clone(), table.clone())))
             .collect();

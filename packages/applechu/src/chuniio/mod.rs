@@ -20,7 +20,7 @@ use self::led_output::LedOutputConfig;
 crate::config_section! {
     pub(crate) struct ExternalChuniIoConfig => CHUNI_IO_CONFIG_SECTION {
         section: "ChuniIo",
-        order: 309,
+        order: 80,
         default_on: true,
         always_enabled: false,
         hidden: false,

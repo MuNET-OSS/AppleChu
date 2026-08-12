@@ -9,7 +9,7 @@ use crate::util::api::Api;
 crate::config_section! {
     pub(crate) struct VfdConfig => VFD_CONFIG_SECTION {
         section: "Vfd",
-        order: 390,
+        order: 110,
         default_on: true,
         always_enabled: false,
         hidden: false,

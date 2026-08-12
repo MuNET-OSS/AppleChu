@@ -4,7 +4,7 @@ pub mod windowed;
 crate::config_section! {
     pub(crate) struct WindowConfig => WINDOW_CONFIG_SECTION {
         section: "Window",
-        order: 20,
+        order: 120,
         default_on: true,
         always_enabled: false,
         hidden: false,

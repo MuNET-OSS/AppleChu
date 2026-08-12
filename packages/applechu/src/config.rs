@@ -38,6 +38,7 @@ macro_rules! config_section {
             default_on: $default_on:expr,
             always_enabled: $always_enabled:expr,
             hidden: $hidden:expr,
+            $(aliases: [$($alias:literal),* $(,)?],)?
             $(export: $export:expr,)?
             $(group: $group:literal,)?
             $(community: $community:expr,)?
@@ -154,6 +155,7 @@ macro_rules! config_section {
                 default_on: $default_on,
                 always_enabled: $always_enabled,
                 hidden: $hidden,
+                aliases: &[$($($alias),*)?],
                 comment: $comment,
                 type_id: std::any::TypeId::of::<$name>,
                 parse: $name::parse_config_section,

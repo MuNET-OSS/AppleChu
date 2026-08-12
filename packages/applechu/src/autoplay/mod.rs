@@ -20,7 +20,7 @@ use crate::util::api::Api;
 crate::config_section! {
     pub(crate) struct AutoplayConfig => AUTOPLAY_CONFIG_SECTION {
         section: "Autoplay",
-        order: 180,
+        order: 310,
         default_on: false,
         always_enabled: false,
         hidden: false,

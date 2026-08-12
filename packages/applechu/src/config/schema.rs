@@ -40,6 +40,7 @@ pub struct SectionDescriptor {
     pub default_on: bool,
     pub always_enabled: bool,
     pub hidden: bool,
+    pub aliases: &'static [&'static str],
     pub comment: &'static str,
     pub type_id: fn() -> TypeId,
     pub parse: fn(Option<&toml::Table>, &mut Vec<ConfigDiagnostic>) -> LoadedSection,
@@ -61,6 +62,14 @@ impl SectionDescriptor {
 
     pub fn hidden(&self) -> bool {
         crate::schema_embed::section(self.name).map_or(self.hidden, |section| section.hidden)
+    }
+
+    pub fn matches_name(&self, name: &str) -> bool {
+        applechu_schema::keys_equal(self.name, name)
+            || self
+                .aliases
+                .iter()
+                .any(|alias| applechu_schema::keys_equal(alias, name))
     }
 
     /// schema 中没有声明的运行时栏目属于内置实现，不写入玩家配置
@@ -154,6 +163,15 @@ pub fn find_section<'a>(root: &'a toml::Table, name: &str) -> Option<&'a toml::T
                 .map(|(_, value)| value)
         })
         .and_then(toml::Value::as_table)
+}
+
+pub fn find_section_for<'a>(
+    root: &'a toml::Table,
+    descriptor: &SectionDescriptor,
+) -> Option<&'a toml::Table> {
+    root.iter()
+        .find(|(key, _)| descriptor.matches_name(key))
+        .and_then(|(_, value)| value.as_table())
 }
 
 fn section_enabled(

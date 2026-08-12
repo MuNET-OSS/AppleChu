@@ -13,7 +13,7 @@ const DISABLE_TIMER_PATTERN_OFFSET: isize = 46;
 crate::config_section! {
     pub(crate) struct DisableTimerConfig => DISABLE_TIMER_CONFIG_SECTION {
         section: "DisableTimer",
-        order: 140,
+        order: 160,
         default_on: false,
         always_enabled: false,
         hidden: false,
@@ -25,7 +25,7 @@ crate::config_section! {
 crate::config_section! {
     pub(crate) struct CustomTimersConfig => CUSTOM_TIMERS_CONFIG_SECTION {
         section: "CustomTimers",
-        order: 200,
+        order: 170,
         default_on: false,
         always_enabled: false,
         hidden: false,

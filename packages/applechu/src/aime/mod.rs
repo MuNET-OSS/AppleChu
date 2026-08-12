@@ -45,7 +45,7 @@ static EXTERNAL: Lazy<Mutex<Option<ExternalAimeIo>>> = Lazy::new(|| Mutex::new(N
 crate::config_section! {
     pub(crate) struct AimeSectionConfig => AIME_CONFIG_SECTION {
         section: "Aime",
-        order: 300,
+        order: 50,
         default_on: true,
         always_enabled: false,
         hidden: false,

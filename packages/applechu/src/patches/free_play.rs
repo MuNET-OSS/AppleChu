@@ -5,7 +5,7 @@ use crate::util::memory::PatchMemory;
 crate::config_section! {
     pub(crate) struct FreePlayConfig => FREE_PLAY_CONFIG_SECTION {
         section: "FreePlay",
-        order: 120,
+        order: 130,
         default_on: false,
         always_enabled: false,
         hidden: false,

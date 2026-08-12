@@ -5,7 +5,7 @@ use crate::util::memory::PatchMemory;
 crate::config_section! {
     pub(crate) struct BypassAppUserConfig => BYPASS_APPUSER_CONFIG_SECTION {
         section: "BypassAppUser",
-        order: 250,
+        order: 290,
         default_on: false,
         always_enabled: false,
         hidden: false,
@@ -18,7 +18,7 @@ crate::config_section! {
 crate::config_section! {
     pub(crate) struct Bypass120hzConfig => BYPASS_120HZ_CONFIG_SECTION {
         section: "Bypass120hz",
-        order: 240,
+        order: 280,
         default_on: false,
         always_enabled: false,
         hidden: false,
@@ -31,7 +31,7 @@ crate::config_section! {
 crate::config_section! {
     pub(crate) struct Bypass1080pConfig => BYPASS_1080P_CONFIG_SECTION {
         section: "Bypass1080p",
-        order: 230,
+        order: 270,
         default_on: false,
         always_enabled: false,
         hidden: false,

@@ -32,7 +32,7 @@ struct VfsConfig {
 crate::config_section! {
     pub(crate) struct VfsSectionConfig => VFS_CONFIG_SECTION {
         section: "VFS",
-        order: 970,
+        order: 360,
         default_on: true,
         always_enabled: false,
         hidden: false,

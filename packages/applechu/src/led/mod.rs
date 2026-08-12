@@ -42,7 +42,7 @@ const EMULATED_OPEN_FLAGS: u32 = 0x4000_0000; // FILE_FLAG_OVERLAPPED
 crate::config_section! {
     pub(crate) struct Led15093SectionConfig => LED_15093_CONFIG_SECTION {
         section: "Led15093",
-        order: 320,
+        order: 100,
         default_on: true,
         always_enabled: false,
         hidden: false,

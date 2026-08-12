@@ -35,7 +35,7 @@ static ORIG_QUERY_HEADERS: AtomicUsize = AtomicUsize::new(0);
 crate::config_section! {
     pub(crate) struct NetLogConfig => NET_LOG_CONFIG_SECTION {
         section: "NetLog",
-        order: 175,
+        order: 300,
         default_on: false,
         always_enabled: false,
         hidden: false,

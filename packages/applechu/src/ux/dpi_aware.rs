@@ -5,7 +5,7 @@ use crate::util::api::Api;
 crate::config_section! {
     pub(crate) struct DpiAwareConfig => DPI_AWARE_CONFIG_SECTION {
         section: "DpiAware",
-        order: 180,
+        order: 340,
         default_on: false,
         always_enabled: false,
         hidden: false,

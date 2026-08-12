@@ -10,7 +10,7 @@ const CLAMP_250_OFFSET: u32 = 0x3DF06D;
 crate::config_section! {
     pub(crate) struct UnlockTracksConfig => UNLOCK_TRACKS_CONFIG_SECTION {
         section: "UnlockTracks",
-        order: 225,
+        order: 180,
         default_on: false,
         always_enabled: false,
         hidden: false,

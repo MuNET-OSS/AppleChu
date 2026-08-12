@@ -20,7 +20,7 @@ use crate::util::api::Api;
 crate::config_section! {
     pub(crate) struct Io4Config => IO4_CONFIG_SECTION {
         section: "Io4",
-        order: 310,
+        order: 60,
         default_on: true,
         always_enabled: false,
         hidden: false,

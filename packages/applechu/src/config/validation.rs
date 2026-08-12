@@ -36,9 +36,10 @@ pub(super) fn validate_document(
             continue;
         }
 
-        if (descriptors.iter().any(|descriptor| {
-            !descriptor.builtin() && applechu_schema::keys_equal(key, descriptor.name)
-        }) || crate::schema_embed::section(key).is_some())
+        if (descriptors
+            .iter()
+            .any(|descriptor| !descriptor.builtin() && descriptor.matches_name(key))
+            || crate::schema_embed::section(key).is_some())
             && !value.is_table()
         {
             diagnostics.push(ConfigDiagnostic::error(format!(
@@ -55,11 +56,12 @@ pub(super) fn validate_registry(
     let mut names = HashSet::new();
     let mut types = HashSet::new();
     for descriptor in descriptors {
-        if !names.insert(applechu_schema::canonical_key(descriptor.name).to_ascii_lowercase()) {
-            diagnostics.push(ConfigDiagnostic::error(format!(
-                "Duplicate config section registration: {}",
-                descriptor.name
-            )));
+        for name in std::iter::once(descriptor.name).chain(descriptor.aliases.iter().copied()) {
+            if !names.insert(applechu_schema::canonical_key(name).to_ascii_lowercase()) {
+                diagnostics.push(ConfigDiagnostic::error(format!(
+                    "Duplicate config section registration: {name}"
+                )));
+            }
         }
         if !types.insert((descriptor.type_id)()) {
             diagnostics.push(ConfigDiagnostic::error(format!(
@@ -132,9 +134,9 @@ pub(super) fn warn_unknown_sections(
     for key in root.keys() {
         if applechu_schema::keys_equal(key, "config_version")
             || applechu_schema::keys_equal(key, "Version")
-            || descriptors.iter().any(|descriptor| {
-                !descriptor.builtin() && applechu_schema::keys_equal(key, descriptor.name)
-            })
+            || descriptors
+                .iter()
+                .any(|descriptor| !descriptor.builtin() && descriptor.matches_name(key))
             || crate::schema_embed::section(key).is_some()
         {
             continue;

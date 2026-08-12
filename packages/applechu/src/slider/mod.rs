@@ -9,7 +9,7 @@ use crate::util::api::Api;
 crate::config_section! {
     pub(crate) struct SliderDeviceConfig => SLIDER_DEVICE_CONFIG_SECTION {
         section: "SliderDevice",
-        order: 350,
+        order: 70,
         default_on: true,
         always_enabled: false,
         hidden: false,

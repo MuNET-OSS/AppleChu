@@ -29,7 +29,7 @@ const GENERIC_WRITE: u32 = 0x4000_0000;
 crate::config_section! {
     pub(crate) struct LedOutputConfig => LED_OUTPUT_CONFIG_SECTION {
         section: "Led",
-        order: 313,
+        order: 90,
         default_on: true,
         always_enabled: false,
         hidden: false,

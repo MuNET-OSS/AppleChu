@@ -5,7 +5,7 @@ use crate::util::memory::PatchMemory;
 crate::config_section! {
     pub(crate) struct Unlock120fpsConfig => UNLOCK_120FPS_CONFIG_SECTION {
         section: "Unlock120fps",
-        order: 155,
+        order: 260,
         default_on: false,
         always_enabled: false,
         hidden: false,

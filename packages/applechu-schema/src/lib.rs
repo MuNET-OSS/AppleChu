@@ -1006,6 +1006,64 @@ mod tests {
     }
 
     #[test]
+    fn default_config_follows_settings_sort_order() {
+        // Given: Rust 声明生成完整的公开配置 schema。
+        let schema = generated_schema();
+
+        // When: 默认配置按 section 顺序输出。
+        let config = schema.default_config_toml();
+        let sections = config
+            .lines()
+            .filter_map(|line| line.strip_prefix('[')?.strip_suffix(']'))
+            .collect::<Vec<_>>();
+
+        // Then: 顺序与设置管理器约定完全一致。
+        assert_eq!(
+            sections,
+            [
+                "System",
+                "Amdaemon",
+                "Dns",
+                "AllowLocalhost",
+                "Keychip",
+                "Aime",
+                "Io4",
+                "SliderDevice",
+                "ChuniIo",
+                "Led",
+                "Led15093",
+                "Vfd",
+                "Window",
+                "FreePlay",
+                "CreditFreeze",
+                "SkipStartup",
+                "DisableTimer",
+                "CustomTimers",
+                "UnlockTracks",
+                "SkipMapAnimation",
+                "Unlocker",
+                "ForceSharedAudio",
+                "Force2chAudio",
+                "CustomVersionText",
+                "DisableEncryption",
+                "DisableTLS",
+                "Unlock120fps",
+                "Bypass1080p",
+                "Bypass120hz",
+                "BypassAppUser",
+                "NetLog",
+                "Autoplay",
+                "FpsDisplay",
+                "FrameLock",
+                "DpiAware",
+                "PCBID",
+                "VFS",
+                "NetEnv",
+            ]
+        );
+    }
+
+    #[test]
     fn rejects_malformed_entries_instead_of_silently_dropping_them() {
         let source = r#"
             [config]

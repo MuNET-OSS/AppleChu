@@ -50,7 +50,7 @@ static ORIG_OPEN_REQUEST: AtomicUsize = AtomicUsize::new(0);
 crate::config_section! {
     pub(crate) struct DisableEncryptionConfig => DISABLE_ENCRYPTION_CONFIG_SECTION {
         section: "DisableEncryption",
-        order: 160,
+        order: 240,
         default_on: true,
         always_enabled: false,
         hidden: false,
@@ -65,7 +65,7 @@ crate::config_section! {
 crate::config_section! {
     pub(crate) struct DisableTlsConfig => DISABLE_TLS_CONFIG_SECTION {
         section: "DisableTLS",
-        order: 170,
+        order: 250,
         default_on: true,
         always_enabled: false,
         hidden: false,

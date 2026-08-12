@@ -60,6 +60,12 @@ impl Parse for SectionDecl {
             let metadata: Ident = content.parse()?;
             content.parse::<Token![:]>()?;
             match metadata.to_string().as_str() {
+                "aliases" => {
+                    let aliases_content;
+                    syn::bracketed!(aliases_content in content);
+                    let _ = aliases_content
+                        .parse_terminated(|input| input.parse::<LitStr>(), Token![,])?;
+                }
                 "export" => export = Some(content.parse::<LitBool>()?.value),
                 "group" => group = Some(content.parse()?),
                 "community" => community = content.parse::<LitBool>()?.value,

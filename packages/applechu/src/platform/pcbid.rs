@@ -16,7 +16,7 @@ static SERIAL_NO: OnceCell<String> = OnceCell::new();
 crate::config_section! {
     pub(crate) struct PcbIdConfig => PCBID_CONFIG_SECTION {
         section: "PCBID",
-        order: 960,
+        order: 350,
         default_on: true,
         always_enabled: false,
         hidden: false,

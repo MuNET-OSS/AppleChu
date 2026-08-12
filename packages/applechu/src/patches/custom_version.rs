@@ -3,12 +3,13 @@ use crate::util::memory::PatchMemory;
 use crate::util::pattern;
 
 crate::config_section! {
-    pub(crate) struct GeneralConfig => GENERAL_CONFIG_SECTION {
-        section: "General",
-        order: 290,
+    pub(crate) struct CustomVersionTextConfig => CUSTOM_VERSION_TEXT_CONFIG_SECTION {
+        section: "CustomVersionText",
+        order: 230,
         default_on: false,
         always_enabled: false,
         hidden: false,
+        aliases: ["General"],
         comment: "自定义版本号",
         fields: {
             pub version_text: String = String::new(),
@@ -22,7 +23,7 @@ const MAX_VERSION_TEXT_LEN: usize = 64;
 
 pub(crate) fn apply_early<M: PatchMemory>(api: &M, config: &Config) {
     let Some(config) = config
-        .section::<GeneralConfig>()
+        .section::<CustomVersionTextConfig>()
         .filter(|config| config.enabled)
     else {
         return;

@@ -38,7 +38,7 @@ impl D3dPresentParameters {
 crate::config_section! {
     pub(crate) struct FpsDisplayConfig => FPS_DISPLAY_CONFIG_SECTION {
         section: "FpsDisplay",
-        order: 210,
+        order: 320,
         default_on: false,
         always_enabled: false,
         hidden: false,
@@ -51,7 +51,7 @@ crate::config_section! {
 crate::config_section! {
     pub(crate) struct FrameLockConfig => FRAME_LOCK_CONFIG_SECTION {
         section: "FrameLock",
-        order: 220,
+        order: 330,
         default_on: false,
         always_enabled: false,
         hidden: false,
