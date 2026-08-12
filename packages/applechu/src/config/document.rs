@@ -92,7 +92,7 @@ impl Config {
             output.push('[');
             output.push_str(descriptor.name);
             output.push_str("]\n");
-            output.push_str("enable = ");
+            output.push_str("Enable = ");
             output.push_str(if loaded.enabled { "true\n" } else { "false\n" });
 
             (descriptor.serialize_fields)(loaded, &mut output);
@@ -158,7 +158,7 @@ impl Config {
                     && value.is_table()
                     && !descriptors
                         .iter()
-                        .any(|descriptor| descriptor.name.eq_ignore_ascii_case(name))
+                        .any(|descriptor| applechu_schema::keys_equal(descriptor.name, name))
             })
             .filter_map(|(name, value)| value.as_table().map(|table| (name.clone(), table.clone())))
             .collect();

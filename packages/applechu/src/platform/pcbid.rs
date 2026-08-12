@@ -23,7 +23,6 @@ crate::config_section! {
         comment: "机台序列号模拟",
         fields: {
             pub serial_no: String = String::from("ACAE01A99999999"),
-            key: "serialNo",
             comment: "机台序列号";
         }
     }

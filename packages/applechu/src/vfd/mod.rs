@@ -19,7 +19,6 @@ crate::config_section! {
             key: "portNo",
             comment: "VFD 串口号；0 表示使用 SP 默认串口";
             pub utf_conversion: bool = false,
-            key: "utfConversion",
             comment: "启用 VFD 文本编码转换日志";
         }
     }

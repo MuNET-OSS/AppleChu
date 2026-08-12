@@ -45,7 +45,6 @@ crate::config_section! {
             pub option: String = String::from("../option"),
             comment: "选项资源目录";
             pub allow_amfs_downloads: bool = false,
-            key: "allowAmfsDownloads",
             comment: "允许写入 AMFS 下载内容";
         }
     }

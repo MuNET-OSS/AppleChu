@@ -53,19 +53,14 @@ crate::config_section! {
             pub port1: u32 = 0,
             comment: "第二块控制板串口号；0 表示按机台模式选择";
             pub board_number: String = String::from("15093-06"),
-            key: "boardNumber",
             comment: "控制板型号";
             pub chip_number: String = String::from("6710 "),
-            key: "chipNumber",
             comment: "应用固件芯片型号";
             pub boot_chip_number: String = String::from("6709 "),
-            key: "bootChipNumber",
             comment: "引导固件芯片型号";
             pub fw_ver: u8 = 0x90,
-            key: "fwVer",
             comment: "固件版本";
             pub fw_sum: u16 = 0xADF7,
-            key: "fwSum",
             comment: "固件校验和";
             pub high_baudrate: bool = false,
             key: "highBaud",

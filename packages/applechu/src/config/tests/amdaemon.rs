@@ -14,8 +14,8 @@ fn amdaemon_sections_are_normalized_by_game_proxy() {
     let output = config.to_toml();
 
     assert!(output.contains("[Dns]"));
-    assert!(output.contains("default = \"127.0.0.1\""));
-    assert!(output.contains("#router = \"\""));
+    assert!(output.contains("Default = \"127.0.0.1\""));
+    assert!(output.contains("#Router = \"\""));
     assert!(!output.contains("[UnknownSection]"));
 }
 
@@ -33,9 +33,9 @@ fn amdaemon_values_survive_game_side_normalization() {
     let output = config.to_toml();
 
     assert!(output.contains("[Keychip]"));
-    assert!(output.contains("id = \"A69E-01A88888888\""));
+    assert!(output.contains("Id = \"A69E-01A88888888\""));
     assert!(output.contains("[Dns]"));
-    assert!(output.contains("default = \"127.0.0.1\""));
+    assert!(output.contains("Default = \"127.0.0.1\""));
 }
 
 #[test]
@@ -49,8 +49,8 @@ fn empty_dns_section_is_filled_by_game_proxy() {
     assert!(dns.enabled);
     assert!(dns.default.is_empty());
     assert!(output.contains("[Dns]"));
-    assert!(output.contains("#default = \"\""));
-    assert!(output.contains("#title = \"\""));
+    assert!(output.contains("#Default = \"\""));
+    assert!(output.contains("#Title = \"\""));
 }
 
 #[test]

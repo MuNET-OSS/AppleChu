@@ -51,10 +51,8 @@ crate::config_section! {
             key: "controllerLedOutputOpeNITHM",
             comment: "使用 OpeNITHM 控制器灯光格式";
             pub serial_port: String = String::from("COM5"),
-            key: "serialPort",
             comment: "灯光输出串口";
             pub serial_baud: u32 = 921_600,
-            key: "serialBaud",
             comment: "灯光输出串口波特率";
         }
     }

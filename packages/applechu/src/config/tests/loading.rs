@@ -69,8 +69,8 @@ fn sync_writes_canonical_config_for_game_startup() {
     fs::remove_dir_all(&directory).expect("必须清理测试目录");
 
     assert!(output.starts_with(applechu_schema::DEFAULT_CONFIG_HEADER));
-    assert!(output.contains("[TestSection]\nenable = true"));
-    assert!(output.contains("answer = 7"));
+    assert!(output.contains("[TestSection]\nEnable = true"));
+    assert!(output.contains("Answer = 7"));
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn missing_config_can_be_normalized_by_game_startup() {
     fs::remove_dir_all(&directory).expect("必须清理测试目录");
 
     assert!(config.is_valid());
-    assert!(output.contains("config_version = 1\n"));
+    assert!(output.contains("ConfigVersion = 1\n"));
     assert!(output.contains("[Amdaemon]\n"));
     assert!(output.contains("[SliderDevice]\n"));
     assert!(output.contains("[DisableTLS]\n"));
@@ -123,7 +123,7 @@ fn missing_config_can_be_normalized_by_game_startup() {
         .expect("生成的配置必须是有效 TOML");
     assert_eq!(
         document
-            .get("config_version")
+            .get("ConfigVersion")
             .and_then(toml::Value::as_integer),
         Some(1)
     );

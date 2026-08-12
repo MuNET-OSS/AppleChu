@@ -11,11 +11,37 @@ pub const DEFAULT_CONFIG_HEADER: &str = r#"## 这是 AppleChu 的 TOML 配置文
 ##
 ## - 井号 # 开头的行为注释，被注释掉的内容不会生效
 ## - 被注释的配置内容使用一个井号 #，说明文字使用两个井号 ##
-## - 功能开关统一使用 enable = true/false
+## - 功能开关统一使用 Enable = true/false
 ## - 未填写的配置使用程序默认值
 
-config_version = 1
+ConfigVersion = 1
 "#;
+
+pub fn canonical_key(key: &str) -> String {
+    let mut output = String::with_capacity(key.len());
+    let mut capitalize = true;
+    for character in key.chars() {
+        if character == '_' {
+            capitalize = true;
+        } else if capitalize {
+            output.extend(character.to_uppercase());
+            capitalize = false;
+        } else {
+            output.push(character);
+        }
+    }
+    output
+}
+
+pub fn keys_equal(left: &str, right: &str) -> bool {
+    left.bytes()
+        .filter(|byte| *byte != b'_')
+        .map(|byte| byte.to_ascii_lowercase())
+        .eq(right
+            .bytes()
+            .filter(|byte| *byte != b'_')
+            .map(|byte| byte.to_ascii_lowercase()))
+}
 
 #[derive(Clone, Debug)]
 pub struct OptionSpec {
@@ -190,11 +216,12 @@ impl Schema {
                 .and_then(toml::Value::as_bool)
                 .unwrap_or(false);
             let mut entries = parse_entries(table, id)?;
+            for entry in &mut entries {
+                entry.key = canonical_key(&entry.key);
+            }
             if !hidden
                 && !always_enabled
-                && !entries
-                    .iter()
-                    .any(|entry| entry.key.eq_ignore_ascii_case("enable"))
+                && !entries.iter().any(|entry| keys_equal(&entry.key, "enable"))
             {
                 entries.insert(0, enable_entry(default_on));
             }
@@ -213,6 +240,7 @@ impl Schema {
         validate_sections(&sections)?;
         validate_groups(root, &sections)?;
         inject_enable_entries(&mut document, &sections)?;
+        canonicalize_document_keys(&mut document)?;
         Ok(Self {
             source,
             document,
@@ -231,7 +259,7 @@ impl Schema {
     pub fn section(&self, id: &str) -> Option<&SectionSpec> {
         self.sections
             .iter()
-            .find(|section| section.id.eq_ignore_ascii_case(id))
+            .find(|section| keys_equal(&section.id, id))
     }
 
     pub fn entry(&self, section: &str, key: &str) -> Option<&EntrySpec> {
@@ -239,7 +267,7 @@ impl Schema {
             section
                 .entries
                 .iter()
-                .find(|entry| entry.key.eq_ignore_ascii_case(key))
+                .find(|entry| keys_equal(&entry.key, key))
         })
     }
 
@@ -268,7 +296,7 @@ impl Schema {
                 if !entry.emit_default {
                     output.push('#');
                 }
-                output.push_str(&entry.key);
+                output.push_str(&canonical_key(&entry.key));
                 output.push_str(" = ");
                 if let Some(value) = &entry.default {
                     output.push_str(&inline_toml(value));
@@ -456,7 +484,7 @@ fn validate_sections(sections: &[SectionSpec]) -> Result<(), SchemaError> {
     for (index, section) in sections.iter().enumerate() {
         if sections[..index]
             .iter()
-            .any(|other| other.id.eq_ignore_ascii_case(&section.id))
+            .any(|other| keys_equal(&other.id, &section.id))
         {
             return Err(SchemaError::Invalid(format!(
                 "重复配置 section: {}",
@@ -465,10 +493,7 @@ fn validate_sections(sections: &[SectionSpec]) -> Result<(), SchemaError> {
         }
         let mut keys = Vec::new();
         for entry in &section.entries {
-            if !keys
-                .iter()
-                .all(|key: &String| !key.eq_ignore_ascii_case(&entry.key))
-            {
+            if !keys.iter().all(|key: &String| !keys_equal(key, &entry.key)) {
                 return Err(SchemaError::Invalid(format!(
                     "重复配置项 {}.{}",
                     section.id, entry.key
@@ -480,7 +505,7 @@ fn validate_sections(sections: &[SectionSpec]) -> Result<(), SchemaError> {
         let enable = section
             .entries
             .iter()
-            .find(|entry| entry.key.eq_ignore_ascii_case("enable"));
+            .find(|entry| keys_equal(&entry.key, "enable"));
         if section.hidden || section.always_enabled {
             if enable.is_some() {
                 return Err(SchemaError::Invalid(format!(
@@ -536,7 +561,7 @@ fn inject_enable_entries(
         let Some(enable) = section
             .entries
             .iter()
-            .find(|entry| entry.key.eq_ignore_ascii_case("enable"))
+            .find(|entry| keys_equal(&entry.key, "enable"))
         else {
             continue;
         };
@@ -555,7 +580,7 @@ fn inject_enable_entries(
                 .as_table()
                 .and_then(|entry| entry.get("key"))
                 .and_then(toml::Value::as_str)
-                .is_some_and(|key| key.eq_ignore_ascii_case("enable"))
+                .is_some_and(|key| keys_equal(key, "enable"))
         }) {
             continue;
         }
@@ -576,6 +601,35 @@ fn inject_enable_entries(
         entry.insert("emit_default".to_owned(), toml::Value::Boolean(true));
         entry.insert("label".to_owned(), toml::Value::Table(label));
         entries.insert(0, toml::Value::Table(entry));
+    }
+    Ok(())
+}
+
+fn canonicalize_document_keys(document: &mut toml::Value) -> Result<(), SchemaError> {
+    let sections = document
+        .as_table_mut()
+        .and_then(|root| root.get_mut("config"))
+        .and_then(toml::Value::as_table_mut)
+        .and_then(|config| config.get_mut("sections"))
+        .and_then(toml::Value::as_array_mut)
+        .ok_or_else(|| SchemaError::Invalid("schema 缺少 config.sections".to_owned()))?;
+    for section in sections {
+        let Some(entries) = section
+            .as_table_mut()
+            .and_then(|section| section.get_mut("entries"))
+            .and_then(toml::Value::as_array_mut)
+        else {
+            continue;
+        };
+        for entry in entries {
+            let Some(key) = entry.as_table_mut().and_then(|entry| entry.get_mut("key")) else {
+                continue;
+            };
+            let raw = key
+                .as_str()
+                .ok_or_else(|| SchemaError::Invalid("配置项 key 必须是字符串".to_owned()))?;
+            *key = toml::Value::String(canonical_key(raw));
+        }
     }
     Ok(())
 }
@@ -792,10 +846,7 @@ fn validate_groups(root: &toml::Table, sections: &[SectionSpec]) -> Result<(), S
             .get("id")
             .and_then(toml::Value::as_str)
             .ok_or_else(|| SchemaError::Invalid(format!("ui.groups[{index}] 缺少 id")))?;
-        if ids
-            .iter()
-            .any(|other: &&str| other.eq_ignore_ascii_case(id))
-        {
+        if ids.iter().any(|other: &&str| keys_equal(other, id)) {
             return Err(SchemaError::Invalid(format!("重复 UI group: {id}")));
         }
         ids.push(id);
@@ -809,7 +860,7 @@ fn validate_groups(root: &toml::Table, sections: &[SectionSpec]) -> Result<(), S
             })?;
             if !sections
                 .iter()
-                .any(|section| section.id.eq_ignore_ascii_case(member))
+                .any(|section| keys_equal(&section.id, member))
             {
                 return Err(SchemaError::Invalid(format!(
                     "UI group {id} 引用了未知 section: {member}"
@@ -913,14 +964,14 @@ mod tests {
             .expect("AM Daemon section body must exist");
 
         assert!(config.starts_with("## 这是 AppleChu 的 TOML 配置文件"));
-        assert!(config.contains("config_version = 1"));
-        assert!(amdaemon.contains("enable = true"));
+        assert!(config.contains("ConfigVersion = 1"));
+        assert!(amdaemon.contains("Enable = true"));
         assert!(amdaemon.contains("AutoStart = false"));
         assert!(amdaemon.contains("AppendConfigArgs = false"));
         assert!(amdaemon.contains("#ConfigFiles = [\"config_*.json\"]"));
         assert!(document["DisableEncryption"].as_table().is_some());
         assert!(document["DisableTLS"].as_table().is_some());
-        assert!(config.contains("#gameId = \"SDHD\""));
+        assert!(config.contains("#GameId = \"SDHD\""));
         assert_eq!(
             super::SCHEMA
                 .entry("SliderDevice", "enable")

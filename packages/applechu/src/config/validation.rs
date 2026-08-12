@@ -11,7 +11,7 @@ pub(super) fn validate_document(
 ) {
     let mut root_keys = HashSet::new();
     for (key, value) in root {
-        let normalized = key.to_ascii_lowercase();
+        let normalized = applechu_schema::canonical_key(key).to_ascii_lowercase();
         if !root_keys.insert(normalized) {
             diagnostics.push(ConfigDiagnostic::error(format!(
                 "Duplicate config section with different casing: {key}"
@@ -19,7 +19,7 @@ pub(super) fn validate_document(
             continue;
         }
 
-        if key.eq_ignore_ascii_case("config_version") {
+        if applechu_schema::keys_equal(key, "config_version") {
             if value.as_integer() != Some(1) {
                 diagnostics.push(ConfigDiagnostic::error(format!(
                     "Unsupported config version; expected {CONFIG_VERSION}"
@@ -27,7 +27,7 @@ pub(super) fn validate_document(
             }
             continue;
         }
-        if key.eq_ignore_ascii_case("Version") {
+        if applechu_schema::keys_equal(key, "Version") {
             if value.as_str() != Some(CONFIG_VERSION) {
                 diagnostics.push(ConfigDiagnostic::error(format!(
                     "Unsupported config version; expected {CONFIG_VERSION}"
@@ -36,10 +36,9 @@ pub(super) fn validate_document(
             continue;
         }
 
-        if (descriptors
-            .iter()
-            .any(|descriptor| !descriptor.builtin() && key.eq_ignore_ascii_case(descriptor.name))
-            || applechu_schema::section(key).is_some())
+        if (descriptors.iter().any(|descriptor| {
+            !descriptor.builtin() && applechu_schema::keys_equal(key, descriptor.name)
+        }) || applechu_schema::section(key).is_some())
             && !value.is_table()
         {
             diagnostics.push(ConfigDiagnostic::error(format!(
@@ -56,7 +55,7 @@ pub(super) fn validate_registry(
     let mut names = HashSet::new();
     let mut types = HashSet::new();
     for descriptor in descriptors {
-        if !names.insert(descriptor.name.to_ascii_lowercase()) {
+        if !names.insert(applechu_schema::canonical_key(descriptor.name).to_ascii_lowercase()) {
             diagnostics.push(ConfigDiagnostic::error(format!(
                 "Duplicate config section registration: {}",
                 descriptor.name
@@ -92,7 +91,7 @@ fn validate_schema_metadata(
     let schema_keys = schema
         .entries
         .iter()
-        .filter(|entry| !entry.key.eq_ignore_ascii_case("enable"))
+        .filter(|entry| !applechu_schema::keys_equal(&entry.key, "enable"))
         .map(|entry| entry.key.as_str())
         .collect::<Vec<_>>();
     let missing = descriptor
@@ -102,7 +101,7 @@ fn validate_schema_metadata(
         .filter(|key| {
             !schema_keys
                 .iter()
-                .any(|schema_key| schema_key.eq_ignore_ascii_case(key))
+                .any(|schema_key| applechu_schema::keys_equal(schema_key, key))
         })
         .collect::<Vec<_>>();
     let extra = schema_keys
@@ -112,7 +111,7 @@ fn validate_schema_metadata(
             !descriptor
                 .field_keys
                 .iter()
-                .any(|runtime_key| runtime_key.eq_ignore_ascii_case(key))
+                .any(|runtime_key| applechu_schema::keys_equal(runtime_key, key))
         })
         .collect::<Vec<_>>();
     if !missing.is_empty() || !extra.is_empty() {
@@ -131,10 +130,10 @@ pub(super) fn warn_unknown_sections(
     diagnostics: &mut Vec<ConfigDiagnostic>,
 ) {
     for key in root.keys() {
-        if key.eq_ignore_ascii_case("config_version")
-            || key.eq_ignore_ascii_case("Version")
+        if applechu_schema::keys_equal(key, "config_version")
+            || applechu_schema::keys_equal(key, "Version")
             || descriptors.iter().any(|descriptor| {
-                !descriptor.builtin() && key.eq_ignore_ascii_case(descriptor.name)
+                !descriptor.builtin() && applechu_schema::keys_equal(key, descriptor.name)
             })
             || applechu_schema::section(key).is_some()
         {

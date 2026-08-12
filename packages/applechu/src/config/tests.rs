@@ -58,9 +58,31 @@ fn canonical_toml_comments_default_values() {
 
     // Then: 栏目和默认字段都作为可直接取消注释的示例输出。
     assert!(output.contains("[TestSection]"));
-    assert!(output.contains("enable = false"));
-    assert!(output.contains("#answer = 42"));
-    assert!(output.contains("#label = \"default\""));
+    assert!(output.contains("Enable = false"));
+    assert!(output.contains("#Answer = 42"));
+    assert!(output.contains("#Label = \"default\""));
+}
+
+#[test]
+fn canonical_toml_uses_pascal_case_keys() {
+    // Given: 旧配置混用 snake_case、camelCase 和 PascalCase。
+    let source = concat!(
+        "config_version = 1\n",
+        "[General]\n",
+        "enable = true\n",
+        "versionText = \"2.50\"\n",
+    );
+    let config = Config::parse(".", source).expect("旧配置必须保持兼容");
+
+    // When: 配置被规范化保存。
+    let output = config.to_toml();
+
+    // Then: 根键、开关和 Rust snake_case 字段统一保存为 PascalCase。
+    assert!(output.contains("ConfigVersion = 1"));
+    assert!(output.contains("[General]\nEnable = true"));
+    assert!(output.contains("VersionText = \"2.50\""));
+    assert!(!output.contains("config_version ="));
+    assert!(!output.contains("versionText ="));
 }
 
 #[test]
@@ -139,10 +161,10 @@ fn empty_section_keeps_explicit_enabled_state_when_serialized() {
     let output = config.to_toml();
     let reparsed = Config::parse(".", &output).expect("序列化配置必须有效");
 
-    assert!(output.contains("[BypassAppUser]\nenable = true"));
+    assert!(output.contains("[BypassAppUser]\nEnable = true"));
     assert!(reparsed
         .to_toml()
-        .contains("[BypassAppUser]\nenable = true"));
+        .contains("[BypassAppUser]\nEnable = true"));
 }
 
 #[test]
@@ -183,7 +205,7 @@ fn slider_device_is_public_and_enabled_by_default() {
 
     assert!(slider.enabled);
     assert!(config.to_toml().contains("[SliderDevice]"));
-    assert!(config.to_toml().contains("enable = true"));
+    assert!(config.to_toml().contains("Enable = true"));
 
     let disabled = Config::parse(".", "config_version = 1\n[SliderDevice]\nenable = false\n")
         .expect("TOML 语法必须有效");
@@ -241,10 +263,10 @@ fn canonical_io_config_has_no_legacy_sections_or_repeated_comments() {
     assert!(!output.contains("[Air]"));
     assert!(!output.contains("[Slider]"));
     assert!(!output.contains("[AimeIo]"));
-    assert!(output.contains("#iodll = \"\""));
-    assert!(output.contains("## AIR 1\n#air1"));
+    assert!(output.contains("#Iodll = \"\""));
+    assert!(output.contains("## AIR 1\n#Air1"));
     assert!(!output.contains("## AIR 2"));
-    assert!(output.contains("## Cell 1\n#cell1"));
+    assert!(output.contains("## Cell 1\n#Cell1"));
     assert!(!output.contains("## Cell 2"));
 }
 

@@ -111,24 +111,18 @@ crate::config_section! {
         comment: "AM Daemon x64 winmm 劫持配置",
         fields: {
             pub auto_start: bool = false,
-            key: "AutoStart",
             emit_default: true,
             comment: "由游戏侧启动 AM Daemon";
             pub executable: String = String::from("amdaemon.exe"),
-            key: "Executable",
             comment: "AM Daemon 可执行文件名";
             pub hide_window: bool = false,
-            key: "HideWindow",
             comment: "手动启动 AM Daemon 时隐藏控制台窗口";
             pub terminate_on_exit: bool = true,
-            key: "TerminateOnExit",
             comment: "AppleChu 退出时终止 AM Daemon";
             pub append_config_args: bool = false,
-            key: "AppendConfigArgs",
             emit_default: true,
             comment: "无完整 -c 参数时补充 JSON 配置";
             pub config_files: Vec<String> = vec![CONFIG_FILE_PATTERN.to_owned()],
-            key: "ConfigFiles",
             comment: "AM Daemon JSON 配置文件列表";
         }
     }
@@ -180,16 +174,12 @@ crate::config_section! {
             pub title: String = String::new(),
             comment: "标题/其他服务器";
             pub replace_host: bool = false,
-            key: "replaceHost",
             comment: "替换 HTTP Host";
             pub startup_port: u16 = 0,
-            key: "startupPort",
             comment: "启动认证服务器端口";
             pub billing_port: u16 = 0,
-            key: "billingPort",
             comment: "计费服务器端口";
             pub aimedb_port: u16 = 0,
-            key: "aimedbPort",
             comment: "AimeDB 服务器端口";
         }
     }
@@ -208,26 +198,20 @@ crate::config_section! {
             key: "id",
             comment: "Keychip ID";
             pub game_id: String = String::from("SDHD"),
-            key: "gameId",
             comment: "游戏 ID，默认 SDHD";
             pub platform_id: String = String::new(),
-            key: "platformId",
             comment: "平台 ID；留空时使用当前平台默认值";
             pub region: u32 = 1,
             comment: "区域编号";
             pub billing_type: u32 = 1,
-            key: "billingType",
             comment: "计费类型";
             pub system_flag: u32 = 0x64,
-            key: "systemFlag",
             comment: "系统标志";
             pub subnet: String = String::from("192.168.139.0"),
             comment: "店内网络子网";
             pub billing_ca: String = String::from("DEVICE\\ca.crt"),
-            key: "billingCa",
             comment: "计费 CA 证书";
             pub billing_pub: String = String::from("DEVICE\\billing.pub"),
-            key: "billingPub",
             comment: "计费公钥";
         }
     }
@@ -243,13 +227,10 @@ crate::config_section! {
         comment: "店内网络适配器模拟",
         fields: {
             pub addr_suffix: u32 = 11,
-            key: "addrSuffix",
             comment: "机台 IP 的末尾地址";
             pub router_suffix: u32 = 254,
-            key: "routerSuffix",
             comment: "店内路由 IP 的末尾地址";
             pub mac_addr: String = String::from("01:02:03:04:05:06"),
-            key: "macAddr",
             comment: "虚拟网卡 MAC 地址";
             pub broadcast: String = String::from("255.255.255.255"),
             comment: "UDP 广播目标地址";
@@ -282,7 +263,6 @@ crate::config_section! {
         comment: "AM Daemon OpenSSL 兼容",
         fields: {
             pub force_legacy_sha: bool = false,
-            key: "forceLegacySha",
             comment: "强制禁用 OpenSSL SHA 扩展路径";
         }
     }

@@ -17,13 +17,10 @@ crate::config_section! {
         comment: "其他平台行为",
         fields: {
             allow_reboot: bool = false,
-            key: "allowReboot",
             comment: "允许游戏重启系统";
             allow_master_key_write: bool = false,
-            key: "allowMasterKeyWrite",
             comment: "允许写入主密钥";
             next_process_file_path: String = String::new(),
-            key: "nextProcessFilePath",
             comment: "下一个进程路径";
         }
     }

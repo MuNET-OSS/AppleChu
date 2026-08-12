@@ -62,11 +62,9 @@ crate::config_section! {
         comment: "解锁游戏内容（内存改写 XML，不修改磁盘文件）",
         fields: {
             pub unlock_chara: bool = true,
-            key: "unlockChara",
             comment: "解锁角色（Chara.xml）";
 
             pub unlock_music: bool = true,
-            key: "unlockMusic",
             comment: "解锁乐曲（Music.xml）";
 
             pub unlock_nameplate: bool = true,
@@ -78,7 +76,6 @@ crate::config_section! {
             comment: "解锁系统语音（SystemVoice.xml）";
 
             pub unlock_event: bool = true,
-            key: "unlockEvent",
             comment: "解锁活动（Event.xml）";
 
             pub unlock_mapicon: bool = true,
@@ -86,7 +83,6 @@ crate::config_section! {
             comment: "解锁跑图小人（MapIcon.xml）";
 
             pub unlock_trophy: bool = true,
-            key: "unlockTrophy",
             comment: "解锁称号（Trophy.xml）";
         }
     }

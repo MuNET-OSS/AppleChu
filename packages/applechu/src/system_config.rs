@@ -60,16 +60,12 @@ crate::config_section! {
         comment: "系统设置",
         fields: {
             pub enable_console: bool = true,
-            key: "EnableConsole",
             comment: "是否创建新的控制台窗口";
             pub lan_slave: bool = false,
-            key: "LanSlave",
             comment: "店内联机从机模式";
             pub mode: CabinetMode = CabinetMode::Sp,
-            key: "Mode",
             comment: "机台模式：SP 或 CVT";
             pub refresh_rate: RefreshRate = RefreshRate::Hz60,
-            key: "RefreshRate",
             comment: "显示器刷新率：60 或 120";
         }
     }
@@ -130,7 +126,6 @@ crate::config_section! {
             pub devices: bool = true,
             comment: "启用设备模拟";
             pub platform_modules: bool = true,
-            key: "platformModules",
             comment: "启用平台模块";
             pub iohook: bool = true,
             comment: "启用 IO Hook";

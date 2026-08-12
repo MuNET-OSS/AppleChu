@@ -139,7 +139,7 @@ pub fn find_key<'a>(table: Option<&'a toml::Table>, key: &str) -> Option<&'a tom
         table.get(key).or_else(|| {
             table
                 .iter()
-                .find(|(entry_key, _)| entry_key.eq_ignore_ascii_case(key))
+                .find(|(entry_key, _)| applechu_schema::keys_equal(entry_key, key))
                 .map(|(_, value)| value)
         })
     })
@@ -149,7 +149,7 @@ pub fn find_section<'a>(root: &'a toml::Table, name: &str) -> Option<&'a toml::T
     root.get(name)
         .or_else(|| {
             root.iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .find(|(key, _)| applechu_schema::keys_equal(key, name))
                 .map(|(_, value)| value)
         })
         .and_then(toml::Value::as_table)
@@ -185,7 +185,10 @@ pub fn warn_unknown_keys(
         return;
     };
     for key in table.keys() {
-        if known.iter().any(|known| key.eq_ignore_ascii_case(known)) {
+        if known
+            .iter()
+            .any(|known| applechu_schema::keys_equal(key, known))
+        {
             continue;
         }
         diagnostics.push(ConfigDiagnostic::warning(format!(
@@ -222,7 +225,7 @@ pub fn append_entry<T: ConfigValue>(output: &mut String, key: &str, value: &T, e
     if !explicit {
         output.push('#');
     }
-    output.push_str(key);
+    output.push_str(&applechu_schema::canonical_key(key));
     output.push_str(" = ");
     output.push_str(&value.to_toml().to_string());
     output.push('\n');
