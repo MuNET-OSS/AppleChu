@@ -1,4 +1,4 @@
-use applechu::amdaemon::{AllowLocalhostConfig, CreditFreezeConfig};
+use applechu::amdaemon::{CreditFreezeConfig, DnsConfig};
 use applechu::config::Config;
 use applechu::patch_engine::{apply_patch, PatchVariant, VersionedPatch};
 use applechu::util::api::Api;
@@ -19,8 +19,8 @@ pub(crate) fn apply_pre_tls() {
         return;
     };
     if config
-        .section::<AllowLocalhostConfig>()
-        .is_some_and(|section| section.enabled)
+        .section::<DnsConfig>()
+        .is_some_and(|section| section.enabled && section.requires_localhost_patch())
     {
         apply_localhost(&api);
     }

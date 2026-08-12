@@ -1024,7 +1024,6 @@ mod tests {
                 "System",
                 "Amdaemon",
                 "Dns",
-                "AllowLocalhost",
                 "Keychip",
                 "Aime",
                 "Io4",
