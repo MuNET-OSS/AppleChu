@@ -1,8 +1,9 @@
 use super::{Config, DiagnosticLevel};
 use crate::amdaemon::{AmdaemonConfig, EpayConfig};
 use crate::system_config::SystemConfig;
-use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+mod amdaemon;
+mod loading;
 
 crate::config_section! {
     pub struct TestSectionConfig => TEST_SECTION {
@@ -143,84 +144,6 @@ fn unknown_entries_are_reported_and_removed() {
 }
 
 #[test]
-fn amdaemon_sections_are_normalized_by_game_proxy() {
-    let source = concat!(
-        "Version = \"1\"\n",
-        "[Dns]\n",
-        "default = \"127.0.0.1\"\n",
-        "[UnknownSection]\n",
-        "value = 1\n",
-    );
-
-    let config = Config::parse(".", source).expect("TOML 语法必须有效");
-    let output = config.to_toml();
-
-    assert!(output.contains("[Dns]"));
-    assert!(output.contains("default = \"127.0.0.1\""));
-    assert!(output.contains("#router = \"\""));
-    assert!(!output.contains("[UnknownSection]"));
-}
-
-#[test]
-fn amdaemon_values_survive_game_side_normalization() {
-    let source = concat!(
-        "Version = \"1\"\n",
-        "[Keychip]\n",
-        "id = \"A69E-01A88888888\"\n",
-        "[Dns]\n",
-        "default = \"127.0.0.1\"\n",
-    );
-
-    let config = Config::parse(".", source).expect("TOML 语法必须有效");
-    let output = config.to_toml();
-
-    assert!(output.contains("[Keychip]"));
-    assert!(output.contains("id = \"A69E-01A88888888\""));
-    assert!(output.contains("[Dns]"));
-    assert!(output.contains("default = \"127.0.0.1\""));
-}
-
-#[test]
-fn empty_dns_section_is_filled_by_game_proxy() {
-    let config = Config::parse(".", "config_version = 1\n[Dns]\n").expect("TOML 语法必须有效");
-    let dns = config
-        .section::<crate::amdaemon::DnsConfig>()
-        .expect("DNS 配置必须完成注入");
-    let output = config.to_toml();
-
-    assert!(dns.enabled);
-    assert!(dns.default.is_empty());
-    assert!(output.contains("[Dns]"));
-    assert!(output.contains("#default = \"\""));
-    assert!(output.contains("#title = \"\""));
-}
-
-#[test]
-fn required_internal_sections_are_not_emitted() {
-    let source = concat!(
-        "Version = \"1\"\n",
-        "[Clock]\n",
-        "timezone = \"real\"\n",
-        "[Hwmon]\n",
-        "[PCBID]\n",
-        "serialNo = \"ACAE01A99999999\"\n",
-        "[VFS]\n",
-        "option = \"../option\"\n",
-    );
-    let config = Config::parse(".", source).expect("TOML 语法必须有效");
-    let output = config.to_toml();
-
-    for name in [
-        "Clock", "Misc", "AMVideo", "DVD", "Epay", "OpenSsl", "Hwmon", "Hwreset", "HookMode",
-    ] {
-        assert!(!output.contains(&format!("[{name}]")));
-    }
-    assert!(output.contains("[PCBID]"));
-    assert!(output.contains("[VFS]"));
-    assert!(output.contains("[SliderDevice]"));
-}
-
-#[test]
 fn slider_device_is_public_and_enabled_by_default() {
     let config = Config::parse(".", "config_version = 1\n").expect("TOML 语法必须有效");
     let slider = config
@@ -339,99 +262,4 @@ fn built_in_section_ignores_user_values() {
 
     assert!(section.enabled);
     assert!(section.hook);
-}
-
-#[test]
-fn loading_does_not_rewrite_user_config() {
-    let directory = temporary_directory("no-writeback");
-    fs::create_dir_all(&directory).expect("必须能创建测试目录");
-    let path = directory.join("AppleChu.toml");
-    let source = "config_version = 1\n\n[UnknownSection]\nvalue = 1\n";
-    fs::write(&path, source).expect("必须能写入测试配置");
-
-    let _ = Config::load(directory.to_str().expect("测试路径必须是 UTF-8"));
-    let output = fs::read_to_string(&path).expect("必须能读回测试配置");
-    fs::remove_dir_all(&directory).expect("必须清理测试目录");
-
-    assert_eq!(output, source);
-}
-
-#[test]
-fn loading_creates_missing_user_config() {
-    let directory = temporary_directory("create-missing");
-    fs::create_dir_all(&directory).expect("必须能创建测试目录");
-    let path = directory.join("AppleChu.toml");
-
-    let config = Config::load(directory.to_str().expect("测试路径必须是 UTF-8"));
-    let output = fs::read_to_string(&path).expect("必须生成默认配置");
-    fs::remove_dir_all(&directory).expect("必须清理测试目录");
-
-    assert!(config.is_valid());
-    assert!(output.contains("config_version = 1\n"));
-    assert!(output.contains("[Amdaemon]\n"));
-    assert!(output.contains("[SliderDevice]\n"));
-    assert!(output.contains("[DisableTLS]\n"));
-    assert!(
-        config
-            .section::<crate::patches::network::DisableEncryptionConfig>()
-            .unwrap()
-            .enabled
-    );
-    assert!(
-        config
-            .section::<crate::patches::network::DisableTlsConfig>()
-            .unwrap()
-            .enabled
-    );
-
-    let document = output
-        .parse::<toml::Table>()
-        .expect("生成的配置必须是有效 TOML");
-    assert_eq!(
-        document
-            .get("config_version")
-            .and_then(toml::Value::as_integer),
-        Some(1)
-    );
-    assert!(document.contains_key("Amdaemon"));
-    assert!(document.contains_key("SliderDevice"));
-
-    let reparsed = Config::parse(&directory, &output).expect("生成的配置必须能重新解析");
-    assert!(reparsed.is_valid());
-    assert!(reparsed.diagnostics().iter().all(|diagnostic| {
-        !diagnostic
-            .message
-            .contains("Unknown config section AutoStart")
-            && !diagnostic
-                .message
-                .contains("Unknown config section AppendConfigArgs")
-            && !diagnostic
-                .message
-                .contains("Unknown config section windowed")
-            && !diagnostic.message.contains("DisableTLS.aimedb")
-            && !diagnostic.message.contains("DisableTLS.default")
-    }));
-    assert!(
-        reparsed
-            .section::<crate::patches::network::DisableEncryptionConfig>()
-            .unwrap()
-            .enabled
-    );
-    assert!(
-        reparsed
-            .section::<crate::patches::network::DisableTlsConfig>()
-            .unwrap()
-            .enabled
-    );
-}
-
-fn temporary_directory(case: &str) -> std::path::PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("系统时间必须有效")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "applechu-config-{case}-{}-{nonce}",
-        std::process::id()
-    ))
 }

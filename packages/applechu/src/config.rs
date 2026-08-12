@@ -1,5 +1,6 @@
 mod document;
 pub mod schema;
+mod validation;
 pub mod value;
 
 pub use document::Config;
