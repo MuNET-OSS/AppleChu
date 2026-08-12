@@ -3,8 +3,8 @@ use std::path::Path;
 
 use crate::{canonical_key, LocalizedText, Schema};
 
-pub const EXAMPLE_CONFIG_FILE: &str = "example.toml";
-pub const FULL_CONFIG_FILE: &str = "full.toml";
+pub const EXAMPLE_CONFIG_FILE: &str = "AppleChu.example.toml";
+pub const FULL_CONFIG_FILE: &str = "AppleChu.full.toml";
 
 pub const DEFAULT_CONFIG_HEADER: &str = r#"## 这是 AppleChu 的 TOML 配置文件
 ##

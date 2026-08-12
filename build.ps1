@@ -9,8 +9,8 @@ Set-StrictMode -Version Latest
 
 $root = $PSScriptRoot
 $target = Join-Path $root 'target'
-$exampleName = 'example.toml'
-$fullName = 'full.toml'
+$exampleName = 'AppleChu.example.toml'
+$fullName = 'AppleChu.full.toml'
 $artifacts = @(
     @{
         Name = 'winhttp.dll'
