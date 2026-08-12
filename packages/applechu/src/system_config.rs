@@ -27,29 +27,6 @@ impl ConfigValue for CabinetMode {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum RefreshRate {
-    Hz60,
-    Hz120,
-}
-
-impl ConfigValue for RefreshRate {
-    fn parse(value: &toml::Value) -> Option<Self> {
-        match value.as_integer()? {
-            60 => Some(Self::Hz60),
-            120 => Some(Self::Hz120),
-            _ => None,
-        }
-    }
-
-    fn to_toml(&self) -> toml::Value {
-        toml::Value::Integer(match self {
-            Self::Hz60 => 60,
-            Self::Hz120 => 120,
-        })
-    }
-}
-
 crate::config_section! {
     pub(crate) struct SystemConfig => SYSTEM_CONFIG_SECTION {
         section: "System",
@@ -69,27 +46,23 @@ crate::config_section! {
             schema_type: "string",
             schema_default: "SP",
             options: ["SP", "CVT"],
-            comment: "机台模式：SP 或 CVT";
-            pub refresh_rate: RefreshRate = RefreshRate::Hz60,
-            schema_type: "int",
-            schema_default: 60,
-            options: [60, 120],
-            comment: "显示器刷新率：60 或 120";
+            comment: "机台模式：SP（120Hz）或 CVT（60Hz）";
         }
     }
 }
 
 impl SystemConfig {
     pub fn is_sp_mode(&self) -> bool {
-        !self.dipsw()[2]
+        matches!(self.mode, CabinetMode::Sp)
     }
 
     pub fn dipsw(&self) -> [bool; 3] {
+        let is_cvt = matches!(self.mode, CabinetMode::Cvt);
         [
             !self.lan_slave,
-            matches!(self.refresh_rate, RefreshRate::Hz60),
-            // 第三位拨码开关选择机台模式：ON 为 CVT，OFF 为 SP
-            matches!(self.mode, CabinetMode::Cvt),
+            is_cvt,
+            // CVT 同时要求 60Hz 与机台模式拨码，避免生成硬件不存在的组合
+            is_cvt,
         ]
     }
 }
@@ -99,17 +72,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dipsw_encodes_lan_refresh_and_cabinet_mode_independently() {
-        let sp_60 = SystemConfig::default();
-        assert_eq!(sp_60.dipsw(), [true, true, false]);
-
-        let cvt_120 = SystemConfig {
+    fn cabinet_mode_selects_its_fixed_refresh_rate() {
+        // Given: SP 与 CVT 两种机台模式。
+        let sp = SystemConfig::default();
+        let cvt = SystemConfig {
             lan_slave: true,
             mode: CabinetMode::Cvt,
-            refresh_rate: RefreshRate::Hz120,
             ..SystemConfig::default()
         };
-        assert_eq!(cvt_120.dipsw(), [false, false, true]);
+
+        // When: 系统生成机台拨码开关。
+        let sp_dipsw = sp.dipsw();
+        let cvt_dipsw = cvt.dipsw();
+
+        // Then: SP 固定 120Hz，CVT 固定 60Hz。
+        assert_eq!(sp_dipsw, [true, false, false]);
+        assert_eq!(cvt_dipsw, [false, true, true]);
     }
 }
 

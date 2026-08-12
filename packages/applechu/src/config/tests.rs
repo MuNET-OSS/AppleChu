@@ -286,16 +286,16 @@ fn invalid_version_or_section_shape_rejects_config() {
 
 #[test]
 fn module_value_types_validate_their_domain() {
-    let source = "Version = \"1\"\n[System]\nMode = \"unknown\"\nRefreshRate = 3\n";
+    let source = "Version = \"1\"\n[System]\nMode = \"unknown\"\n";
     let config = Config::parse(".", source).expect("TOML 语法必须有效");
     let system = config
         .section::<SystemConfig>()
         .expect("系统配置必须完成注入");
 
     assert!(system.is_sp_mode());
-    // 无效模式回退为 SP，SP 对应 DIPSW3 OFF
-    assert_eq!(system.dipsw(), [true, true, false]);
-    assert_eq!(config.diagnostics().len(), 2);
+    // 无效模式回退为 SP，对应 120Hz 与 DIPSW3 OFF
+    assert_eq!(system.dipsw(), [true, false, false]);
+    assert_eq!(config.diagnostics().len(), 1);
     assert!(config
         .diagnostics()
         .iter()
@@ -303,15 +303,19 @@ fn module_value_types_validate_their_domain() {
 }
 
 #[test]
-fn refresh_rate_uses_hertz_in_user_config() {
-    let source = "Version = \"1\"\n[System]\nRefreshRate = 120\n";
+fn legacy_refresh_rate_is_removed_and_mode_controls_dipsw() {
+    let source = "Version = \"1\"\n[System]\nMode = \"CVT\"\nRefreshRate = 120\n";
     let config = Config::parse(".", source).expect("测试配置必须有效");
     let system = config
         .section::<SystemConfig>()
         .expect("系统配置必须完成注入");
 
-    assert_eq!(system.dipsw(), [true, false, false]);
-    assert!(config.to_toml().contains("RefreshRate = 120"));
+    assert_eq!(system.dipsw(), [true, true, true]);
+    assert!(!config.to_toml().contains("RefreshRate"));
+    assert!(config
+        .diagnostics()
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("System.RefreshRate")));
 }
 
 #[test]

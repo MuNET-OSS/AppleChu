@@ -981,12 +981,7 @@ mod tests {
         assert_eq!(mode.options[0].value.as_str(), Some("SP"));
         assert_eq!(mode.options[1].value.as_str(), Some("CVT"));
 
-        let refresh_rate = schema
-            .entry("System", "RefreshRate")
-            .expect("RefreshRate must exist");
-        assert_eq!(refresh_rate.options.len(), 2);
-        assert_eq!(refresh_rate.options[0].value.as_integer(), Some(60));
-        assert_eq!(refresh_rate.options[1].value.as_integer(), Some(120));
+        assert!(schema.entry("System", "RefreshRate").is_none());
     }
 
     #[test]
