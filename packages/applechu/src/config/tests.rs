@@ -17,6 +17,7 @@ crate::config_section! {
         fields: {
             answer: i32 = 42, comment: "答案";
             label: String = String::from("default"), comment: "标签";
+            quiet: bool = false;
         }
     }
 }
@@ -62,6 +63,7 @@ fn canonical_toml_comments_default_values() {
     assert!(output.contains("Enable = false"));
     assert!(output.contains("#Answer = 42"));
     assert!(output.contains("#Label = \"default\""));
+    assert!(output.contains("#Quiet = false"));
 }
 
 #[test]

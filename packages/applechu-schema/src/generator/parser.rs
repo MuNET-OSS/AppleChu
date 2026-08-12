@@ -2,9 +2,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use syn::parse::{Parse, ParseStream};
-use syn::{braced, Expr, Ident, LitBool, LitInt, LitStr, Token, Type};
+use syn::{braced, Ident, LitBool, LitInt, LitStr, Token};
 
 use crate::SchemaError;
+
+mod field;
+
+pub(super) use field::FieldDecl;
 
 pub(super) struct SectionDecl {
     pub name: LitStr,
@@ -19,23 +23,6 @@ pub(super) struct SectionDecl {
     pub description_en: Option<LitStr>,
     pub comment: LitStr,
     pub fields: Vec<FieldDecl>,
-}
-
-pub(super) struct FieldDecl {
-    pub name: Ident,
-    pub value_type: Type,
-    pub default: Expr,
-    pub key: Option<LitStr>,
-    pub emit_default: bool,
-    pub advanced: bool,
-    pub schema_type: Option<LitStr>,
-    pub schema_default: Option<Expr>,
-    pub min: Option<Expr>,
-    pub max: Option<Expr>,
-    pub options: Vec<Expr>,
-    pub description: Option<LitStr>,
-    pub description_en: Option<LitStr>,
-    pub comment: LitStr,
 }
 
 impl Parse for SectionDecl {
@@ -106,74 +93,6 @@ impl Parse for SectionDecl {
             comment,
             fields,
         })
-    }
-}
-
-impl Parse for FieldDecl {
-    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let _: Vec<syn::Attribute> = input.call(syn::Attribute::parse_outer)?;
-        let _: syn::Visibility = input.parse()?;
-        let name = input.parse()?;
-        input.parse::<Token![:]>()?;
-        let value_type = input.parse()?;
-        input.parse::<Token![=]>()?;
-        let default = input.parse()?;
-        input.parse::<Token![,]>()?;
-        let mut key = None;
-        let mut emit_default = false;
-        let mut advanced = false;
-        let mut schema_type = None;
-        let mut schema_default = None;
-        let mut min = None;
-        let mut max = None;
-        let mut options = Vec::new();
-        let mut description = None;
-        let mut description_en = None;
-        loop {
-            let metadata: Ident = input.parse()?;
-            input.parse::<Token![:]>()?;
-            match metadata.to_string().as_str() {
-                "key" => key = Some(input.parse()?),
-                "emit_default" => emit_default = input.parse::<LitBool>()?.value,
-                "advanced" => advanced = input.parse::<LitBool>()?.value,
-                "schema_type" => schema_type = Some(input.parse()?),
-                "schema_default" => schema_default = Some(input.parse()?),
-                "min" => min = Some(input.parse()?),
-                "max" => max = Some(input.parse()?),
-                "options" => {
-                    let content;
-                    syn::bracketed!(content in input);
-                    options = content
-                        .parse_terminated(Expr::parse, Token![,])?
-                        .into_iter()
-                        .collect();
-                }
-                "description" => description = Some(input.parse()?),
-                "description_en" => description_en = Some(input.parse()?),
-                "comment" => {
-                    let comment = input.parse()?;
-                    input.parse::<Token![;]>()?;
-                    return Ok(Self {
-                        name,
-                        value_type,
-                        default,
-                        key,
-                        emit_default,
-                        advanced,
-                        schema_type,
-                        schema_default,
-                        min,
-                        max,
-                        options,
-                        description,
-                        description_en,
-                        comment,
-                    });
-                }
-                _ => return Err(syn::Error::new(metadata.span(), "unknown field metadata")),
-            }
-            input.parse::<Token![,]>()?;
-        }
     }
 }
 

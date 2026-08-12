@@ -159,10 +159,12 @@ fn field_value(field: &FieldDecl) -> Result<toml::Value, SchemaError> {
     if field.advanced {
         table.insert("advanced".to_owned(), toml::Value::Boolean(true));
     }
-    table.insert(
-        "label".to_owned(),
-        localized(&field.comment.value(), Some(&canonical_key)),
-    );
+    if let Some(comment) = &field.comment {
+        table.insert(
+            "label".to_owned(),
+            localized(&comment.value(), Some(&canonical_key)),
+        );
+    }
     if let Some(description) = &field.description {
         table.insert(
             "description".to_owned(),
@@ -172,7 +174,11 @@ fn field_value(field: &FieldDecl) -> Result<toml::Value, SchemaError> {
             ),
         );
     }
-    if field.comment.value().is_empty() {
+    if field
+        .comment
+        .as_ref()
+        .is_none_or(|comment| comment.value().is_empty())
+    {
         table.insert("emit_comment".to_owned(), toml::Value::Boolean(false));
     }
     if let Some(min) = &field.min {

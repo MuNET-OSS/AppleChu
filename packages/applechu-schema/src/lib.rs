@@ -880,6 +880,7 @@ mod tests {
                             min: 1,
                             max: 9,
                             comment: "Version text";
+                            quiet: bool = false;
                         }
                     }
                 }
@@ -903,6 +904,11 @@ mod tests {
         assert_eq!(entry.min, Some(1));
         assert_eq!(entry.max, Some(9));
         assert!(schema.default_config_toml().contains("#VersionNumber = 3"));
+        let quiet = schema
+            .entry("Fixture", "Quiet")
+            .expect("commentless entry must exist");
+        assert!(!quiet.emit_comment);
+        assert!(schema.default_config_toml().contains("#Quiet = false"));
     }
 
     #[test]

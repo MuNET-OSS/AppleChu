@@ -39,6 +39,17 @@ macro_rules! __config_advanced {
     };
 }
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __config_comment {
+    () => {
+        ""
+    };
+    ($value:literal) => {
+        $value
+    };
+}
+
 #[macro_export]
 macro_rules! config_section {
     (
@@ -59,18 +70,18 @@ macro_rules! config_section {
             fields: {
                 $(
                     $(#[$field_meta:meta])*
-                    $field_vis:vis $field:ident : $ty:ty = $default:expr,
-                    $(key: $key:literal,)?
-                    $(emit_default: $emit_default:expr,)?
-                    $(advanced: $advanced:expr,)?
-                    $(schema_type: $schema_type:literal,)?
-                    $(schema_default: $schema_default:expr,)?
-                    $(min: $min:expr,)?
-                    $(max: $max:expr,)?
-                    $(options: [$($option:expr),* $(,)?],)?
-                    $(description: $field_description:literal,)?
-                    $(description_en: $field_description_en:literal,)?
-                    comment: $field_comment:literal;
+                    $field_vis:vis $field:ident : $ty:ty = $default:expr
+                    $(, key: $key:literal)?
+                    $(, emit_default: $emit_default:expr)?
+                    $(, advanced: $advanced:expr)?
+                    $(, schema_type: $schema_type:literal)?
+                    $(, schema_default: $schema_default:expr)?
+                    $(, min: $min:expr)?
+                    $(, max: $max:expr)?
+                    $(, options: [$($option:expr),* $(,)?])?
+                    $(, description: $field_description:literal)?
+                    $(, description_en: $field_description_en:literal)?
+                    $(, comment: $field_comment:literal)?;
                 )*
             }
         }
@@ -148,7 +159,7 @@ macro_rules! config_section {
                             output,
                             $section,
                             $crate::__config_key!($field $(, $key)?),
-                            $field_comment,
+                            $crate::__config_comment!($($field_comment)?),
                         );
                         $crate::config::schema::append_entry(
                             output,
