@@ -1,7 +1,7 @@
 use syn::LitStr;
 
 use super::parser::{FieldDecl, SectionDecl};
-use super::value::{expression_value, schema_type};
+use super::value::{expression_value, schema_format, schema_type};
 use crate::{canonical_key, SchemaError};
 
 pub(super) fn build(sections: &[SectionDecl]) -> Result<String, SchemaError> {
@@ -156,6 +156,11 @@ fn field_value(field: &FieldDecl) -> Result<toml::Value, SchemaError> {
         "emit_default".to_owned(),
         toml::Value::Boolean(field.emit_default),
     );
+    if let Some(format) = schema_format(&field.value_type) {
+        table.insert("format".to_owned(), toml::Value::String(format.to_owned()));
+        table.insert("min".to_owned(), toml::Value::Integer(1));
+        table.insert("max".to_owned(), toml::Value::Integer(255));
+    }
     if field.advanced {
         table.insert("advanced".to_owned(), toml::Value::Boolean(true));
     }

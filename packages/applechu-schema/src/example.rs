@@ -55,7 +55,7 @@ impl Schema {
                     &entry
                         .default
                         .as_ref()
-                        .map_or_else(|| "\"\"".to_owned(), inline_toml),
+                        .map_or_else(|| "\"\"".to_owned(), |value| inline_toml(entry, value)),
                 );
                 output.push('\n');
             }
@@ -79,7 +79,12 @@ fn append_comment(output: &mut String, comment: Option<&str>) {
     }
 }
 
-fn inline_toml(value: &toml::Value) -> String {
+fn inline_toml(entry: &crate::EntrySpec, value: &toml::Value) -> String {
+    if entry.format.as_deref() == Some("virtual_key") {
+        if let Some(code) = value.as_integer() {
+            return format!("0x{code:02X}");
+        }
+    }
     value.to_string()
 }
 

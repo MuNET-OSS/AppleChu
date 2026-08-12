@@ -47,6 +47,7 @@ pub struct OptionSpec {
 pub struct EntrySpec {
     pub key: String,
     pub value_type: String,
+    pub format: Option<String>,
     pub default: Option<toml::Value>,
     pub min: Option<i64>,
     pub max: Option<i64>,
@@ -481,6 +482,7 @@ fn enable_entry(default_on: bool) -> EntrySpec {
     EntrySpec {
         key: "enable".to_owned(),
         value_type: "bool".to_owned(),
+        format: None,
         default: Some(toml::Value::Boolean(default_on)),
         min: None,
         max: None,
@@ -598,6 +600,22 @@ fn validate_entry(section: &SectionSpec, entry: &EntrySpec) -> Result<(), Schema
             section.id, entry.key, entry.value_type
         )));
     }
+    match entry.format.as_deref() {
+        None => {}
+        Some("virtual_key") if entry.value_type == "int" => {}
+        Some("virtual_key") => {
+            return Err(SchemaError::Invalid(format!(
+                "虚拟键码配置必须是整数 {}.{}",
+                section.id, entry.key
+            )));
+        }
+        Some(format) => {
+            return Err(SchemaError::Invalid(format!(
+                "不支持的配置格式 {}.{}: {format}",
+                section.id, entry.key
+            )));
+        }
+    }
     if let (Some(min), Some(max)) = (entry.min, entry.max) {
         if min > max {
             return Err(SchemaError::Invalid(format!(
@@ -713,6 +731,16 @@ fn parse_entries(table: &toml::Table, section: &str) -> Result<Vec<EntrySpec>, S
             Ok(EntrySpec {
                 key: key.to_owned(),
                 value_type: value_type.to_owned(),
+                format: entry
+                    .get("format")
+                    .map(|value| {
+                        value.as_str().map(str::to_owned).ok_or_else(|| {
+                            SchemaError::Invalid(format!(
+                                "配置项 {section}.{key}.format 必须是字符串"
+                            ))
+                        })
+                    })
+                    .transpose()?,
                 default: entry.get("default").cloned(),
                 min: entry.get("min").and_then(toml::Value::as_integer),
                 max: entry.get("max").and_then(toml::Value::as_integer),
@@ -881,6 +909,8 @@ mod tests {
                             max: 9,
                             comment: "Version text";
                             quiet: bool = false;
+                            hotkey: VirtualKey = VirtualKey::new(0x70),
+                            comment: "Hotkey";
                         }
                     }
                 }
@@ -909,6 +939,14 @@ mod tests {
             .expect("commentless entry must exist");
         assert!(!quiet.emit_comment);
         assert!(schema.default_config_toml().contains("#Quiet = false"));
+        let hotkey = schema
+            .entry("Fixture", "Hotkey")
+            .expect("virtual key entry must exist");
+        assert_eq!(hotkey.value_type, "int");
+        assert_eq!(hotkey.format.as_deref(), Some("virtual_key"));
+        assert_eq!(hotkey.min, Some(1));
+        assert_eq!(hotkey.max, Some(255));
+        assert!(schema.default_config_toml().contains("#Hotkey = 0x70"));
     }
 
     #[test]

@@ -17,7 +17,7 @@ pub(super) fn schema_type(value_type: &Type) -> Result<String, SchemaError> {
         "bool" => Ok("bool".to_owned()),
         "String" => Ok("string".to_owned()),
         "Vec" => Ok("string_array".to_owned()),
-        "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" => Ok("int".to_owned()),
+        "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "VirtualKey" => Ok("int".to_owned()),
         _ => Err(SchemaError::Invalid(format!(
             "不支持的配置字段类型: {name}"
         ))),
@@ -54,7 +54,7 @@ pub(super) fn expression_value(expression: &Expr) -> Result<toml::Value, SchemaE
         Expr::Cast(value) => expression_value(&value.expr),
         Expr::Call(value) => match (expression_name(&value.func).as_str(), value.args.first()) {
             ("new", None) => Ok(toml::Value::String(String::new())),
-            ("from", Some(argument)) => expression_value(argument),
+            ("from" | "new", Some(argument)) => expression_value(argument),
             (name, _) => Err(SchemaError::Invalid(format!("不支持的默认值调用: {name}"))),
         },
         Expr::MethodCall(value) if value.method == "to_owned" => expression_value(&value.receiver),
@@ -84,6 +84,17 @@ pub(super) fn expression_value(expression: &Expr) -> Result<toml::Value, SchemaE
         Expr::Paren(value) => expression_value(&value.expr),
         _ => Err(SchemaError::Invalid("不支持的配置默认值表达式".to_owned())),
     }
+}
+
+pub(super) fn schema_format(value_type: &Type) -> Option<&'static str> {
+    let Type::Path(path) = value_type else {
+        return None;
+    };
+    path.path
+        .segments
+        .last()
+        .is_some_and(|part| part.ident == "VirtualKey")
+        .then_some("virtual_key")
 }
 
 fn expression_name(expression: &Expr) -> String {
