@@ -41,7 +41,7 @@ crate::config_section! {
             comment: "红外模拟虚拟键码";
             pub air1: i32 = b'4' as i32,
             advanced: true,
-            comment: "第 1 组红外传感器按键";
+            comment: "红外传感器按键";
             pub air2: i32 = b'5' as i32,
             advanced: true;
             pub air3: i32 = b'6' as i32,
@@ -54,7 +54,7 @@ crate::config_section! {
             advanced: true;
             pub cell1: i32 = b'L' as i32,
             advanced: true,
-            comment: "触摸条第 1 单元按键";
+            comment: "触摸板按键";
             pub cell2: i32 = b'L' as i32, advanced: true;
             pub cell3: i32 = b'L' as i32, advanced: true;
             pub cell4: i32 = b'L' as i32, advanced: true;

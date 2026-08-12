@@ -260,10 +260,10 @@ fn canonical_io_config_has_no_legacy_sections_or_repeated_comments() {
     assert!(!output.contains("[Slider]"));
     assert!(!output.contains("[AimeIo]"));
     assert!(output.contains("#Iodll = \"\""));
-    assert!(!output.contains("## 第 1 组红外传感器按键"));
+    assert!(!output.contains("## 红外传感器按键"));
     assert!(!output.contains("Air1"));
     assert!(!output.contains("## 第 2 组红外传感器按键"));
-    assert!(!output.contains("## 触摸条第 1 单元按键"));
+    assert!(!output.contains("## 触摸板按键"));
     assert!(!output.contains("Cell1"));
     assert!(!output.contains("## 触摸条第 2 单元按键"));
 }

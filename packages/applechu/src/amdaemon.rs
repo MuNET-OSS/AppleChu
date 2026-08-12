@@ -111,7 +111,7 @@ crate::config_section! {
         comment: "AM Daemon 自动启动及命令行管理",
         fields: {
             pub auto_start: bool = true,
-            comment: "由游戏侧启动 AM Daemon";
+            comment: "游戏自动拉起 AM Daemon";
             pub executable: String = String::from("amdaemon.exe"),
             advanced: true,
             comment: "AM Daemon 可执行文件名";
@@ -119,14 +119,14 @@ crate::config_section! {
             comment: "手动启动 AM Daemon 时隐藏控制台窗口";
             pub terminate_on_exit: bool = true,
             advanced: true,
-            comment: "AppleChu 退出时终止 AM Daemon";
+            comment: "ChusanApp 退出时终止 AM Daemon";
             pub append_config_args: bool = true,
             advanced: true,
             comment: "无完整 -c 参数时补充 JSON 配置";
             pub config_files: Vec<String> = vec![CONFIG_FILE_PATTERN.to_owned()],
             advanced: true,
             schema_default: ["config_*.json"],
-            comment: "AM Daemon JSON 配置文件列表";
+            comment: "JSON 配置文件列表";
         }
     }
 }
@@ -202,37 +202,28 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
-        comment: "AM 平台 DNS 映射",
+        comment: "服务器地址",
         fields: {
-            pub default: String = String::new(),
-            comment: "未单独指定时使用的服务器地址";
+            pub default: String = String::new();
             pub router: String = String::new(),
-            advanced: true,
-            comment: "店内路由服务器";
+            advanced: true;
             pub startup: String = String::new(),
-            advanced: true,
-            comment: "启动认证服务器";
+            advanced: true;
             pub billing: String = String::new(),
-            advanced: true,
-            comment: "计费服务器";
+            advanced: true;
             pub aimedb: String = String::new(),
-            advanced: true,
-            comment: "AimeDB 服务器";
+            advanced: true;
             pub title: String = String::new(),
-            advanced: true,
-            comment: "标题/其他服务器";
+            advanced: true;
             pub replace_host: bool = true,
             advanced: true,
             comment: "替换 HTTP Host";
             pub startup_port: u16 = 0,
-            advanced: true,
-            comment: "启动认证服务器端口";
+            advanced: true;
             pub billing_port: u16 = 0,
-            advanced: true,
-            comment: "计费服务器端口";
+            advanced: true;
             pub aimedb_port: u16 = 0,
-            advanced: true,
-            comment: "AimeDB 服务器端口";
+            advanced: true;
         }
     }
 }
@@ -244,34 +235,27 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
-        comment: "NuSec/keychip 模拟",
+        comment: "KeyChip 模拟",
         fields: {
             pub keychip_id: String = String::from("A69E-01A88888888"),
             key: "id",
             comment: "Keychip ID";
-            pub game_id: String = String::from("SDHD"),
-            comment: "游戏 ID，默认 SDHD";
+            pub game_id: String = String::from("SDHD");
             pub platform_id: String = String::new(),
             advanced: true,
-            comment: "平台 ID；留空时使用当前平台默认值";
+            comment: "留空时使用当前平台默认值";
             pub region: u32 = 1,
-            advanced: true,
-            comment: "区域编号";
+            advanced: true;
             pub billing_type: u32 = 1,
-            advanced: true,
-            comment: "计费类型";
+            advanced: true;
             pub system_flag: u32 = 0x64,
-            advanced: true,
-            comment: "系统标志";
+            advanced: true;
             pub subnet: String = String::from("192.168.139.0"),
-            advanced: true,
-            comment: "店内网络子网";
+            advanced: true;
             pub billing_ca: String = String::from("DEVICE\\ca.crt"),
-            advanced: true,
-            comment: "计费 CA 证书";
+            advanced: true;
             pub billing_pub: String = String::from("DEVICE\\billing.pub"),
-            advanced: true,
-            comment: "计费公钥";
+            advanced: true;
         }
     }
 }
@@ -283,20 +267,16 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
-        comment: "店内网络适配器模拟",
+        comment: "网络环境模拟",
         fields: {
             pub addr_suffix: u32 = 11,
-            advanced: true,
-            comment: "机台 IP 的末尾地址";
+            advanced: true;
             pub router_suffix: u32 = 254,
-            advanced: true,
-            comment: "店内路由 IP 的末尾地址";
+            advanced: true;
             pub mac_addr: String = String::from("01:02:03:04:05:06"),
-            advanced: true,
-            comment: "虚拟网卡 MAC 地址";
+            advanced: true;
             pub broadcast: String = String::from("255.255.255.255"),
-            advanced: true,
-            comment: "UDP 广播目标地址";
+            advanced: true;
         }
     }
 }

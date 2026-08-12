@@ -10,9 +10,7 @@ crate::config_section! {
         always_enabled: false,
         hidden: false,
         group: "audio",
-        description: "系统采样率必须为 48000Hz，可能增加延迟",
-        description_en: "System sample rate must be 48000Hz, may increase latency",
-        comment: "强制共享音频，采样率必须为 48000Hz",
+        comment: "强制共享音频，系统采样率必须为 48000Hz，可能增加延迟",
         fields: {}
     }
 }

@@ -36,14 +36,11 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
-        comment: "虚拟文件系统",
+        comment: "文件路径映射",
         fields: {
-            pub amfs: String = String::from("amfs"),
-            comment: "AMFS 目录";
-            pub appdata: String = String::from("appdata"),
-            comment: "APPDATA 目录";
-            pub option: String = String::from("../option"),
-            comment: "选项资源目录";
+            pub amfs: String = String::from("amfs");
+            pub appdata: String = String::from("appdata");
+            pub option: String = String::from("../option");
             pub allow_amfs_downloads: bool = false,
             advanced: true,
             comment: "允许写入 AMFS 下载内容";

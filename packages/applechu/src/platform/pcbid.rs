@@ -20,10 +20,9 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
-        comment: "机台序列号模拟",
+        comment: "PCBID 模拟",
         fields: {
-            pub serial_no: String = String::from("ACAE01A99999999"),
-            comment: "机台序列号";
+            pub serial_no: String = String::from("ACAE01A99999999");
         }
     }
 }

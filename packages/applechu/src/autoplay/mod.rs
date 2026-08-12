@@ -25,7 +25,7 @@ crate::config_section! {
         always_enabled: false,
         hidden: false,
         group: "gameplay",
-        description: "只屏蔽成绩数据，角色/设置/地图进度正常保存",
+        description: "如果在游玩中启用了 Auto Play，结算时将屏蔽成绩数据",
         description_en: "Only blocks score data, settings/progress saved normally",
         comment: "自动游玩",
         fields: {

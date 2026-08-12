@@ -61,33 +61,31 @@ crate::config_section! {
         hidden: false,
         group: "gameplay",
         community: true,
-        description: "在内存中解锁内容，不修改资源文件",
-        description_en: "Unlocks content in memory without modifying resource files",
-        comment: "解锁游戏内容（内存改写 XML，不修改磁盘文件）",
+        comment: "解锁游戏内容",
         fields: {
             pub unlock_chara: bool = true,
-            comment: "解锁角色（Chara.xml）";
+            comment: "解锁角色";
 
             pub unlock_music: bool = true,
-            comment: "解锁乐曲（Music.xml）";
+            comment: "解锁乐曲";
 
             pub unlock_nameplate: bool = true,
             key: "unlockNamePlate",
-            comment: "解锁铭牌（NamePlate.xml）";
+            comment: "解锁姓名框";
 
             pub unlock_systemvoice: bool = true,
             key: "unlockSystemVoice",
-            comment: "解锁系统语音（SystemVoice.xml）";
+            comment: "解锁系统语音";
 
             pub unlock_event: bool = true,
-            comment: "解锁活动（Event.xml）";
+            comment: "解锁 Event";
 
             pub unlock_mapicon: bool = true,
             key: "unlockMapIcon",
-            comment: "解锁跑图小人（MapIcon.xml）";
+            comment: "解锁跑图小人";
 
             pub unlock_trophy: bool = true,
-            comment: "解锁称号（Trophy.xml）";
+            comment: "解锁称号";
         }
     }
 }

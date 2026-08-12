@@ -62,21 +62,20 @@ crate::config_section! {
             pub high_baudrate: bool = true,
             key: "highBaud",
             advanced: true,
-            comment: "使用 115200 高波特率（Chunithm 默认需要）";
+            comment: "使用 115200 波特率";
             pub aime_path: String = String::from("DEVICE\\aime.txt"),
             comment: "Aime 卡号文件";
             pub felica_path: String = String::from("DEVICE\\felica.txt"),
             advanced: true,
             comment: "FeliCa 卡号文件";
             pub authdata_path: String = String::from("DEVICE\\authdata.bin"),
-            advanced: true,
-            comment: "认证数据文件";
+            advanced: true;
             pub aime_gen: bool = true,
             advanced: true,
-            comment: "缺少 Aime 卡号时自动生成";
+            comment: "缺少 aime.txt 卡号时自动生成";
             pub felica_gen: bool = false,
             advanced: true,
-            comment: "缺少 FeliCa 卡号时自动生成";
+            comment: "缺少 felica.txt 卡号时自动生成";
             pub scan: i32 = 0x0D,
             advanced: true,
             comment: "读卡按键的虚拟键码";
@@ -88,7 +87,7 @@ crate::config_section! {
             advanced: true,
             comment: "读卡代理标志";
             pub iodll: String = String::new(),
-            comment: "外部 Aime IO DLL 路径";
+            comment: "外部 AimeIO DLL 路径";
         }
     }
 }

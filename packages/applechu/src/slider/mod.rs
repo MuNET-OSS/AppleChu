@@ -14,7 +14,7 @@ crate::config_section! {
         always_enabled: false,
         hidden: false,
         group: "io",
-        comment: "触摸条设备模拟",
+        comment: "触摸板设备模拟",
         fields: {}
     }
 }
