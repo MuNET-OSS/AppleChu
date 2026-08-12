@@ -14,6 +14,7 @@ extern crate winhttp as applechu;
 // 公开转发，不包含 AM Daemon 的专用实现
 pub use applechu::{config, iohook, module_registry, platform, util};
 
+mod amdaemon_patch;
 mod amvideo_loader;
 mod command_line;
 mod console;
@@ -50,6 +51,7 @@ unsafe extern "system" fn dll_main(module: HMODULE, reason: u32, _reserved: *mut
     if reason == DLL_PROCESS_ATTACH {
         MODULE.store(module as usize, Ordering::Release);
         DisableThreadLibraryCalls(module);
+        amdaemon_patch::apply_pre_tls();
         startup::install();
     }
 

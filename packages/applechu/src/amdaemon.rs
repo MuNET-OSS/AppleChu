@@ -135,6 +135,30 @@ crate::config_section! {
 }
 
 crate::config_section! {
+    pub struct AllowLocalhostConfig => ALLOW_LOCALHOST_CONFIG_SECTION {
+        section: "AllowLocalhost",
+        order: 6,
+        default_on: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "允许 127.0.0.1/localhost 作为网络服务器",
+        fields: {}
+    }
+}
+
+crate::config_section! {
+    pub struct CreditFreezeConfig => CREDIT_FREEZE_CONFIG_SECTION {
+        section: "CreditFreeze",
+        order: 7,
+        default_on: false,
+        always_enabled: false,
+        hidden: false,
+        comment: "阻止 credit 被消耗",
+        fields: {}
+    }
+}
+
+crate::config_section! {
     pub struct DnsConfig => DNS_CONFIG_SECTION {
         section: "Dns",
         order: 980,

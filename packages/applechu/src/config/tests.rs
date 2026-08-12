@@ -1,5 +1,5 @@
 use super::{Config, DiagnosticLevel};
-use crate::amdaemon::{AmdaemonConfig, EpayConfig};
+use crate::amdaemon::{AllowLocalhostConfig, AmdaemonConfig, CreditFreezeConfig, EpayConfig};
 use crate::system_config::SystemConfig;
 
 mod amdaemon;
@@ -79,6 +79,37 @@ fn amdaemon_is_a_container_with_independent_controls() {
     assert!(output.contains("[Amdaemon]\n"));
     assert!(output.contains("AutoStart = false"));
     assert!(output.contains("AppendConfigArgs = false"));
+}
+
+#[test]
+fn amdaemon_patch_features_have_independent_sections() {
+    let source = concat!(
+        "config_version = 1\n",
+        "[AllowLocalhost]\n",
+        "enable = true\n",
+        "[CreditFreeze]\n",
+        "enable = false\n",
+    );
+    let config = Config::parse(".", source).expect("测试配置必须有效");
+
+    assert!(
+        config
+            .section::<AllowLocalhostConfig>()
+            .expect("localhost section 必须存在")
+            .enabled
+    );
+    assert!(
+        !config
+            .section::<CreditFreezeConfig>()
+            .expect("credit section 必须存在")
+            .enabled
+    );
+    assert!(
+        config
+            .section::<AmdaemonConfig>()
+            .expect("AM Daemon section 必须存在")
+            .enabled
+    );
 }
 
 #[test]

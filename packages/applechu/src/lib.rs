@@ -25,7 +25,7 @@ mod led;
 pub mod module_registry;
 #[cfg(target_arch = "x86")]
 mod national_match;
-mod patch_engine;
+pub mod patch_engine;
 mod patches;
 pub mod platform;
 #[cfg(target_arch = "x86")]

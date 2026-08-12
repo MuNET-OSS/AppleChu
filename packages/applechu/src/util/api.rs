@@ -104,32 +104,122 @@ impl Api {
     }
 
     pub fn aob_scan(&self, start: usize, size: u32, pattern: &[u8], mask: &str) -> usize {
-        let Ok(mask) = CString::new(mask) else {
+        let mask_text = mask;
+        let Ok(mask) = CString::new(mask_text) else {
             return 0;
         };
-        self.raw()
-            .and_then(|api| api.aob_scan)
-            .map_or(0, |func| unsafe {
+        if let Some(api) = self.raw() {
+            return api.aob_scan.map_or(0, |func| unsafe {
                 func(start, size, pattern.as_ptr(), mask.as_ptr())
-            })
+            });
+        }
+        self.standalone_aob_scan(start, size, pattern, mask_text)
     }
 
     pub fn mem_write(&self, addr: usize, data: &[u8]) -> bool {
         let Ok(size) = u32::try_from(data.len()) else {
             return false;
         };
-        self.raw()
-            .and_then(|api| api.mem_write)
-            .is_some_and(|func| unsafe { func(addr, data.as_ptr().cast(), size) == 0 })
+        if let Some(api) = self.raw() {
+            return api
+                .mem_write
+                .is_some_and(|func| unsafe { func(addr, data.as_ptr().cast(), size) == 0 });
+        }
+        self.standalone_mem_write(addr, data)
     }
 
     pub fn mem_read(&self, addr: usize, buf: &mut [u8]) -> bool {
         let Ok(size) = u32::try_from(buf.len()) else {
             return false;
         };
-        self.raw()
-            .and_then(|api| api.mem_read)
-            .is_some_and(|func| unsafe { func(addr, buf.as_mut_ptr().cast(), size) == 0 })
+        if let Some(api) = self.raw() {
+            return api
+                .mem_read
+                .is_some_and(|func| unsafe { func(addr, buf.as_mut_ptr().cast(), size) == 0 });
+        }
+        self.standalone_mem_read(addr, buf)
+    }
+
+    #[cfg(windows)]
+    fn standalone_range(&self, addr: usize, len: usize) -> bool {
+        let base = self.info.game_base;
+        let end = base.saturating_add(self.info.game_size as usize);
+        addr >= base && len <= end.saturating_sub(addr)
+    }
+
+    #[cfg(not(windows))]
+    fn standalone_range(&self, _addr: usize, _len: usize) -> bool {
+        false
+    }
+
+    pub(crate) fn standalone_aob_scan(
+        &self,
+        start: usize,
+        size: u32,
+        pattern: &[u8],
+        mask: &str,
+    ) -> usize {
+        if self.raw.is_some() || pattern.is_empty() || pattern.len() != mask.len() {
+            return 0;
+        }
+        let scan_size = usize::try_from(size).unwrap_or(0);
+        if !self.standalone_range(start, scan_size) || pattern.len() > scan_size {
+            return 0;
+        }
+        for offset in 0..=scan_size - pattern.len() {
+            let candidate =
+                unsafe { std::slice::from_raw_parts((start + offset) as *const u8, pattern.len()) };
+            if candidate
+                .iter()
+                .zip(pattern.iter().zip(mask.as_bytes()))
+                .all(|(actual, (expected, wildcard))| *wildcard != b'x' || actual == expected)
+            {
+                return start + offset;
+            }
+        }
+        0
+    }
+
+    pub(crate) fn standalone_mem_read(&self, addr: usize, buf: &mut [u8]) -> bool {
+        if self.raw.is_some() || !self.standalone_range(addr, buf.len()) {
+            return false;
+        }
+        unsafe { std::ptr::copy_nonoverlapping(addr as *const u8, buf.as_mut_ptr(), buf.len()) };
+        true
+    }
+
+    pub(crate) fn standalone_mem_write(&self, addr: usize, data: &[u8]) -> bool {
+        if self.raw.is_some() || !self.standalone_range(addr, data.len()) {
+            return false;
+        }
+        #[cfg(windows)]
+        unsafe {
+            use windows_sys::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
+            let mut old = 0;
+            if VirtualProtect(
+                addr as *const _,
+                data.len(),
+                PAGE_EXECUTE_READWRITE,
+                &mut old,
+            ) == 0
+            {
+                return false;
+            }
+            std::ptr::copy_nonoverlapping(data.as_ptr(), addr as *mut u8, data.len());
+            let mut ignored = 0;
+            let _ = VirtualProtect(addr as *const _, data.len(), old, &mut ignored);
+            windows_sys::Win32::System::Diagnostics::Debug::FlushInstructionCache(
+                windows_sys::Win32::System::Threading::GetCurrentProcess(),
+                addr as *const _,
+                data.len(),
+            );
+            true
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (addr, data);
+            false
+        }
     }
 
     #[allow(dead_code)]
