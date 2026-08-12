@@ -4,7 +4,7 @@ mod generator;
 use sha2::{Digest, Sha256};
 use std::fmt;
 
-pub use example::{DEFAULT_CONFIG_HEADER, EXAMPLE_CONFIG_FILE};
+pub use example::{DEFAULT_CONFIG_HEADER, EXAMPLE_CONFIG_FILE, FULL_CONFIG_FILE};
 pub use generator::generate_from_rust_dir;
 
 const MAGIC: &[u8; 8] = b"ACMANI\0\0";
@@ -485,7 +485,7 @@ fn enable_entry(default_on: bool) -> EntrySpec {
         min: None,
         max: None,
         emit_default: true,
-        emit_comment: true,
+        emit_comment: false,
         hidden: false,
         advanced: false,
         options: Vec::new(),
@@ -551,6 +551,7 @@ fn inject_enable_entries(
             enable.default.clone().expect("enable 必须包含代码默认值"),
         );
         entry.insert("emit_default".to_owned(), toml::Value::Boolean(true));
+        entry.insert("emit_comment".to_owned(), toml::Value::Boolean(false));
         entry.insert("label".to_owned(), toml::Value::Table(label));
         entries.insert(0, toml::Value::Table(entry));
     }
@@ -971,9 +972,17 @@ mod tests {
         assert!(config.starts_with("## 这是 AppleChu 的 TOML 配置文件"));
         assert!(config.contains("ConfigVersion = 1"));
         assert!(amdaemon.contains("Enable = true"));
-        assert!(amdaemon.contains("AutoStart = false"));
-        assert!(amdaemon.contains("AppendConfigArgs = false"));
-        assert!(amdaemon.contains("#ConfigFiles = [\"config_*.json\"]"));
+        assert!(amdaemon.contains("#AutoStart = true"));
+        assert!(!amdaemon.contains("AppendConfigArgs"));
+        assert!(!amdaemon.contains("ConfigFiles"));
+        assert!(!config.lines().any(|line| line == "## 启用"));
+        assert_eq!(
+            schema
+                .entry("Dns", "ReplaceHost")
+                .and_then(|entry| entry.default.as_ref())
+                .and_then(toml::Value::as_bool),
+            Some(true)
+        );
         assert!(document["DisableEncryption"].as_table().is_some());
         assert!(document["DisableTLS"].as_table().is_some());
         assert!(config.contains("#GameId = \"SDHD\""));

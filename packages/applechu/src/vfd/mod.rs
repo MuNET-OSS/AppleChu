@@ -18,8 +18,10 @@ crate::config_section! {
         fields: {
             pub port: u32 = 0,
             key: "portNo",
+            advanced: true,
             comment: "VFD 串口号；0 表示使用 SP 默认串口";
             pub utf_conversion: bool = false,
+            advanced: true,
             comment: "启用 VFD 文本编码转换日志";
         }
     }

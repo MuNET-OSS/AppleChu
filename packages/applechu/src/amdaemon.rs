@@ -108,21 +108,23 @@ crate::config_section! {
         default_on: true,
         always_enabled: false,
         hidden: false,
-        comment: "AM Daemon x64 winmm 劫持配置",
+        comment: "AM Daemon 自动启动及命令行管理",
         fields: {
-            pub auto_start: bool = false,
-            emit_default: true,
+            pub auto_start: bool = true,
             comment: "由游戏侧启动 AM Daemon";
             pub executable: String = String::from("amdaemon.exe"),
+            advanced: true,
             comment: "AM Daemon 可执行文件名";
             pub hide_window: bool = false,
             comment: "手动启动 AM Daemon 时隐藏控制台窗口";
             pub terminate_on_exit: bool = true,
+            advanced: true,
             comment: "AppleChu 退出时终止 AM Daemon";
-            pub append_config_args: bool = false,
-            emit_default: true,
+            pub append_config_args: bool = true,
+            advanced: true,
             comment: "无完整 -c 参数时补充 JSON 配置";
             pub config_files: Vec<String> = vec![CONFIG_FILE_PATTERN.to_owned()],
+            advanced: true,
             schema_default: ["config_*.json"],
             comment: "AM Daemon JSON 配置文件列表";
         }
@@ -205,22 +207,31 @@ crate::config_section! {
             pub default: String = String::new(),
             comment: "未单独指定时使用的服务器地址";
             pub router: String = String::new(),
+            advanced: true,
             comment: "店内路由服务器";
             pub startup: String = String::new(),
+            advanced: true,
             comment: "启动认证服务器";
             pub billing: String = String::new(),
+            advanced: true,
             comment: "计费服务器";
             pub aimedb: String = String::new(),
+            advanced: true,
             comment: "AimeDB 服务器";
             pub title: String = String::new(),
+            advanced: true,
             comment: "标题/其他服务器";
-            pub replace_host: bool = false,
+            pub replace_host: bool = true,
+            advanced: true,
             comment: "替换 HTTP Host";
             pub startup_port: u16 = 0,
+            advanced: true,
             comment: "启动认证服务器端口";
             pub billing_port: u16 = 0,
+            advanced: true,
             comment: "计费服务器端口";
             pub aimedb_port: u16 = 0,
+            advanced: true,
             comment: "AimeDB 服务器端口";
         }
     }
@@ -241,18 +252,25 @@ crate::config_section! {
             pub game_id: String = String::from("SDHD"),
             comment: "游戏 ID，默认 SDHD";
             pub platform_id: String = String::new(),
+            advanced: true,
             comment: "平台 ID；留空时使用当前平台默认值";
             pub region: u32 = 1,
+            advanced: true,
             comment: "区域编号";
             pub billing_type: u32 = 1,
+            advanced: true,
             comment: "计费类型";
             pub system_flag: u32 = 0x64,
+            advanced: true,
             comment: "系统标志";
             pub subnet: String = String::from("192.168.139.0"),
+            advanced: true,
             comment: "店内网络子网";
             pub billing_ca: String = String::from("DEVICE\\ca.crt"),
+            advanced: true,
             comment: "计费 CA 证书";
             pub billing_pub: String = String::from("DEVICE\\billing.pub"),
+            advanced: true,
             comment: "计费公钥";
         }
     }
@@ -268,12 +286,16 @@ crate::config_section! {
         comment: "店内网络适配器模拟",
         fields: {
             pub addr_suffix: u32 = 11,
+            advanced: true,
             comment: "机台 IP 的末尾地址";
             pub router_suffix: u32 = 254,
+            advanced: true,
             comment: "店内路由 IP 的末尾地址";
             pub mac_addr: String = String::from("01:02:03:04:05:06"),
+            advanced: true,
             comment: "虚拟网卡 MAC 地址";
             pub broadcast: String = String::from("255.255.255.255"),
+            advanced: true,
             comment: "UDP 广播目标地址";
         }
     }

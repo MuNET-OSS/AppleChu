@@ -54,28 +54,38 @@ crate::config_section! {
         fields: {
             // 两种机台默认使用 COM4，同时保留分模式覆盖项
             pub cvt_port: u32 = 4,
+            advanced: true,
             comment: "CVT 模式串口号";
             pub sp_port: u32 = 4,
+            advanced: true,
             comment: "SP 模式串口号";
             pub high_baudrate: bool = true,
             key: "highBaud",
+            advanced: true,
             comment: "使用 115200 高波特率（Chunithm 默认需要）";
             pub aime_path: String = String::from("DEVICE\\aime.txt"),
             comment: "Aime 卡号文件";
             pub felica_path: String = String::from("DEVICE\\felica.txt"),
+            advanced: true,
             comment: "FeliCa 卡号文件";
             pub authdata_path: String = String::from("DEVICE\\authdata.bin"),
+            advanced: true,
             comment: "认证数据文件";
             pub aime_gen: bool = true,
+            advanced: true,
             comment: "缺少 Aime 卡号时自动生成";
             pub felica_gen: bool = false,
+            advanced: true,
             comment: "缺少 FeliCa 卡号时自动生成";
             pub scan: i32 = 0x0D,
+            advanced: true,
             comment: "读卡按键的虚拟键码";
             // 0 表示按机台模式选择：CVT=Gen2，SP=Gen3
             pub gen: u8 = 0,
+            advanced: true,
             comment: "读卡器代数";
             pub proxy_flag: u8 = 2,
+            advanced: true,
             comment: "读卡代理标志";
             pub iodll: String = String::new(),
             comment: "外部 Aime IO DLL 路径";

@@ -28,6 +28,7 @@ crate::config_section! {
         comment: "IO4 USB HID 模拟",
         fields: {
             pub foreground: bool = true,
+            advanced: true,
             comment: "仅在游戏窗口位于前台时读取输入";
             pub test: i32 = 0x70,
             comment: "测试按钮虚拟键码";
@@ -36,52 +37,60 @@ crate::config_section! {
             pub coin: i32 = 0x72,
             comment: "投币按钮虚拟键码";
             pub ir: i32 = 0x20,
+            advanced: true,
             comment: "红外模拟虚拟键码";
             pub air1: i32 = b'4' as i32,
+            advanced: true,
             comment: "第 1 组红外传感器按键";
             pub air2: i32 = b'5' as i32,
+            advanced: true,
             comment: "";
             pub air3: i32 = b'6' as i32,
+            advanced: true,
             comment: "";
             pub air4: i32 = b'7' as i32,
+            advanced: true,
             comment: "";
             pub air5: i32 = b'8' as i32,
+            advanced: true,
             comment: "";
             pub air6: i32 = b'9' as i32,
+            advanced: true,
             comment: "";
             pub cell1: i32 = b'L' as i32,
+            advanced: true,
             comment: "触摸条第 1 单元按键";
-            pub cell2: i32 = b'L' as i32, comment: "";
-            pub cell3: i32 = b'L' as i32, comment: "";
-            pub cell4: i32 = b'L' as i32, comment: "";
-            pub cell5: i32 = b'K' as i32, comment: "";
-            pub cell6: i32 = b'K' as i32, comment: "";
-            pub cell7: i32 = b'K' as i32, comment: "";
-            pub cell8: i32 = b'K' as i32, comment: "";
-            pub cell9: i32 = b'J' as i32, comment: "";
-            pub cell10: i32 = b'J' as i32, comment: "";
-            pub cell11: i32 = b'J' as i32, comment: "";
-            pub cell12: i32 = b'J' as i32, comment: "";
-            pub cell13: i32 = b'H' as i32, comment: "";
-            pub cell14: i32 = b'H' as i32, comment: "";
-            pub cell15: i32 = b'H' as i32, comment: "";
-            pub cell16: i32 = b'H' as i32, comment: "";
-            pub cell17: i32 = b'G' as i32, comment: "";
-            pub cell18: i32 = b'G' as i32, comment: "";
-            pub cell19: i32 = b'G' as i32, comment: "";
-            pub cell20: i32 = b'G' as i32, comment: "";
-            pub cell21: i32 = b'F' as i32, comment: "";
-            pub cell22: i32 = b'F' as i32, comment: "";
-            pub cell23: i32 = b'F' as i32, comment: "";
-            pub cell24: i32 = b'F' as i32, comment: "";
-            pub cell25: i32 = b'D' as i32, comment: "";
-            pub cell26: i32 = b'D' as i32, comment: "";
-            pub cell27: i32 = b'D' as i32, comment: "";
-            pub cell28: i32 = b'D' as i32, comment: "";
-            pub cell29: i32 = b'S' as i32, comment: "";
-            pub cell30: i32 = b'S' as i32, comment: "";
-            pub cell31: i32 = b'S' as i32, comment: "";
-            pub cell32: i32 = b'S' as i32, comment: "";
+            pub cell2: i32 = b'L' as i32, advanced: true, comment: "";
+            pub cell3: i32 = b'L' as i32, advanced: true, comment: "";
+            pub cell4: i32 = b'L' as i32, advanced: true, comment: "";
+            pub cell5: i32 = b'K' as i32, advanced: true, comment: "";
+            pub cell6: i32 = b'K' as i32, advanced: true, comment: "";
+            pub cell7: i32 = b'K' as i32, advanced: true, comment: "";
+            pub cell8: i32 = b'K' as i32, advanced: true, comment: "";
+            pub cell9: i32 = b'J' as i32, advanced: true, comment: "";
+            pub cell10: i32 = b'J' as i32, advanced: true, comment: "";
+            pub cell11: i32 = b'J' as i32, advanced: true, comment: "";
+            pub cell12: i32 = b'J' as i32, advanced: true, comment: "";
+            pub cell13: i32 = b'H' as i32, advanced: true, comment: "";
+            pub cell14: i32 = b'H' as i32, advanced: true, comment: "";
+            pub cell15: i32 = b'H' as i32, advanced: true, comment: "";
+            pub cell16: i32 = b'H' as i32, advanced: true, comment: "";
+            pub cell17: i32 = b'G' as i32, advanced: true, comment: "";
+            pub cell18: i32 = b'G' as i32, advanced: true, comment: "";
+            pub cell19: i32 = b'G' as i32, advanced: true, comment: "";
+            pub cell20: i32 = b'G' as i32, advanced: true, comment: "";
+            pub cell21: i32 = b'F' as i32, advanced: true, comment: "";
+            pub cell22: i32 = b'F' as i32, advanced: true, comment: "";
+            pub cell23: i32 = b'F' as i32, advanced: true, comment: "";
+            pub cell24: i32 = b'F' as i32, advanced: true, comment: "";
+            pub cell25: i32 = b'D' as i32, advanced: true, comment: "";
+            pub cell26: i32 = b'D' as i32, advanced: true, comment: "";
+            pub cell27: i32 = b'D' as i32, advanced: true, comment: "";
+            pub cell28: i32 = b'D' as i32, advanced: true, comment: "";
+            pub cell29: i32 = b'S' as i32, advanced: true, comment: "";
+            pub cell30: i32 = b'S' as i32, advanced: true, comment: "";
+            pub cell31: i32 = b'S' as i32, advanced: true, comment: "";
+            pub cell32: i32 = b'S' as i32, advanced: true, comment: "";
         }
     }
 }

@@ -97,12 +97,12 @@ fn amdaemon_is_a_container_with_independent_controls() {
     let output = config.to_toml();
 
     assert!(section.enabled);
-    assert!(!section.auto_start);
-    assert!(!section.append_config_args);
+    assert!(section.auto_start);
+    assert!(section.append_config_args);
     assert_eq!(section.config_files, ["config_*.json"]);
     assert!(output.contains("[Amdaemon]\n"));
-    assert!(output.contains("AutoStart = false"));
-    assert!(output.contains("AppendConfigArgs = false"));
+    assert!(output.contains("#AutoStart = true"));
+    assert!(!output.contains("AppendConfigArgs"));
 }
 
 #[test]
@@ -258,9 +258,11 @@ fn canonical_io_config_has_no_legacy_sections_or_repeated_comments() {
     assert!(!output.contains("[Slider]"));
     assert!(!output.contains("[AimeIo]"));
     assert!(output.contains("#Iodll = \"\""));
-    assert!(output.contains("## 第 1 组红外传感器按键\n#Air1"));
+    assert!(!output.contains("## 第 1 组红外传感器按键"));
+    assert!(!output.contains("Air1"));
     assert!(!output.contains("## 第 2 组红外传感器按键"));
-    assert!(output.contains("## 触摸条第 1 单元按键\n#Cell1"));
+    assert!(!output.contains("## 触摸条第 1 单元按键"));
+    assert!(!output.contains("Cell1"));
     assert!(!output.contains("## 触摸条第 2 单元按键"));
 }
 

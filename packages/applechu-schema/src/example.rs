@@ -3,7 +3,8 @@ use std::path::Path;
 
 use crate::{canonical_key, LocalizedText, Schema};
 
-pub const EXAMPLE_CONFIG_FILE: &str = "AppleChu.example.toml";
+pub const EXAMPLE_CONFIG_FILE: &str = "example.toml";
+pub const FULL_CONFIG_FILE: &str = "full.toml";
 
 pub const DEFAULT_CONFIG_HEADER: &str = r#"## 这是 AppleChu 的 TOML 配置文件
 ##
@@ -17,6 +18,14 @@ ConfigVersion = 1
 
 impl Schema {
     pub fn default_config_toml(&self) -> String {
+        self.config_toml(false)
+    }
+
+    pub fn full_config_toml(&self) -> String {
+        self.config_toml(true)
+    }
+
+    fn config_toml(&self, include_advanced: bool) -> String {
         let mut output = String::from(DEFAULT_CONFIG_HEADER);
         for section in &self.sections {
             output.push('\n');
@@ -28,7 +37,7 @@ impl Schema {
                 append_comment(&mut output, description.zh_or_en());
             }
             for entry in &section.entries {
-                if entry.advanced {
+                if entry.advanced && !include_advanced {
                     continue;
                 }
                 if entry.emit_comment {
@@ -55,10 +64,9 @@ impl Schema {
     }
 
     pub fn write_example_config(&self, output: impl AsRef<Path>) -> std::io::Result<()> {
-        fs::write(
-            output.as_ref().join(EXAMPLE_CONFIG_FILE),
-            self.default_config_toml(),
-        )
+        let output = output.as_ref();
+        fs::write(output.join(EXAMPLE_CONFIG_FILE), self.default_config_toml())?;
+        fs::write(output.join(FULL_CONFIG_FILE), self.full_config_toml())
     }
 }
 
@@ -80,7 +88,7 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::{generate_from_rust_dir, EXAMPLE_CONFIG_FILE};
+    use crate::{generate_from_rust_dir, EXAMPLE_CONFIG_FILE, FULL_CONFIG_FILE};
 
     #[test]
     fn example_config_is_written_to_build_output() {
@@ -106,7 +114,13 @@ mod tests {
         // Then: 固定文件名中的内容与内嵌默认配置完全一致。
         let example = fs::read_to_string(directory.join(EXAMPLE_CONFIG_FILE))
             .expect("example config must be readable");
+        let full = fs::read_to_string(directory.join(FULL_CONFIG_FILE))
+            .expect("full config must be readable");
         fs::remove_dir_all(&directory).expect("output directory must be removed");
         assert_eq!(example, schema.default_config_toml());
+        assert!(full.parse::<toml::Table>().is_ok());
+        assert!(!example.contains("EnableConsole"));
+        assert!(full.contains("#EnableConsole = true"));
+        assert!(full.contains("#AppendConfigArgs = true"));
     }
 }

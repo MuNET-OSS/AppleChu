@@ -38,22 +38,29 @@ crate::config_section! {
         fields: {
             pub cab_pipe: bool = true,
             key: "cabLedOutputPipe",
+            advanced: true,
             comment: "通过命名管道输出机台灯光";
             pub cab_serial: bool = false,
             key: "cabLedOutputSerial",
+            advanced: true,
             comment: "通过串口输出机台灯光";
             pub controller_pipe: bool = true,
             key: "controllerLedOutputPipe",
+            advanced: true,
             comment: "通过命名管道输出控制器灯光";
             pub controller_serial: bool = false,
             key: "controllerLedOutputSerial",
+            advanced: true,
             comment: "通过串口输出控制器灯光";
             pub controller_openithm: bool = false,
             key: "controllerLedOutputOpeNITHM",
+            advanced: true,
             comment: "使用 OpeNITHM 控制器灯光格式";
             pub serial_port: String = String::from("COM5"),
+            advanced: true,
             comment: "灯光输出串口";
             pub serial_baud: u32 = 921_600,
+            advanced: true,
             comment: "灯光输出串口波特率";
         }
     }
