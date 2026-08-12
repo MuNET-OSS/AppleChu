@@ -9,7 +9,8 @@ Set-StrictMode -Version Latest
 
 $root = $PSScriptRoot
 $target = Join-Path $root 'target'
-$exampleName = 'AppleChu.example.toml'
+$exampleName = 'example.toml'
+$fullName = 'full.toml'
 $artifacts = @(
     @{
         Name = 'winhttp.dll'
@@ -47,6 +48,10 @@ try {
     $exampleDestination = Join-Path $target $exampleName
     Copy-Item -LiteralPath $exampleSource -Destination $exampleDestination -Force
     Write-Host "已复制到 $exampleDestination"
+    $fullSource = Join-Path $target "i686-pc-windows-msvc\release\$fullName"
+    $fullDestination = Join-Path $target $fullName
+    Copy-Item -LiteralPath $fullSource -Destination $fullDestination -Force
+    Write-Host "已复制到 $fullDestination"
 
     if ($Deploy) {
         $deployDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Deploy)
@@ -57,6 +62,7 @@ try {
             Copy-Item -LiteralPath $source -Destination $deployDirectory -Force
         }
         Copy-Item -LiteralPath $exampleDestination -Destination $deployDirectory -Force
+        Copy-Item -LiteralPath $fullDestination -Destination $deployDirectory -Force
 
         Write-Host "已部署到 $deployDirectory"
     }
