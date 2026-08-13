@@ -204,14 +204,15 @@ crate::config_section! {
         hidden: false,
         comment: "服务器地址",
         fields: {
-            pub default: String = String::new();
+            pub default: String = String::from("play.mumur.net"),
+            emit_default: true;
+            pub aimedb: String = String::from("aime.mumur.net"),
+            emit_default: true;
             pub router: String = String::new(),
             advanced: true;
             pub startup: String = String::new(),
             advanced: true;
             pub billing: String = String::new(),
-            advanced: true;
-            pub aimedb: String = String::new(),
             advanced: true;
             pub title: String = String::new(),
             advanced: true;
@@ -239,6 +240,7 @@ crate::config_section! {
         fields: {
             pub keychip_id: String = String::from("A69E-01A88888888"),
             key: "id",
+            emit_default: true,
             comment: "Keychip ID";
             pub game_id: String = String::from("SDHD");
             pub platform_id: String = String::new(),
