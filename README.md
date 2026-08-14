@@ -29,7 +29,7 @@
 其他兼容 ChuMod API 的 DLL 仍可放入 `mods/` 目录自动加载。（包括原本依靠注入进 `chusanApp.exe` 的 DLL 也可以自动加载）
 
 > [!TIP]
-> 预编译的 `winhttp.dll` 和 `winmm.dll` 可在 [Releases](https://github.com/MuNET-OSS/AppleChu/releases) 页面下载
+> 预编译的 `AppleChu.zip` 可在 [Releases](https://github.com/MuNET-OSS/AppleChu/releases) 页面下载
 
 ## 配置
 
@@ -88,21 +88,21 @@ AppleChu 内置一套与 segatools 配置和 API 完全兼容的游戏侧 IO 仿
 
 需要 Rust nightly 工具链与 `i686-pc-windows-msvc` 和 `x86_64-pc-windows-msvc` 目标：
 
-配置 schema 由 `config_section!` Rust 声明在构建时自动生成并嵌入 `winhttp.dll` 的 `.acmani` section，无需维护独立 schema 文件。构建同时输出带完整注释的 `AppleChu.example.toml` 示例配置。
+配置 schema 由 `config_section!` Rust 声明在构建时自动生成并嵌入 `winhttp.dll` 的 `.acmani` section，无需维护独立 schema 文件。构建同时输出普通配置 `AppleChu.example.toml` 和包含高级选项的 `AppleChu.full.toml`。
 
-```bash
+```powershell
 rustup target add i686-pc-windows-msvc
 rustup target add x86_64-pc-windows-msvc
-cargo build --release
-cargo build --release --target x86_64-pc-windows-msvc -p applechu-amdaemon
+./build.ps1
 ```
 
-产物位于：
+本地构建产物位于：
 
 ```text
-target/i686-pc-windows-msvc/release/winhttp.dll
-target/i686-pc-windows-msvc/release/AppleChu.example.toml
-target/x86_64-pc-windows-msvc/release/winmm.dll
+target/winhttp.dll
+target/winmm.dll
+target/AppleChu.example.toml
+target/AppleChu.full.toml
 ```
 
 ## 许可证

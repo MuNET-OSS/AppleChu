@@ -49,28 +49,25 @@ jobs:
           toolchain: nightly-2026-07-31
           targets: i686-pc-windows-msvc,x86_64-pc-windows-msvc
 
-      - name: Build game-side winhttp.dll
-        run: cargo build --release -p applechu --target i686-pc-windows-msvc
+      - name: Build AppleChu
+        shell: pwsh
+        run: ./build.ps1
 
-      - name: Build AM Daemon winmm.dll
-        run: cargo build --release -p applechu-amdaemon --target x86_64-pc-windows-msvc
+      - name: Prepare AppleChu.zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path target/AppleChu-artifact
+          Copy-Item target/winhttp.dll target/AppleChu-artifact/
+          Copy-Item target/winmm.dll target/AppleChu-artifact/
+          Copy-Item target/AppleChu.example.toml target/AppleChu-artifact/
+          Copy-Item target/AppleChu.full.toml target/AppleChu-artifact/
 
-      - name: Verify embedded schema
-        run: cargo run -p applechu-schema --bin verify_pe --target x86_64-pc-windows-msvc -- target/i686-pc-windows-msvc/release/winhttp.dll target/i686-pc-windows-msvc/release/AppleChu.example.toml
-
-      - name: Upload game-side proxy
+      - name: Upload AppleChu.zip
         uses: actions/upload-artifact@v4
         with:
-          name: winhttp.dll
-          path: |
-            target/i686-pc-windows-msvc/release/winhttp.dll
-            target/i686-pc-windows-msvc/release/AppleChu.example.toml
-
-      - name: Upload AM Daemon proxy
-        uses: actions/upload-artifact@v4
-        with:
-          name: winmm.dll
-          path: target/x86_64-pc-windows-msvc/release/winmm.dll
+          name: AppleChu
+          path: target/AppleChu-artifact/*
+          if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -81,12 +78,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: '*.dll'
-          merge-multiple: true
+          name: AppleChu
+          path: AppleChu
+
+      - name: Package release
+        shell: pwsh
+        run: Compress-Archive -Path AppleChu/* -DestinationPath AppleChu.zip
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            winhttp.dll
-            winmm.dll
-            AppleChu.example.toml
+          files: AppleChu.zip
