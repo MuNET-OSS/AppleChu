@@ -51,7 +51,7 @@ crate::config_section! {
         always_enabled: false,
         hidden: false,
         group: "io",
-        comment: "Aime 读卡器模拟",
+        comment: "Aime 读卡器模拟。如果要使用原生串口的读卡器，请禁用此选项",
         fields: {
             // 两种机台默认使用 COM4，同时保留分模式覆盖项
             pub cvt_port: u32 = 4,
@@ -88,7 +88,7 @@ crate::config_section! {
             advanced: true,
             comment: "读卡代理标志";
             pub iodll: String = String::new(),
-            comment: "外部 AimeIO DLL 路径";
+            comment: "外部 AimeIO DLL 路径。如果要使用 AimeIO，需要开启读卡器模拟";
         }
     }
 }
