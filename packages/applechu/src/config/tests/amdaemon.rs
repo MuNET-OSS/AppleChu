@@ -39,7 +39,7 @@ fn amdaemon_values_survive_game_side_normalization() {
 }
 
 #[test]
-fn empty_dns_section_is_filled_by_game_proxy() {
+fn empty_dns_section_uses_builtin_server_defaults() {
     let config = Config::parse(".", "config_version = 1\n[Dns]\n").expect("TOML 语法必须有效");
     let dns = config
         .section::<crate::amdaemon::DnsConfig>()
@@ -47,9 +47,11 @@ fn empty_dns_section_is_filled_by_game_proxy() {
     let output = config.to_toml();
 
     assert!(dns.enabled);
-    assert!(dns.default.is_empty());
+    assert_eq!(dns.default, "play.mumur.net");
+    assert_eq!(dns.aimedb, "aime.mumur.net");
     assert!(output.contains("[Dns]"));
-    assert!(output.contains("#Default = \"\""));
+    assert!(output.contains("Default = \"play.mumur.net\""));
+    assert!(output.contains("Aimedb = \"aime.mumur.net\""));
     assert!(!output.contains("Title"));
 }
 

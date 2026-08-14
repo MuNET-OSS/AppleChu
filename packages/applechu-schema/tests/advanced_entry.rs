@@ -40,7 +40,6 @@ fn configured_advanced_entries_match_the_curated_list() {
                 "Router",
                 "Startup",
                 "Billing",
-                "Aimedb",
                 "Title",
                 "ReplaceHost",
                 "StartupPort",

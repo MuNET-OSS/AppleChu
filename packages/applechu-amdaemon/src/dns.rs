@@ -677,13 +677,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_default_keeps_unspecified_service_hosts_empty() {
+    fn builtin_defaults_fill_unspecified_service_hosts() {
         let resolved = resolve_config(&DnsConfig::default());
 
-        assert!(resolved.router.is_empty());
-        assert!(resolved.startup.is_empty());
-        assert!(resolved.billing.is_empty());
-        assert!(resolved.aimedb.is_empty());
+        assert_eq!(resolved.router, "play.mumur.net");
+        assert_eq!(resolved.startup, "play.mumur.net");
+        assert_eq!(resolved.billing, "play.mumur.net");
+        assert_eq!(resolved.aimedb, "aime.mumur.net");
     }
 
     #[test]
