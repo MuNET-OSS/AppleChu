@@ -6,7 +6,7 @@ crate::config_section! {
     pub(crate) struct BypassAppUserConfig => BYPASS_APPUSER_CONFIG_SECTION {
         section: "BypassAppUser",
         order: 290,
-        default_on: false,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         group: "compatibility",
@@ -19,7 +19,7 @@ crate::config_section! {
     pub(crate) struct Bypass120hzConfig => BYPASS_120HZ_CONFIG_SECTION {
         section: "Bypass120hz",
         order: 280,
-        default_on: false,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         group: "display",
@@ -32,7 +32,7 @@ crate::config_section! {
     pub(crate) struct Bypass1080pConfig => BYPASS_1080P_CONFIG_SECTION {
         section: "Bypass1080p",
         order: 270,
-        default_on: false,
+        default_on: true,
         always_enabled: false,
         hidden: false,
         group: "display",

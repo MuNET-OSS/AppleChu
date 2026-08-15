@@ -77,7 +77,7 @@ crate::config_section! {
             key: "unlockSystemVoice",
             comment: "解锁系统语音";
 
-            pub unlock_event: bool = true,
+            pub unlock_event: bool = false,
             comment: "解锁 Event";
 
             pub unlock_mapicon: bool = true,
