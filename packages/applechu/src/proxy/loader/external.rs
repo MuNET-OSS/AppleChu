@@ -91,6 +91,8 @@ pub(super) unsafe fn load(base_dir: &str, info: &ChuModInfo, api: *mut ChuModAPI
             let mod_stem = mod_name
                 .strip_suffix(".dll")
                 .or_else(|| mod_name.strip_suffix(".DLL"))
+                .or_else(|| mod_name.strip_suffix(".asi"))
+                .or_else(|| mod_name.strip_suffix(".ASI"))
                 .unwrap_or(&mod_name);
             let mod_log_path = format!("{log_dir}\\{mod_stem}.log");
             let mod_log_path_c = std::ffi::CString::new(mod_log_path.clone()).unwrap_or_default();

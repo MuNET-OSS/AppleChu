@@ -26,7 +26,7 @@ pub fn ensure_mods_dir(base_dir: &str) -> String {
 
 pub fn scan_mod_files(mods_dir: &str) -> Vec<(String, String)> {
     unsafe {
-        let pattern = format!("{}\\*.dll\0", mods_dir);
+        let pattern = format!("{}\\*.*\0", mods_dir);
         let mut find_data: WIN32_FIND_DATAA = std::mem::zeroed();
         let find_handle = FindFirstFileA(pattern.as_ptr(), &mut find_data);
         if find_handle == INVALID_HANDLE_VALUE {
@@ -39,8 +39,12 @@ pub fn scan_mod_files(mods_dir: &str) -> Vec<(String, String)> {
             if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 {
                 let mod_name_cstr = CStr::from_ptr(find_data.cFileName.as_ptr() as *const c_char);
                 let mod_name = mod_name_cstr.to_string_lossy().into_owned();
-                let full_path = format!("{}\\{}", mods_dir, mod_name);
-                mods.push((mod_name, full_path));
+                let is_dll = mod_name.ends_with(".dll") || mod_name.ends_with(".DLL");
+                let is_asi = mod_name.ends_with(".asi") || mod_name.ends_with(".ASI");
+                if is_dll || is_asi {
+                    let full_path = format!("{}\\{}", mods_dir, mod_name);
+                    mods.push((mod_name, full_path));
+                }
             }
 
             if FindNextFileA(find_handle, &mut find_data) == 0 {
@@ -48,6 +52,9 @@ pub fn scan_mod_files(mods_dir: &str) -> Vec<(String, String)> {
             }
         }
         FindClose(find_handle);
+        if mods.is_empty() {
+            log_info("No external modules found");
+        }
         mods
     }
 }
