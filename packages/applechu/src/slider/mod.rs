@@ -28,6 +28,8 @@ const CMD_AUTO_SCAN_STOP: u8 = 0x04;
 const CMD_RESET: u8 = 0x10;
 const CMD_GET_BOARD_INFO: u8 = 0xF0;
 const SLIDER_PORT: u32 = 1;
+// 与设备串口缓冲容量一致，防止扫描状态无限排队
+const SLIDER_READABLE_CAPACITY: usize = 520;
 const BOARD_INFO: [u8; 32] = [
     b'1', b'5', b'3', b'3', b'0', b' ', b' ', b' ', 0xA0, b'0', b'6', b'7', b'1', b'2', 0xFF, 0x90,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -80,7 +82,11 @@ impl SliderDevice {
                 chuniio::slider_start(Arc::new(move |pressure| {
                     let mut response = Vec::with_capacity(36);
                     let _ = encode_frame_into(&mut response, CMD_AUTO_SCAN, &pressure);
-                    uart::push_readable_port(SLIDER_PORT, &response);
+                    uart::push_readable_port_bounded(
+                        SLIDER_PORT,
+                        &response,
+                        SLIDER_READABLE_CAPACITY,
+                    );
                 }));
                 Ok(())
             }

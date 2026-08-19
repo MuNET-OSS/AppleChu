@@ -170,6 +170,19 @@ impl Default for UartPort {
     }
 }
 
+impl UartPort {
+    fn push_readable_bounded(&mut self, bytes: &[u8], capacity: usize) -> bool {
+        let Some(required) = self.readable.len().checked_add(bytes.len()) else {
+            return false;
+        };
+        if required > capacity {
+            return false;
+        }
+        self.readable.extend_from_slice(bytes);
+        true
+    }
+}
+
 pub fn init_all(_api: &Api, _config: &Config) {}
 
 pub fn uart_init(port_no: u32) {
@@ -389,6 +402,17 @@ pub fn push_readable_port(port_no: u32, bytes: &[u8]) -> bool {
     true
 }
 
+/// 按完整消息写入有界 UART 可读队列，空间不足时不写入
+pub fn push_readable_port_bounded(port_no: u32, bytes: &[u8], capacity: usize) -> bool {
+    let Ok(mut ports) = PORTS.lock() else {
+        return false;
+    };
+    let Some(port) = ports.get_mut(&port_no) else {
+        return false;
+    };
+    port.push_readable_bounded(bytes, capacity)
+}
+
 pub unsafe fn device_io_control(
     handle: usize,
     code: u32,
@@ -604,3 +628,42 @@ const _: () = assert!(std::mem::size_of::<SerialChars>() == 6);
 const _: () = assert!(std::mem::size_of::<SerialHandflow>() == 16);
 const _: () = assert!(std::mem::size_of::<SerialTimeouts>() == 20);
 const _: () = assert!(std::mem::size_of::<SerialStatus>() == 20);
+
+#[cfg(test)]
+mod tests {
+    use super::UartPort;
+
+    #[test]
+    fn bounded_readable_queue_drops_whole_messages() {
+        let mut port = UartPort::default();
+        let frame = [0xA5; 36];
+
+        for _ in 0..14 {
+            assert!(port.push_readable_bounded(&frame, 520));
+        }
+        assert_eq!(port.readable.len(), 504);
+
+        assert!(!port.push_readable_bounded(&frame, 520));
+        assert_eq!(port.readable.len(), 504);
+        assert!(port
+            .readable
+            .chunks_exact(frame.len())
+            .all(|item| item == frame));
+    }
+
+    #[test]
+    fn bounded_readable_queue_resumes_after_data_is_read() {
+        let mut port = UartPort::default();
+        let first = [0x11; 260];
+        let second = [0x22; 260];
+
+        assert!(port.push_readable_bounded(&first, 520));
+        assert!(port.push_readable_bounded(&second, 520));
+        assert!(!port.push_readable_bounded(&second, 520));
+
+        port.readable.drain(..first.len());
+        assert!(port.push_readable_bounded(&first, 520));
+        assert_eq!(&port.readable[..second.len()], &second);
+        assert_eq!(&port.readable[second.len()..], &first);
+    }
+}
