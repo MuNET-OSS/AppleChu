@@ -15,13 +15,10 @@ impl VirtualKey {
     fn parse_str(value: &str) -> Option<Self> {
         let key = value.trim();
         if let Some(hex) = key.strip_prefix("0x").or_else(|| key.strip_prefix("0X")) {
-            return u8::from_str_radix(hex, 16)
-                .ok()
-                .filter(|code| *code != 0)
-                .map(Self);
+            return u8::from_str_radix(hex, 16).ok().map(Self);
         }
         if let Ok(code) = key.parse::<u8>() {
-            return (code != 0).then_some(Self(code));
+            return Some(Self(code));
         }
 
         let normalized = key.replace([' ', '-', '_'], "").to_ascii_uppercase();
@@ -61,9 +58,7 @@ impl VirtualKey {
 impl ConfigValue for VirtualKey {
     fn parse(value: &toml::Value) -> Option<Self> {
         match value {
-            toml::Value::Integer(code) => {
-                u8::try_from(*code).ok().filter(|code| *code != 0).map(Self)
-            }
+            toml::Value::Integer(code) => u8::try_from(*code).ok().map(Self),
             toml::Value::String(value) => Self::parse_str(value),
             toml::Value::Float(_)
             | toml::Value::Boolean(_)
@@ -104,10 +99,25 @@ mod tests {
     }
 
     #[test]
-    fn invalid_virtual_keys_are_rejected() {
-        // Given: 零值、超范围值和未知名称。
+    fn zero_is_the_disabled_key_value() {
+        // Given: 零值的整数、十六进制文本和普通键码。
         let values = [
             toml::Value::Integer(0),
+            toml::Value::String("0x00".to_owned()),
+            toml::Value::String("0".to_owned()),
+        ];
+
+        // When: 输入在配置边界被解析。
+        let parsed = values.map(|value| VirtualKey::parse(&value));
+
+        // Then: 零值保留为明确的禁用键码。
+        assert_eq!(parsed, [Some(VirtualKey::new(0)); 3]);
+    }
+
+    #[test]
+    fn out_of_range_and_unknown_virtual_keys_are_rejected() {
+        // Given: 超范围值和未知名称。
+        let values = [
             toml::Value::Integer(0x100),
             toml::Value::String("F25".to_owned()),
         ];
@@ -116,6 +126,6 @@ mod tests {
         let parsed = values.map(|value| VirtualKey::parse(&value));
 
         // Then: 无效键码不会进入运行时。
-        assert_eq!(parsed, [None, None, None]);
+        assert_eq!(parsed, [None, None]);
     }
 }

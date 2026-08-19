@@ -158,7 +158,7 @@ fn field_value(field: &FieldDecl) -> Result<toml::Value, SchemaError> {
     );
     if let Some(format) = schema_format(&field.value_type) {
         table.insert("format".to_owned(), toml::Value::String(format.to_owned()));
-        table.insert("min".to_owned(), toml::Value::Integer(1));
+        table.insert("min".to_owned(), toml::Value::Integer(0));
         table.insert("max".to_owned(), toml::Value::Integer(255));
     }
     if field.advanced {

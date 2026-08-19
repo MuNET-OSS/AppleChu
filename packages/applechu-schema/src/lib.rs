@@ -944,7 +944,7 @@ mod tests {
             .expect("virtual key entry must exist");
         assert_eq!(hotkey.value_type, "int");
         assert_eq!(hotkey.format.as_deref(), Some("virtual_key"));
-        assert_eq!(hotkey.min, Some(1));
+        assert_eq!(hotkey.min, Some(0));
         assert_eq!(hotkey.max, Some(255));
         assert!(schema.default_config_toml().contains("#Hotkey = 0x70"));
     }

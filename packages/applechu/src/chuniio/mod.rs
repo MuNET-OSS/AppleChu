@@ -412,6 +412,9 @@ fn hresult(status: i32) -> Result<(), i32> {
 
 #[cfg(windows)]
 fn is_key_down(vk: i32) -> bool {
+    if vk == 0 {
+        return false;
+    }
     unsafe {
         windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk) & 0x8000u16 as i16
             != 0
