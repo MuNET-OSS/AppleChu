@@ -203,6 +203,52 @@ fn max_tracks_is_patched_by_early_pipeline() {
     assert_eq!(&memory.image.borrow()[41..45], &7_i32.to_le_bytes());
 }
 
+fn write_rel32(image: &mut [u8], instruction: usize, target: usize) {
+    let next = instruction + 5;
+    let displacement =
+        i32::try_from(target as isize - next as isize).expect("测试相对地址必须适合 i32");
+    image[instruction + 1..instruction + 5].copy_from_slice(&displacement.to_le_bytes());
+}
+
+#[test]
+fn unlock_all_difficulty_follows_main_version_thunk() {
+    let mut image = vec![0x90; 256];
+    image[8..11].copy_from_slice(&[0x32, 0xC0, 0xC3]);
+    image[32..75].copy_from_slice(&[
+        0x38, 0x44, 0x24, 0x13, 0x74, 0x09, 0xE8, 0, 0, 0, 0, 0x3C, 0x01, 0x75, 0x1C, 0x6A, 0x01,
+        0x8D, 0x44, 0x24, 0x14, 0x8B, 0xCF, 0x50, 0xE8, 0, 0, 0, 0, 0x6A, 0x01, 0x8D, 0x44, 0x24,
+        0x14, 0x8B, 0xCF, 0x50, 0xE8, 0, 0, 0, 0,
+    ]);
+    image[128] = 0xE9;
+    image[192..195].copy_from_slice(&[0x32, 0xC0, 0xC3]);
+    write_rel32(&mut image, 38, 128);
+    write_rel32(&mut image, 128, 192);
+    let memory = FakeMemory::new(image);
+
+    patches::apply_pre_tls(&memory, &config("[UnlockAllDifficulty]\nEnable = true"));
+
+    let image = memory.image.borrow();
+    assert_eq!(&image[8..11], &[0x32, 0xC0, 0xC3]);
+    assert_eq!(&image[192..195], &[0xB0, 0x01, 0xC3]);
+}
+
+#[test]
+fn unlock_all_difficulty_supports_legacy_direct_call() {
+    let mut image = vec![0x90; 256];
+    image[32..75].copy_from_slice(&[
+        0x38, 0x44, 0x24, 0x13, 0x74, 0x09, 0xE8, 0, 0, 0, 0, 0x3C, 0x01, 0x75, 0x1C, 0x6A, 0x01,
+        0x8D, 0x44, 0x24, 0x14, 0x50, 0x8B, 0xCF, 0xE8, 0, 0, 0, 0, 0x6A, 0x01, 0x8D, 0x44, 0x24,
+        0x14, 0x50, 0x8B, 0xCF, 0xE8, 0, 0, 0, 0,
+    ]);
+    image[192..195].copy_from_slice(&[0x32, 0xC0, 0xC3]);
+    write_rel32(&mut image, 38, 192);
+    let memory = FakeMemory::new(image);
+
+    patches::apply_pre_tls(&memory, &config("[UnlockAllDifficulty]\nEnable = true"));
+
+    assert_eq!(&memory.image.borrow()[192..195], &[0xB0, 0x01, 0xC3]);
+}
+
 #[test]
 fn unlock_track_clamp_is_patched_for_247() {
     // Given: 247 clamp 指令仍使用 ESI 比较操作数。

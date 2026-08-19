@@ -1100,6 +1100,7 @@ mod tests {
                 "DisableTimer",
                 "CustomTimers",
                 "UnlockTracks",
+                "UnlockAllDifficulty",
                 "SkipMapAnimation",
                 "Unlocker",
                 "ForceSharedAudio",

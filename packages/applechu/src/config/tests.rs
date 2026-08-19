@@ -364,6 +364,7 @@ fn optional_user_features_are_disabled_by_default() {
         "SkipStartup",
         "DisableTimer",
         "SkipMapAnimation",
+        "UnlockAllDifficulty",
         "Unlock120fps",
         "DpiAware",
     ];

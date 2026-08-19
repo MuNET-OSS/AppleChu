@@ -10,6 +10,7 @@ pub mod skip_map_anim;
 pub mod skip_startup;
 pub mod timers;
 pub mod unlock_120fps;
+pub mod unlock_all_difficulty;
 pub mod unlock_tracks;
 
 use crate::config::Config;
@@ -25,6 +26,7 @@ pub fn apply_pre_tls<M: PatchMemory>(memory: &M, config: &Config) {
     timers::apply_early(memory, config);
     skip_map_anim::apply_early(memory, config);
     unlock_tracks::apply_early(memory, config);
+    unlock_all_difficulty::apply_early(memory, config);
     unlock_120fps::apply_early(memory, config);
     bypass::apply_early(memory, config);
     audio::apply_early(memory, config);
