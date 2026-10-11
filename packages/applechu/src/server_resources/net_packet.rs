@@ -156,6 +156,19 @@ fn dispatch(path: &str, body: &[u8]) {
             }
         }
     }
+
+    // 同时广播给 chu-abi 模组，使其能读取/协作处理该响应。
+    // 载荷为 `{"api":"<名>","response":<原始响应>}`，便于订阅方按 API 过滤。
+    if let Some(api) = crate::util::api::API.get() {
+        let mut envelope = String::with_capacity(value.to_string().len() + 32);
+        envelope.push_str("{\"api\":");
+        write_json_string(&name, &mut envelope);
+        envelope.push_str(",\"response\":");
+        envelope.push_str(&value.to_string());
+        envelope.push('}');
+        api.publish(PUBLISH_TOPIC, envelope.as_bytes());
+    }
+
     // 改写结果记录到日志；回写由调用方（游戏自身缓冲）决定，
     // 本桥只读响应，不修改游戏的内存流。
     if modified {
@@ -164,6 +177,26 @@ fn dispatch(path: &str, body: &[u8]) {
             value.to_string().len()
         ));
     }
+}
+
+/// 对外广播主题名（chu-abi 模组按此订阅）
+const PUBLISH_TOPIC: &str = "net_packet";
+
+/// 在本模块内构造转义后的 JSON 字符串（避免把 json 模块的私有工具外泄）
+fn write_json_string(value: &str, output: &mut String) {
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            control if (control as u32) < 0x20 => {
+                use std::fmt::Write as _;
+                let _ = write!(output, "\\u{:04x}", control as u32);
+            }
+            other => output.push(other),
+        }
+    }
+    output.push('"');
 }
 
 /// 从请求路径解析逻辑 API 名（末段，去掉查询串与扩展）
