@@ -340,9 +340,9 @@ unsafe extern "system" fn hooked_read_file(
 unsafe extern "system" fn hooked_get_file_size(file: HANDLE, high: *mut u32) -> u32 {
     if let Some((length, _)) = handle::size_and_position(file as usize) {
         if !high.is_null() {
-            *high = (length >> 32) as u32;
+            *high = ((length as u64) >> 32) as u32;
         }
-        return (length & 0xFFFF_FFFF) as u32;
+        return (length as u64 & 0xFFFF_FFFF) as u32;
     }
     let next = NEXT_GET_FILE_SIZE.load(Ordering::SeqCst);
     if next == 0 {
@@ -378,9 +378,9 @@ unsafe extern "system" fn hooked_set_file_pointer(
         let target = base.saturating_add(distance as isize).max(0) as usize;
         if handle::seek(file as usize, target).is_some() {
             if !high.is_null() {
-                *high = (target >> 32) as i32;
+                *high = ((target as u64) >> 32) as i32;
             }
-            return (target & 0xFFFF_FFFF) as u32;
+            return (target as u64 & 0xFFFF_FFFF) as u32;
         }
     }
     let next = NEXT_SET_FILE_POINTER.load(Ordering::SeqCst);
