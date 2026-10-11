@@ -205,6 +205,14 @@ pub fn amfs_path() -> Option<String> {
     CONFIG.get().map(|config| config.amfs.clone())
 }
 
+/// 游戏原始请求中 option 的**源前缀**（重定向前），规范化小写
+///
+/// 游戏访问 option 时传入的是 `c:\mount\option\...`，`resolve_path` 之后才被
+/// 改写为真实目录；虚拟包匹配必须对源前缀做判断。
+pub fn option_source_prefix() -> String {
+    VFS_OPTION.to_owned()
+}
+
 pub fn appdata_path() -> Option<String> {
     CONFIG.get().map(|config| config.appdata.clone())
 }
