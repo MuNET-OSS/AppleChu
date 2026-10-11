@@ -194,11 +194,9 @@ fn read_entry_data(
     // 本地文件头：签名(4) + 版本(2) + 标志(2) + 方法(2) + 时间(2) + 日期(2)
     //            + CRC(4) + 压缩大小(4) + 原始大小(4) + 名称长度(2) + 扩展长度(2)
     let name_len = read_u16(bytes, local_offset + 26)
-        .ok_or_else(|| "zip local header is truncated".to_owned())?
-        as usize;
+        .ok_or_else(|| "zip local header is truncated".to_owned())? as usize;
     let extra_len = read_u16(bytes, local_offset + 28)
-        .ok_or_else(|| "zip local header is truncated".to_owned())?
-        as usize;
+        .ok_or_else(|| "zip local header is truncated".to_owned())? as usize;
     let data_start = local_offset
         .checked_add(30)
         .and_then(|value| value.checked_add(name_len))

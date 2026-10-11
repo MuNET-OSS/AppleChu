@@ -28,8 +28,7 @@ const DISPATCHER_SIGNATURE: &str = concat!(
 /// MSVC `std::string::_Myres` 达到该值表示数据在堆上
 const SSO_CAPACITY: u32 = 16;
 
-type DispatcherFn =
-    unsafe extern "thiscall" fn(*mut u8, *mut u8, *mut u8, *mut u8) -> i32;
+type DispatcherFn = unsafe extern "thiscall" fn(*mut u8, *mut u8, *mut u8, *mut u8) -> i32;
 
 static ORIGINAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static TARGET: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

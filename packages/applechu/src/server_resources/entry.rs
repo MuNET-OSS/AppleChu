@@ -97,7 +97,12 @@ pub fn parse_entries(resources: &JsonValue) -> Vec<ServerResourcesEntry> {
     resources
         .get("entries")
         .and_then(JsonValue::as_array)
-        .map(|items| items.iter().filter_map(ServerResourcesEntry::from_json).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(ServerResourcesEntry::from_json)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -132,7 +137,9 @@ fn locale_matches(locales: &[String], locale: Option<&str>) -> bool {
         return true;
     }
     match locale {
-        Some(current) => locales.iter().any(|item| item.eq_ignore_ascii_case(current)),
+        Some(current) => locales
+            .iter()
+            .any(|item| item.eq_ignore_ascii_case(current)),
         // 无语言来源时不做排除，避免误杀全部条目
         None => true,
     }

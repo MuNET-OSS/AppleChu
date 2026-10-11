@@ -86,33 +86,73 @@ fn synthetic() -> &'static Mutex<HashMap<usize, Vec<InjectedEntry>>> {
 /// 安装 VFS 桥接；须在 `platform` 阶段（`path_hook` 安装完成）之后调用
 pub fn install(api: &Api) -> Result<(), String> {
     unsafe {
-        bind(api, "FindFirstFileW", hooked_find_first_file_w as *const (), &NEXT_FIND_FIRST_FILE_W)?;
-        bind(api, "FindNextFileW", hooked_find_next_file_w as *const (), &NEXT_FIND_NEXT_FILE_W)?;
-        bind(api, "FindClose", hooked_find_close as *const (), &NEXT_FIND_CLOSE)?;
-        bind(api, "CreateFileW", hooked_create_file_w as *const (), &NEXT_CREATE_FILE_W)?;
-        bind(api, "ReadFile", hooked_read_file as *const (), &NEXT_READ_FILE)?;
-        bind(api, "GetFileSize", hooked_get_file_size as *const (), &NEXT_GET_FILE_SIZE)?;
-        bind(api, "GetFileSizeEx", hooked_get_file_size_ex as *const (), &NEXT_GET_FILE_SIZE_EX)?;
-        bind(api, "SetFilePointer", hooked_set_file_pointer as *const (), &NEXT_SET_FILE_POINTER)?;
+        bind(
+            api,
+            "FindFirstFileW",
+            hooked_find_first_file_w as *const (),
+            &NEXT_FIND_FIRST_FILE_W,
+        )?;
+        bind(
+            api,
+            "FindNextFileW",
+            hooked_find_next_file_w as *const (),
+            &NEXT_FIND_NEXT_FILE_W,
+        )?;
+        bind(
+            api,
+            "FindClose",
+            hooked_find_close as *const (),
+            &NEXT_FIND_CLOSE,
+        )?;
+        bind(
+            api,
+            "CreateFileW",
+            hooked_create_file_w as *const (),
+            &NEXT_CREATE_FILE_W,
+        )?;
+        bind(
+            api,
+            "ReadFile",
+            hooked_read_file as *const (),
+            &NEXT_READ_FILE,
+        )?;
+        bind(
+            api,
+            "GetFileSize",
+            hooked_get_file_size as *const (),
+            &NEXT_GET_FILE_SIZE,
+        )?;
+        bind(
+            api,
+            "GetFileSizeEx",
+            hooked_get_file_size_ex as *const (),
+            &NEXT_GET_FILE_SIZE_EX,
+        )?;
+        bind(
+            api,
+            "SetFilePointer",
+            hooked_set_file_pointer as *const (),
+            &NEXT_SET_FILE_POINTER,
+        )?;
         bind(
             api,
             "SetFilePointerEx",
             hooked_set_file_pointer_ex as *const (),
             &NEXT_SET_FILE_POINTER_EX,
         )?;
-        bind(api, "CloseHandle", hooked_close_handle as *const (), &NEXT_CLOSE_HANDLE)?;
+        bind(
+            api,
+            "CloseHandle",
+            hooked_close_handle as *const (),
+            &NEXT_CLOSE_HANDLE,
+        )?;
     }
     api.log_info("ServerResources: option VFS bridge installed");
     Ok(())
 }
 
 /// 把 detour 挂到目标进程内该导入的**当前**实现上，并保留它作为下一跳
-unsafe fn bind(
-    api: &Api,
-    name: &str,
-    detour: *const (),
-    slot: &AtomicUsize,
-) -> Result<(), String> {
+unsafe fn bind(api: &Api, name: &str, detour: *const (), slot: &AtomicUsize) -> Result<(), String> {
     // 只挂游戏主模块：避免与 path_hook 覆盖的其他模块重复包装
     let previous = hook_iat(api.game_base(), KERNEL32_DLL, name, detour);
     let Some(previous) = previous else {
@@ -148,12 +188,7 @@ unsafe fn restore(name: &str, slot: &AtomicUsize) {
         return;
     }
     if let Some(api) = crate::util::api::API.get() {
-        let _ = hook_iat(
-            api.game_base(),
-            KERNEL32_DLL,
-            name,
-            previous as *const (),
-        );
+        let _ = hook_iat(api.game_base(), KERNEL32_DLL, name, previous as *const ());
     }
 }
 
@@ -199,7 +234,7 @@ unsafe fn fill_entry(name: &str, directory: bool, data: *mut WIN32_FIND_DATAW) {
 
 fn next_synthetic_handle() -> usize {
     let token = NEXT_SYNTHETIC.fetch_add(1, Ordering::Relaxed);
-    (token | SYNTHETIC_FLAG) as usize
+    token | SYNTHETIC_FLAG
 }
 
 unsafe extern "system" fn hooked_find_first_file_w(
@@ -292,7 +327,15 @@ unsafe extern "system" fn hooked_create_file_w(
                 .unwrap_or(0);
             // \\.\NUL 必然可打开，且 CloseHandle 语义正常
             let nul = winapi::string_to_wide("\\\\.\\NUL");
-            let real = next(nul.as_ptr(), access, share, security, creation, flags, template);
+            let real = next(
+                nul.as_ptr(),
+                access,
+                share,
+                security,
+                creation,
+                flags,
+                template,
+            );
             if real != INVALID_HANDLE_VALUE && handle::register(real as usize, &key, length) {
                 return real;
             }
@@ -374,7 +417,11 @@ unsafe extern "system" fn hooked_set_file_pointer(
     method: u32,
 ) -> u32 {
     if let Some((_, position)) = handle::size_and_position(file as usize) {
-        let base = if method == FILE_BEGIN { 0isize } else { position as isize };
+        let base = if method == FILE_BEGIN {
+            0isize
+        } else {
+            position as isize
+        };
         let target = base.saturating_add(distance as isize).max(0) as usize;
         if handle::seek(file as usize, target).is_some() {
             if !high.is_null() {
@@ -398,7 +445,11 @@ unsafe extern "system" fn hooked_set_file_pointer_ex(
     method: u32,
 ) -> i32 {
     if let Some((_, position)) = handle::size_and_position(file as usize) {
-        let base = if method == FILE_BEGIN { 0 } else { position as i64 };
+        let base = if method == FILE_BEGIN {
+            0
+        } else {
+            position as i64
+        };
         let target = base.saturating_add(distance).max(0) as usize;
         if handle::seek(file as usize, target).is_some() {
             if !new_position.is_null() {

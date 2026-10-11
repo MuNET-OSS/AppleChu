@@ -8,9 +8,9 @@ use std::ffi::c_void;
 use std::ptr;
 
 use windows_sys::Win32::Security::Cryptography::{
-    BCryptCloseAlgorithmProvider, BCryptDestroyKey, BCryptImportKeyPair, BCryptOpenAlgorithmProvider,
-    BCryptVerifySignature, BCRYPT_ALG_HANDLE, BCRYPT_KEY_HANDLE, BCRYPT_PAD_PKCS1,
-    BCRYPT_PKCS1_PADDING_INFO, BCRYPT_RSA_ALGORITHM, BCRYPT_RSAPUBLIC_BLOB,
+    BCryptCloseAlgorithmProvider, BCryptDestroyKey, BCryptImportKeyPair,
+    BCryptOpenAlgorithmProvider, BCryptVerifySignature, BCRYPT_ALG_HANDLE, BCRYPT_KEY_HANDLE,
+    BCRYPT_PAD_PKCS1, BCRYPT_PKCS1_PADDING_INFO, BCRYPT_RSAPUBLIC_BLOB, BCRYPT_RSA_ALGORITHM,
     BCRYPT_SHA256_ALGORITHM,
 };
 

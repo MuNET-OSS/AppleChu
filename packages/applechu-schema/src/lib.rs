@@ -1124,12 +1124,12 @@ mod tests {
                 "RestartSong",
                 "SkipWarning",
                 "PCBID",
+                "ServerResources",
                 "VFS",
                 "NetEnv",
             ]
         );
     }
-
     #[test]
     fn rejects_malformed_entries_instead_of_silently_dropping_them() {
         let source = r#"

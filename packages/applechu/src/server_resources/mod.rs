@@ -27,7 +27,7 @@ use crate::util::api::Api;
 crate::config_section! {
     pub(crate) struct ServerResourcesConfig => SERVER_RESOURCES_CONFIG_SECTION {
         section: "ServerResources",
-        order: 350,
+        order: 355,
         default_on: false,
         always_enabled: false,
         hidden: false,
@@ -186,9 +186,15 @@ fn game_version_from(response: &JsonValue) -> i64 {
 
 fn version_to_int(text: &str) -> i64 {
     let mut parts = text.trim().split('.');
-    let major = parts.next().and_then(|part| part.trim().parse::<i64>().ok());
-    let minor = parts.next().and_then(|part| part.trim().parse::<i64>().ok());
-    let release = parts.next().and_then(|part| part.trim().parse::<i64>().ok());
+    let major = parts
+        .next()
+        .and_then(|part| part.trim().parse::<i64>().ok());
+    let minor = parts
+        .next()
+        .and_then(|part| part.trim().parse::<i64>().ok());
+    let release = parts
+        .next()
+        .and_then(|part| part.trim().parse::<i64>().ok());
     match (major, minor, release) {
         (Some(major), Some(minor), Some(release)) => major * 10_000 + minor * 100 + release,
         (Some(major), Some(minor), None) => major * 10_000 + minor * 100,

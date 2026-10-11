@@ -68,9 +68,8 @@ pub fn inflate(input: &[u8]) -> Result<Vec<u8>, String> {
     };
 
     // 读出解压结果
-    let result = unsafe { read_string(&output_buffer) }.ok_or_else(|| {
-        format!("deflate returned {status} without a usable output buffer")
-    })?;
+    let result = unsafe { read_string(&output_buffer) }
+        .ok_or_else(|| format!("deflate returned {status} without a usable output buffer"))?;
 
     // 输出若落在堆上，用游戏的释放函数回收，避免每次解压泄漏
     unsafe {
@@ -154,7 +153,10 @@ mod tests {
         unsafe { layout_string(&mut buffer, data).unwrap() };
 
         // Then: 长度与指针写入正确，容量足以让被调函数走指针路径。
-        assert_eq!(u32::from_le_bytes(buffer[0x10..0x14].try_into().unwrap()), 5);
+        assert_eq!(
+            u32::from_le_bytes(buffer[0x10..0x14].try_into().unwrap()),
+            5
+        );
         assert!(u32::from_le_bytes(buffer[0x14..0x18].try_into().unwrap()) >= SSO_CAPACITY);
         assert_eq!(
             u32::from_le_bytes(buffer[0..4].try_into().unwrap()) as usize,
