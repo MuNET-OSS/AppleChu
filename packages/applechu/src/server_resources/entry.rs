@@ -1,7 +1,11 @@
 //! 服务器下发条目与条件筛选
 //!
-//! 对应 `_appleChuResources.entries[]` 中的单个条目，以及 AquaMai
+//! 对应 `<field>.entries[]` 中的单个条目，以及 AquaMai
 //! `ConditionalMessage.ShouldShow()` 的等价判定。
+//!
+//! 字段名与 AquaMai 保持一致，只替换品牌前缀：`_appleChuResources` /
+//! `minimumAppleChuVersion` / `maximumAppleChuVersion`，其余（`url` / `sign` /
+//! `locales` / `minimumGameVersion` / `maximumGameVersion`）完全相同。
 
 use crate::server_resources::json::JsonValue;
 
@@ -19,6 +23,9 @@ pub struct ServerResourcesEntry {
 
 impl ServerResourcesEntry {
     /// 从 JSON 对象解析；缺少 `url` 或 `sign` 视为无效条目
+    ///
+    /// 字段名按「AppleChu 优先、AquaMai 兼容」读取：同一份响应里两种命名
+    /// 都能生效，方便服务端一次性同时服务 AquaMai 与 AppleChu。
     pub fn from_json(value: &JsonValue) -> Option<Self> {
         let url = value.get("url").and_then(JsonValue::as_str)?;
         let sign = value.get("sign").and_then(JsonValue::as_str)?;
@@ -33,8 +40,14 @@ impl ServerResourcesEntry {
                 .get("locales")
                 .map(JsonValue::string_array)
                 .unwrap_or_default(),
-            minimum_apple_chu_version: optional_string(value, "minimumAppleChuVersion"),
-            maximum_apple_chu_version: optional_string(value, "maximumAppleChuVersion"),
+            minimum_apple_chu_version: optional_string_any(
+                value,
+                &["minimumAppleChuVersion", "minimumAquaMaiVersion"],
+            ),
+            maximum_apple_chu_version: optional_string_any(
+                value,
+                &["maximumAppleChuVersion", "maximumAquaMaiVersion"],
+            ),
             minimum_game_version: value
                 .get("minimumGameVersion")
                 .and_then(JsonValue::as_i64)
@@ -99,13 +112,16 @@ pub fn select_entry<'a>(
         .find(|entry| entry.should_show(locale, game_version))
 }
 
-fn optional_string(value: &JsonValue, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(JsonValue::as_str)
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(ToOwned::to_owned)
+/// 按候选键顺序取第一个非空字符串（AppleChu 键优先，AquaMai 键兜底）
+fn optional_string_any(value: &JsonValue, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value
+            .get(key)
+            .and_then(JsonValue::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(ToOwned::to_owned)
+    })
 }
 
 /// 语言筛选：空列表表示不限制
@@ -180,6 +196,30 @@ mod tests {
         // Then: 解析失败，避免无签名内容进入下载流程。
         let value = json::parse(r#"{"url":"https://example/option.bin"}"#).unwrap();
         assert!(ServerResourcesEntry::from_json(&value).is_none());
+    }
+
+    #[test]
+    fn accepts_aquamai_version_field_names() {
+        // Given: 服务端按 AquaMai 命名下发版本范围（同一份响应同时服务两个客户端）。
+        let entry = entry_from(
+            r#"{"url":"u","sign":"s","minimumAquaMaiVersion":"2.0.0","maximumAquaMaiVersion":"9.9.9"}"#,
+        );
+
+        // Then: 兼容读取，语义与 AppleChu 命名一致。
+        assert_eq!(entry.minimum_apple_chu_version.as_deref(), Some("2.0.0"));
+        assert_eq!(entry.maximum_apple_chu_version.as_deref(), Some("9.9.9"));
+        assert!(entry.should_show(None, 0));
+    }
+
+    #[test]
+    fn apple_chu_field_names_take_priority() {
+        // Given: 两种命名同时出现。
+        let entry = entry_from(
+            r#"{"url":"u","sign":"s","minimumAppleChuVersion":"2.0.0","minimumAquaMaiVersion":"9.0.0"}"#,
+        );
+
+        // Then: 取 AppleChu 命名，不因兼容读取而放宽条件。
+        assert_eq!(entry.minimum_apple_chu_version.as_deref(), Some("2.0.0"));
     }
 
     #[test]

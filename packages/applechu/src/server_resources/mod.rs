@@ -133,33 +133,44 @@ fn on_response(api_name: &str, response: &mut JsonValue) -> bool {
     if api_name != "GetGameSettingApi" {
         return false;
     }
-    let Some(resources) = response.get("_appleChuResources") else {
-        return false;
-    };
+    if let Some(resources) = locate_resources(response) {
+        let entries = entry::parse_entries(resources);
+        if entries.is_empty() {
+            return false;
+        }
 
-    let entries = entry::parse_entries(resources);
-    if entries.is_empty() {
-        return false;
-    }
+        let game_version = game_version_from(response);
+        let Some(selected) = entry::select_entry(&entries, None, game_version) else {
+            log_info(&format!(
+                "ServerResources: {count} entr{suffix} present but none matched (gameVersion={game_version})",
+                count = entries.len(),
+                suffix = if entries.len() == 1 { "y" } else { "ies" }
+            ));
+            return false;
+        };
 
-    let game_version = game_version_from(response);
-    let Some(selected) = entry::select_entry(&entries, None, game_version) else {
         log_info(&format!(
-            "ServerResources: {count} entr{suffix} present but none matched (gameVersion={game_version})",
-            count = entries.len(),
-            suffix = if entries.len() == 1 { "y" } else { "ies" }
+            "ServerResources: entry matched, url={} gameVersion={game_version}",
+            selected.url
         ));
-        return false;
-    };
-
-    log_info(&format!(
-        "ServerResources: entry matched, url={} gameVersion={game_version}",
-        selected.url
-    ));
-    start_download(selected);
+        start_download(selected);
+    }
     // 本功能只读取响应，不改写，因此始终返回 false
     false
 }
+
+/// 找到下发的资源字段
+///
+/// 根级优先；为兼容把字段嵌进 `gameSetting` 的服务器实现，再往里找一层。
+/// 字段名 `_appleChuResources` 与 AquaMai 的 `_aquaMaiResources` 结构一致。
+fn locate_resources(response: &JsonValue) -> Option<&JsonValue> {
+    response
+        .get(RESOURCES_FIELD)
+        .or_else(|| response.get("gameSetting")?.get(RESOURCES_FIELD))
+}
+
+/// 下发字段名（与 AquaMai 的 `_aquaMaiResources` 同构，仅换品牌前缀）
+pub(crate) const RESOURCES_FIELD: &str = "_appleChuResources";
 
 /// 从同一响应派生游戏版本整数（`romVersion` / `dataVersion`）
 ///
