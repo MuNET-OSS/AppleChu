@@ -210,9 +210,7 @@ fn read_entry_data(
 
     match method {
         METHOD_STORE => Ok(data.to_vec()),
-        METHOD_DEFLATE => Err(
-            "option package uses deflate compression, which is not wired up yet".to_owned(),
-        ),
+        METHOD_DEFLATE => crate::server_resources::deflate::inflate(data),
         other => Err(format!("unsupported zip compression method {other}")),
     }
 }

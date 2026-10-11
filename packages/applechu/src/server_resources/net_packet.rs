@@ -157,17 +157,8 @@ fn dispatch(path: &str, body: &[u8]) {
         }
     }
 
-    // 同时广播给 chu-abi 模组，使其能读取/协作处理该响应。
-    // 载荷为 `{"api":"<名>","response":<原始响应>}`，便于订阅方按 API 过滤。
-    if let Some(api) = crate::util::api::API.get() {
-        let mut envelope = String::with_capacity(value.to_string().len() + 32);
-        envelope.push_str("{\"api\":");
-        write_json_string(&name, &mut envelope);
-        envelope.push_str(",\"response\":");
-        envelope.push_str(&value.to_string());
-        envelope.push('}');
-        api.publish(PUBLISH_TOPIC, envelope.as_bytes());
-    }
+    // 同时广播给 chu-abi 模组，使其能读取/协作处理该响应
+    publish(&name, &value);
 
     // 改写结果记录到日志；回写由调用方（游戏自身缓冲）决定，
     // 本桥只读响应，不修改游戏的内存流。
@@ -177,6 +168,22 @@ fn dispatch(path: &str, body: &[u8]) {
             value.to_string().len()
         ));
     }
+}
+
+/// 把一次响应广播到 `net_packet` 主题，供 chu-abi 模组订阅
+///
+/// 载荷为 `{"api":"<名>","response":<响应>}`，便于订阅方按 API 过滤。
+pub(crate) fn publish(api_name: &str, response: &JsonValue) {
+    let Some(api) = crate::util::api::API.get() else {
+        return;
+    };
+    let mut envelope = String::with_capacity(response.to_string().len() + 32);
+    envelope.push_str("{\"api\":");
+    write_json_string(api_name, &mut envelope);
+    envelope.push_str(",\"response\":");
+    envelope.push_str(&response.to_string());
+    envelope.push('}');
+    api.publish(PUBLISH_TOPIC, envelope.as_bytes());
 }
 
 /// 对外广播主题名（chu-abi 模组按此订阅）

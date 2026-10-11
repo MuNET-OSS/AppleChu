@@ -6,12 +6,15 @@
 //!
 //! 流程细节见 `D:\Git\work\plan\服务器下发-架构.md`。
 
+pub mod deflate;
+pub mod dispatcher;
 pub mod download;
 pub mod entry;
 pub mod handle;
 pub mod json;
 pub mod net_packet;
 pub mod package;
+pub mod power_on_gate;
 pub mod vfs_bridge;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,6 +40,12 @@ crate::config_section! {
             pub cache_path: String = String::from("tmp/ServerResources"),
             advanced: true,
             comment: "资源包缓存路径（相对游戏目录）";
+            pub native_dispatcher: bool = true,
+            advanced: true,
+            comment: "挂在原生收包分发器上；关闭则退回 WinHTTP 响应层";
+            pub hold_boot: bool = true,
+            advanced: true,
+            comment: "下载期间挂起开机流程";
         }
     }
 }
@@ -66,21 +75,56 @@ pub(crate) fn init(api: &Api, config: &Config) -> Result<(), String> {
         return Ok(());
     }
 
-    net_packet::subscribe(on_response);
-    net_packet::install(api, config)?;
+    // 信令来源：优先挂在原生分发器（拿逻辑 API 名 + 明文响应），
+    // 关闭或挂钩失败时退回 WinHTTP 响应层。
+    if section.native_dispatcher {
+        match dispatcher::install(api) {
+            Ok(()) => {}
+            Err(error) => {
+                api.log_warn(&format!(
+                    "ServerResources: native dispatcher unavailable ({error}), falling back to WinHTTP"
+                ));
+                net_packet::subscribe(on_response);
+                net_packet::install(api, config)?;
+            }
+        }
+    } else {
+        net_packet::subscribe(on_response);
+        net_packet::install(api, config)?;
+    }
     vfs_bridge::install(api)?;
+    if section.hold_boot {
+        // 闸门装不上不致命：退化为「下载不阻塞开机」
+        if let Err(error) = power_on_gate::install(api) {
+            api.log_warn(&format!("ServerResources: boot gate unavailable: {error}"));
+        }
+    }
     api.log_info("ServerResources: waiting for GetGameSettingApi response");
     Ok(())
 }
 
-/// 关闭：还原 VFS 钩子并释放虚拟句柄
+/// 关闭：还原钩子并释放虚拟句柄
 pub(crate) fn shutdown() {
+    power_on_gate::shutdown();
+    dispatcher::shutdown();
     vfs_bridge::shutdown();
 }
 
 /// 取出已就绪的资源包（未命中时为 `None`）
 pub(crate) fn package() -> Option<&'static package::OptionPackage> {
     PACKAGE.get().and_then(Option::as_ref)
+}
+
+/// 原生分发器回传的响应：解析 JSON 后进入条件筛选
+///
+/// 与 WinHTTP 层共用同一段逻辑，区别只在信令来源。
+pub(crate) fn on_net_response(api_name: &str, body: &str) {
+    let Some(mut value) = json::parse(body) else {
+        return;
+    };
+    // 广播给 chu-abi 模组（与 WinHTTP 路径行为一致）
+    net_packet::publish(api_name, &value);
+    on_response(api_name, &mut value);
 }
 
 /// 信令回调：在 `GetGameSettingApi` 响应中查找下发条目
@@ -142,18 +186,22 @@ fn version_to_int(text: &str) -> i64 {
 }
 
 /// 启动后台下载（只允许一次）
+///
+/// 下载与解析放在独立线程，避免阻塞收包线程；期间由开机闸门把
+/// `projGame::PowerOn` 状态机停在当前帧，下载结束后放行。
 fn start_download(selected: &entry::ServerResourcesEntry) {
     if DOWNLOAD_STARTED.swap(true, Ordering::AcqRel) {
         return;
     }
-    // 下载与解析放在独立线程，避免阻塞收包线程；开机闸门（PowerOn 状态改写）
-    // 接线前，先保证拿到包即可。
+    power_on_gate::begin_block();
     let url = selected.url.clone();
     let sign = selected.sign.clone();
     std::thread::spawn(move || {
         if let Err(error) = fetch_and_load(&url, &sign) {
             log_warn(&format!("ServerResources: {error}"));
         }
+        // 无论成功失败都恢复开机，避免下载异常时卡住
+        power_on_gate::end_block();
     });
 }
 
