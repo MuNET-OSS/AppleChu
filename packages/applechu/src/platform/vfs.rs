@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use once_cell::sync::OnceCell;
 
@@ -11,6 +12,8 @@ use crate::platform::{path_hook, winapi};
 use crate::util::api::Api;
 
 static CONFIG: OnceCell<VfsConfig> = OnceCell::new();
+/// option 根下的子树重定向：(小写目录名, 目标目录)
+static OPTION_OVERRIDES: OnceLock<Mutex<Vec<(String, String)>>> = OnceLock::new();
 static OPTION_API_LOGGED: AtomicBool = AtomicBool::new(false);
 static OPTION_PATH_LOGGED: AtomicBool = AtomicBool::new(false);
 
@@ -123,6 +126,11 @@ pub fn resolve_path(path: &str) -> Option<PathBuf> {
     if normalized == VFS_TMP_ICF && !config.allow_amfs_downloads {
         return Some(PathBuf::from(&config.appdata).join("tmpIcf.icf"));
     }
+    // 自定义 option 的挂载点优先于盘符映射：它的位置可能正好落在某个映射盘上，
+    // 未注册覆盖时返回 `None`，下面的分支一个都不少。
+    if let Some(target) = option_override(config, &normalized) {
+        return Some(target);
+    }
     if let Some(tail) = strip_drive(&normalized, 'e') {
         return Some(join_root(&config.amfs, tail));
     }
@@ -136,12 +144,70 @@ pub fn resolve_path(path: &str) -> Option<PathBuf> {
         return Some(join_root(&config.nthome, tail));
     }
     if let Some(tail) = strip_prefix_dir(&normalized, VFS_OPTION) {
-        return Some(join_root(&config.option, tail));
+        return Some(option_target(config, tail));
     }
     if let Some(tail) = strip_prefix_dir(&normalized, VFS_APM) {
         return Some(join_root(&config.option, tail));
     }
     None
+}
+
+/// option 源路径 → 真实路径
+///
+/// 根下第一段命中自定义 option 覆盖时，该段**被替换**为解压目录（不是简单叠加），
+/// 其余路径原样接在后面；未命中时与没有覆盖时完全一致，落在配置的 option 根下。
+fn option_target(config: &VfsConfig, tail: &str) -> PathBuf {
+    if tail.is_empty() {
+        return PathBuf::from(&config.option);
+    }
+    let mut segments = tail.splitn(2, '\\');
+    let name = segments.next().unwrap_or_default().to_ascii_lowercase();
+    let rest = segments.next().unwrap_or_default();
+    match override_dir(&name) {
+        Some(target) => join_root(&target, rest),
+        None => join_root(&config.option, tail),
+    }
+}
+
+/// 命中挂载根（mount 根由本模块 hook 给出）的 option 子树
+///
+/// 与 [`option_target`] 同理：第一段被替换为解压目录。`normalized` 已小写，
+/// 因此比较也用小写。
+fn option_override(config: &VfsConfig, normalized: &str) -> Option<PathBuf> {
+    let option_root = config.option.trim_end_matches('\\').to_ascii_lowercase();
+    let tail = strip_prefix_dir(normalized, &option_root)?;
+    if tail.is_empty() {
+        return None;
+    }
+    let mut segments = tail.splitn(2, '\\');
+    let name = segments.next()?.to_ascii_lowercase();
+    let rest = segments.next().unwrap_or_default();
+    Some(join_root(&override_dir(&name)?, rest))
+}
+
+/// 查 option 根下某个子目录名的重定向目标（`None` 表示未挂载）
+fn override_dir(name: &str) -> Option<String> {
+    let overrides = OPTION_OVERRIDES.get()?.lock().ok()?;
+    overrides
+        .iter()
+        .find(|(candidate, _)| candidate == name)
+        .map(|(_, target)| target.clone())
+}
+
+/// 注册（或替换）option 根下一个子目录的重定向
+///
+/// 由服务器下发功能在解压完成后调用：`c:\mount\option\<name>\...` 将指向
+/// `target`，读取与枚举都由游戏走真实文件 API 完成。传空 `target` 注销。
+pub fn set_option_override(name: &str, target: &str) {
+    let overrides = OPTION_OVERRIDES.get_or_init(|| Mutex::new(Vec::new()));
+    let Ok(mut overrides) = overrides.lock() else {
+        return;
+    };
+    let key = name.trim_matches('\\').to_ascii_lowercase();
+    overrides.retain(|(candidate, _)| *candidate != key);
+    if !target.is_empty() {
+        overrides.push((key, winapi::fixup_path(Path::new(target))));
+    }
 }
 
 fn strip_drive(path: &str, drive: char) -> Option<&str> {
@@ -203,6 +269,14 @@ pub fn root_cstring(kind: &str) -> Option<CString> {
 
 pub fn amfs_path() -> Option<String> {
     CONFIG.get().map(|config| config.amfs.clone())
+}
+
+/// 游戏原始请求中 option 的**源前缀**（重定向前），规范化小写
+///
+/// 游戏访问 option 时传入的是 `c:\mount\option\...`，`resolve_path` 之后才被
+/// 改写为真实目录；虚拟包匹配必须对源前缀做判断。
+pub fn option_source_prefix() -> String {
+    VFS_OPTION.to_owned()
 }
 
 pub fn appdata_path() -> Option<String> {
