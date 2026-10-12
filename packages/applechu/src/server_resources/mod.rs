@@ -2,7 +2,11 @@
 //!
 //! 架构对齐 AquaMai `ServerResources`：监听游戏正常的 `GetGameSettingApi`
 //! 响应 → 读 `_appleChuResources` → 条件筛选 → 下载 → RSA 验签 → 缓存 →
-//! 解析为内存 Option 包 → 交给 VFS 呈现。资源不落盘（仅缓存包本体）。
+//! 解压为磁盘上的 option 目录树 → 交给 VFS 与游戏本身。
+//!
+//! 缓存只保留资源包本体（与 AquaMai 落一个缓存文件一致，不进游戏目录）；
+//! 解压出的 `AXXX` 树由 `platform/vfs` 重定向呈现，读取与子目录枚举都走游戏
+//! 原有的文件 API，本功能只补 option 根那一级枚举（见 `vfs_bridge`）。
 //!
 //! 流程细节见 `D:\Git\work\plan\服务器下发-架构.md`。
 
@@ -10,17 +14,18 @@ pub mod deflate;
 pub mod dispatcher;
 pub mod download;
 pub mod entry;
-pub mod handle;
 pub mod json;
 pub mod net_packet;
 pub mod package;
 pub mod power_on_gate;
 pub mod vfs_bridge;
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use crate::config::Config;
+use crate::platform::vfs;
 use crate::server_resources::json::JsonValue;
 use crate::util::api::Api;
 
@@ -50,9 +55,29 @@ crate::config_section! {
     }
 }
 
-/// 当前生效的 Option 资源包；供 VFS 层枚举与读取
-static PACKAGE: OnceLock<Option<package::OptionPackage>> = OnceLock::new();
+/// 已挂载的自定义 option 根
+struct MountedOption {
+    /// 根目录名（`AXXX`，保留包内原始大小写）
+    root: String,
+    /// 解压目录绝对路径
+    directory: PathBuf,
+}
+
+/// 当前生效的自定义 option；供枚举注入追加到 option 根
+static MOUNTED: OnceLock<Mutex<Vec<MountedOption>>> = OnceLock::new();
 static DOWNLOAD_STARTED: AtomicBool = AtomicBool::new(false);
+
+fn mounted() -> &'static Mutex<Vec<MountedOption>> {
+    MOUNTED.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// 已挂载的自定义 option 根目录名（按挂载顺序）
+pub(crate) fn mounted_roots() -> Vec<String> {
+    mounted()
+        .lock()
+        .map(|mounted| mounted.iter().map(|entry| entry.root.clone()).collect())
+        .unwrap_or_default()
+}
 
 pub(crate) fn is_enabled(config: &Config) -> bool {
     config
@@ -60,7 +85,7 @@ pub(crate) fn is_enabled(config: &Config) -> bool {
         .is_some_and(|section| section.enabled)
 }
 
-/// 初始化：注册信令处理与网络桥
+/// 初始化：注册信令处理与枚举注入
 #[applechu_macros::config_section(stage = Late, order = 60, shutdown = shutdown)]
 pub(crate) fn init(api: &Api, config: &Config) -> Result<(), String> {
     if !is_enabled(config) {
@@ -103,16 +128,16 @@ pub(crate) fn init(api: &Api, config: &Config) -> Result<(), String> {
     Ok(())
 }
 
-/// 关闭：还原钩子并释放虚拟句柄
+/// 关闭：还原钩子并注销已挂载的 option
 pub(crate) fn shutdown() {
     power_on_gate::shutdown();
     dispatcher::shutdown();
     vfs_bridge::shutdown();
-}
-
-/// 取出已就绪的资源包（未命中时为 `None`）
-pub(crate) fn package() -> Option<&'static package::OptionPackage> {
-    PACKAGE.get().and_then(Option::as_ref)
+    if let Ok(mounted) = mounted().lock() {
+        for entry in mounted.iter() {
+            vfs::set_option_override(&entry.root, "");
+        }
+    }
 }
 
 /// 原生分发器回传的响应：解析 JSON 后进入条件筛选
@@ -204,8 +229,8 @@ fn version_to_int(text: &str) -> i64 {
 
 /// 启动后台下载（只允许一次）
 ///
-/// 下载与解析放在独立线程，避免阻塞收包线程；期间由开机闸门把
-/// `projGame::PowerOn` 状态机停在当前帧，下载结束后放行。
+/// 下载与解压在独立线程，避免阻塞收包线程；期间由开机闸门把
+/// `projGame::PowerOn` 状态机停在当前帧，结束后放行。
 fn start_download(selected: &entry::ServerResourcesEntry) {
     if DOWNLOAD_STARTED.swap(true, Ordering::AcqRel) {
         return;
@@ -214,7 +239,7 @@ fn start_download(selected: &entry::ServerResourcesEntry) {
     let url = selected.url.clone();
     let sign = selected.sign.clone();
     std::thread::spawn(move || {
-        if let Err(error) = fetch_and_load(&url, &sign) {
+        if let Err(error) = fetch_and_mount(&url, &sign) {
             log_warn(&format!("ServerResources: {error}"));
         }
         // 无论成功失败都恢复开机，避免下载异常时卡住
@@ -222,7 +247,7 @@ fn start_download(selected: &entry::ServerResourcesEntry) {
     });
 }
 
-fn fetch_and_load(url: &str, sign: &str) -> Result<(), String> {
+fn fetch_and_mount(url: &str, sign: &str) -> Result<(), String> {
     let Some(api) = crate::util::api::API.get() else {
         return Err("api handle is not available".to_owned());
     };
@@ -236,7 +261,7 @@ fn fetch_and_load(url: &str, sign: &str) -> Result<(), String> {
     if let Ok(cached) = std::fs::read(&cache) {
         if crate::util::crypto::verify_signature(&public_key, &cached, sign) {
             api.log_info("ServerResources: cache hit, loading from cache");
-            return load_package(&cached);
+            return mount_package(&cached);
         }
         api.log_warn("ServerResources: cache signature mismatch, re-downloading");
         let _ = std::fs::remove_file(&cache);
@@ -253,16 +278,34 @@ fn fetch_and_load(url: &str, sign: &str) -> Result<(), String> {
     if let Err(error) = std::fs::write(&cache, &bytes) {
         api.log_warn(&format!("ServerResources: cache write failed: {error}"));
     }
-    load_package(&bytes)
+    mount_package(&bytes)
 }
 
-fn load_package(bytes: &[u8]) -> Result<(), String> {
+/// 解析包并挂载：解压到缓存目录，再把 option 子树重定向过去
+fn mount_package(bytes: &[u8]) -> Result<(), String> {
     let package = package::OptionPackage::parse(bytes)?;
     let root = package.root().to_owned();
-    let count = package.file_count();
-    let _ = PACKAGE.set(Some(package));
+    let directory = extract_dir(&root)?;
+
+    // 覆盖安装：先清掉上一次的内容，避免残留已从包中移除的文件
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    let written = package.extract_to(&directory)?;
+
+    // 挂载：`c:\mount\option\<root>\...` 指向解压目录
+    let target = directory.to_string_lossy().into_owned();
+    vfs::set_option_override(&root, &target);
+    if let Ok(mut mounted) = mounted().lock() {
+        mounted.retain(|entry| entry.root != root);
+        mounted.push(MountedOption {
+            root: root.clone(),
+            directory: directory.clone(),
+        });
+    }
     log_info(&format!(
-        "ServerResources: option package ready root={root} files={count}"
+        "ServerResources: option mounted root={root} files={written} dir={}",
+        directory.display()
     ));
     Ok(())
 }
@@ -281,6 +324,23 @@ fn resolve_cache_path(configured: &str) -> String {
             format!("{base}\\{normalized}")
         }
     }
+}
+
+/// 某个自定义 option 的解压目录：缓存路径加 `.d` 后缀
+///
+/// 解压目录与缓存文件同名不同层级，改 `cache_path` 时两者一起走。
+fn extract_dir(root: &str) -> Result<PathBuf, String> {
+    let Some((_, cache_path)) = api_config() else {
+        return Err("ServerResources config is not available".to_owned());
+    };
+    let cache = resolve_cache_path(&cache_path);
+    let mut directory = PathBuf::from(format!("{cache}.d"));
+    // 包内根目录名已由 `package` 校验过（无分隔符与 `..`），这里再挡一次
+    if root.is_empty() || root.contains(['\\', '/', ':']) || root.contains("..") {
+        return Err(format!("option package has an unsafe root name: {root}"));
+    }
+    directory.push(root);
+    Ok(directory)
 }
 
 /// 取当前配置中的 ServerResources 段（公钥与缓存路径）
@@ -342,5 +402,25 @@ mod tests {
         // Then: 展开到游戏目录下，且不因缺少 base_dir 而 panic。
         let path = resolve_cache_path("tmp/ServerResources");
         assert!(path.ends_with("tmp\\ServerResources"));
+    }
+
+    #[test]
+    fn extract_directory_sits_next_to_the_cache_file() {
+        // Given: 一个合法的包内根目录名。
+        // Then: 解压目录是缓存路径加 `.d`，再拼上根目录名。
+        let directory = extract_dir("A123").expect("应能构造解压目录");
+        assert!(directory
+            .to_string_lossy()
+            .ends_with("ServerResources.d\\A123"));
+    }
+
+    #[test]
+    fn unsafe_root_names_are_rejected() {
+        // Given: 含分隔符或穿越段的根目录名。
+        // Then: 一律拒绝，避免解压写出缓存目录之外。
+        assert!(extract_dir("").is_err());
+        assert!(extract_dir("..").is_err());
+        assert!(extract_dir("a\\b").is_err());
+        assert!(extract_dir("C:").is_err());
     }
 }

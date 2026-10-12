@@ -1,184 +1,159 @@
-//! Option VFS 桥接
+//! Option 枚举注入
 //!
-//! 把内存中的 Option 包呈现给游戏：枚举目录时注入虚拟 `AXXX` 根，
-//! 读取文件时由内存内容服务。资源不落盘，磁盘上只保留缓存包本身。
+//! 服务器下发的自定义 option 解压在缓存目录里，由 `platform/vfs` 把
+//! `c:\mount\option\<AXXX>\...` 重定向到那里——**读取与子目录枚举都交给游戏走
+//! 真实文件 API**。唯独 option 根那一级枚举需要本模块补一刀：包内根目录并不在
+//! 游戏真实的 option 目录里，`FindFirstFile` 扫 `c:\mount\option\*` 时看不见它。
 //!
-//! ## 挂在哪一层
+//! 语义是**叠加**：真实枚举照常跑并原样返回，虚拟根追加在其后，磁盘原有
+//! option（A001 等）的顺序与内容完全不变。
 //!
-//! `platform/path_hook` 已经把游戏的 option 访问改写到一个可变根目录
-//! （默认 `<游戏目录>\option`），但只做路径改写、不注入条目。这里在**其之上**
-//! 再包一层：保留 `path_hook` 的原始指针，自己优先处理虚拟内容，未命中时
-//! 转交 `path_hook`（按路径改写）再落到系统 API。
-//!
-//! ## 关键点
-//!
-//! - 目录枚举用「合成句柄」：只在 `path_hook` 的原始 `FindFirstFileW` 失败
-//!   （目标目录不存在）时才创建，避免与真实句柄混淆；合成句柄高位标记，
-//!   不会与内核句柄冲突。
-//! - 文件内容用**真实的 `\\.\NUL` 句柄**承载：`CreateFileW` 命中虚拟路径时
-//!   打开 NUL，并把真实句柄登记进 `handle` 表；`ReadFile` / `GetFileSize` /
-//!   `SetFilePointer` / `CloseHandle` 按句柄查表即可区分虚拟与真实文件。
-//!   即便某个真实 API 没被钩到，拿到 NUL 句柄也只是读到 0 字节，不会误读磁盘。
+//! 游戏 option 扫描走的是 **ANSI**（`FindFirstFileExA` + `FindNextFileA`），
+//! 因此 A 与 W 两个变体都必须挂。
 
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-// 这些导入在 Windows 上是真实插件依赖；合成句柄用高位掩码避开内核句柄空间。
 use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
-use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, WIN32_FIND_DATAW,
-};
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
 
 use crate::platform::{vfs, winapi};
-use crate::server_resources::handle;
 use crate::util::api::Api;
 use crate::util::iat_hook::hook_iat;
 
 const KERNEL32_DLL: &str = "kernel32.dll";
-/// `INVALID_FILE_ATTRIBUTES`
-const INVALID_FILE_ATTRIBUTES: u32 = u32::MAX;
-/// `GetFileSize` 失败返回值
-const INVALID_FILE_SIZE: u32 = u32::MAX;
-/// 合成枚举句柄的高位标记（内核句柄不会落到该区间）
+/// 合成枚举句柄的高位标记
 const SYNTHETIC_FLAG: usize = 1 << 31;
-/// `SetFilePointer` 的 `FILE_BEGIN`
-const FILE_BEGIN: u32 = 0;
+/// 同时打开的合成枚举上限，避免异常调用把状态表撑爆
+const MAX_SYNTHETIC: usize = 64;
+/// `WIN32_FIND_DATAA` / `WIN32_FIND_DATAW` 的名称都在偏移 44，
+/// 宽度分别是 260 字节与 260 个 UTF-16 单元
+const FIND_DATA_NAME_OFFSET: usize = 44;
+const FIND_DATA_NAME_MAX: usize = 260;
+const FIND_DATA_SIZE_A: usize = 320;
+const FIND_DATA_SIZE_W: usize = 592;
 
-type FindFirstFileWFn = unsafe extern "system" fn(*const u16, *mut WIN32_FIND_DATAW) -> HANDLE;
-type FindNextFileWFn = unsafe extern "system" fn(HANDLE, *mut WIN32_FIND_DATAW) -> i32;
+type FindFirstFileAFn = unsafe extern "system" fn(*const i8, *mut c_void) -> HANDLE;
+type FindFirstFileWFn = unsafe extern "system" fn(*const u16, *mut c_void) -> HANDLE;
+type FindFirstFileExAFn =
+    unsafe extern "system" fn(*const i8, u32, *mut c_void, u32, *mut c_void, u32) -> HANDLE;
+type FindFirstFileExWFn =
+    unsafe extern "system" fn(*const u16, u32, *mut c_void, u32, *mut c_void, u32) -> HANDLE;
+type FindNextFileFn = unsafe extern "system" fn(HANDLE, *mut c_void) -> i32;
 type FindCloseFn = unsafe extern "system" fn(HANDLE) -> i32;
-type CreateFileWFn =
-    unsafe extern "system" fn(*const u16, u32, u32, *const c_void, u32, u32, HANDLE) -> HANDLE;
-type ReadFileFn = unsafe extern "system" fn(HANDLE, *mut c_void, u32, *mut u32, *mut c_void) -> i32;
-type GetFileSizeFn = unsafe extern "system" fn(HANDLE, *mut u32) -> u32;
-type GetFileSizeExFn = unsafe extern "system" fn(HANDLE, *mut i64) -> i32;
-type SetFilePointerFn = unsafe extern "system" fn(HANDLE, i32, *mut i32, u32) -> u32;
-type SetFilePointerExFn = unsafe extern "system" fn(HANDLE, i64, *mut i64, u32) -> i32;
-type CloseHandleFn = unsafe extern "system" fn(HANDLE) -> i32;
 
-/// 我们包装后的 API 指针（未命中虚拟内容时转交）
+/// 包装后的 API 指针（未命中虚拟内容时转交 path_hook 的下一跳）
+static NEXT_FIND_FIRST_FILE_A: AtomicUsize = AtomicUsize::new(0);
 static NEXT_FIND_FIRST_FILE_W: AtomicUsize = AtomicUsize::new(0);
+static NEXT_FIND_FIRST_FILE_EX_A: AtomicUsize = AtomicUsize::new(0);
+static NEXT_FIND_FIRST_FILE_EX_W: AtomicUsize = AtomicUsize::new(0);
+static NEXT_FIND_NEXT_FILE_A: AtomicUsize = AtomicUsize::new(0);
 static NEXT_FIND_NEXT_FILE_W: AtomicUsize = AtomicUsize::new(0);
 static NEXT_FIND_CLOSE: AtomicUsize = AtomicUsize::new(0);
-static NEXT_CREATE_FILE_W: AtomicUsize = AtomicUsize::new(0);
-static NEXT_READ_FILE: AtomicUsize = AtomicUsize::new(0);
-static NEXT_GET_FILE_SIZE: AtomicUsize = AtomicUsize::new(0);
-static NEXT_GET_FILE_SIZE_EX: AtomicUsize = AtomicUsize::new(0);
-static NEXT_SET_FILE_POINTER: AtomicUsize = AtomicUsize::new(0);
-static NEXT_SET_FILE_POINTER_EX: AtomicUsize = AtomicUsize::new(0);
-static NEXT_CLOSE_HANDLE: AtomicUsize = AtomicUsize::new(0);
 
-/// 合成枚举句柄 → 待吐出的条目（倒序弹出）
-static SYNTHETIC: OnceLock<Mutex<HashMap<usize, Vec<InjectedEntry>>>> = OnceLock::new();
+/// 合成枚举句柄 → 枚举状态
+static SYNTHETIC: OnceLock<Mutex<HashMap<usize, SyntheticState>>> = OnceLock::new();
 static NEXT_SYNTHETIC: AtomicUsize = AtomicUsize::new(0);
 
-struct InjectedEntry {
-    name: String,
-    directory: bool,
+struct SyntheticState {
+    /// 真实枚举结束后才吐出的虚拟条目
+    injected: Vec<String>,
+    /// 真实枚举句柄；根目录不存在时为 0（此时虚拟条目立即可用）
+    real: usize,
+    /// 真实枚举是否已结束
+    real_done: bool,
+    /// 该句柄属于宽字符还是 ANSI 变体（决定填充与转交哪个 API）
+    wide: bool,
 }
 
-fn synthetic() -> &'static Mutex<HashMap<usize, Vec<InjectedEntry>>> {
+fn synthetic() -> &'static Mutex<HashMap<usize, SyntheticState>> {
     SYNTHETIC.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// 安装 VFS 桥接；须在 `platform` 阶段（`path_hook` 安装完成）之后调用
+/// 安装枚举注入；须在 `platform` 阶段（`path_hook` 安装完成）之后调用
+///
+/// 游戏只导入其中一部分 API，缺失的跳过而不是整体失败。
 pub fn install(api: &Api) -> Result<(), String> {
-    unsafe {
-        bind(
-            api,
+    let mut bound = 0usize;
+    let mut missing: Vec<&str> = Vec::new();
+
+    for (name, detour, slot) in hooks() {
+        // 只挂游戏主模块：path_hook 已把它的下一跳铺进各模块的 IAT
+        let previous = unsafe { hook_iat(api.game_base(), KERNEL32_DLL, name, detour) };
+        match previous {
+            Some(previous) => {
+                slot.store(previous as usize, Ordering::SeqCst);
+                bound += 1;
+            }
+            None => missing.push(name),
+        }
+    }
+
+    if bound == 0 {
+        return Err("no directory enumeration import found in game module".to_owned());
+    }
+    api.log_info(&format!(
+        "ServerResources: option enumeration hook installed ({bound} APIs)"
+    ));
+    if !missing.is_empty() {
+        api.log_warn(&format!(
+            "ServerResources: not imported by game module, skipped: {}",
+            missing.join(", ")
+        ));
+    }
+    Ok(())
+}
+
+/// 需要挂接的 API 表
+fn hooks() -> [(&'static str, *const (), &'static AtomicUsize); 7] {
+    [
+        (
+            "FindFirstFileA",
+            hooked_find_first_file_a as *const (),
+            &NEXT_FIND_FIRST_FILE_A,
+        ),
+        (
             "FindFirstFileW",
             hooked_find_first_file_w as *const (),
             &NEXT_FIND_FIRST_FILE_W,
-        )?;
-        bind(
-            api,
+        ),
+        (
+            "FindFirstFileExA",
+            hooked_find_first_file_ex_a as *const (),
+            &NEXT_FIND_FIRST_FILE_EX_A,
+        ),
+        (
+            "FindFirstFileExW",
+            hooked_find_first_file_ex_w as *const (),
+            &NEXT_FIND_FIRST_FILE_EX_W,
+        ),
+        (
+            "FindNextFileA",
+            hooked_find_next_file_a as *const (),
+            &NEXT_FIND_NEXT_FILE_A,
+        ),
+        (
             "FindNextFileW",
             hooked_find_next_file_w as *const (),
             &NEXT_FIND_NEXT_FILE_W,
-        )?;
-        bind(
-            api,
+        ),
+        (
             "FindClose",
             hooked_find_close as *const (),
             &NEXT_FIND_CLOSE,
-        )?;
-        bind(
-            api,
-            "CreateFileW",
-            hooked_create_file_w as *const (),
-            &NEXT_CREATE_FILE_W,
-        )?;
-        bind(
-            api,
-            "ReadFile",
-            hooked_read_file as *const (),
-            &NEXT_READ_FILE,
-        )?;
-        bind(
-            api,
-            "GetFileSize",
-            hooked_get_file_size as *const (),
-            &NEXT_GET_FILE_SIZE,
-        )?;
-        bind(
-            api,
-            "GetFileSizeEx",
-            hooked_get_file_size_ex as *const (),
-            &NEXT_GET_FILE_SIZE_EX,
-        )?;
-        bind(
-            api,
-            "SetFilePointer",
-            hooked_set_file_pointer as *const (),
-            &NEXT_SET_FILE_POINTER,
-        )?;
-        bind(
-            api,
-            "SetFilePointerEx",
-            hooked_set_file_pointer_ex as *const (),
-            &NEXT_SET_FILE_POINTER_EX,
-        )?;
-        bind(
-            api,
-            "CloseHandle",
-            hooked_close_handle as *const (),
-            &NEXT_CLOSE_HANDLE,
-        )?;
-    }
-    api.log_info("ServerResources: option VFS bridge installed");
-    Ok(())
+        ),
+    ]
 }
 
-/// 把 detour 挂到目标进程内该导入的**当前**实现上，并保留它作为下一跳
-unsafe fn bind(api: &Api, name: &str, detour: *const (), slot: &AtomicUsize) -> Result<(), String> {
-    // 只挂游戏主模块：避免与 path_hook 覆盖的其他模块重复包装
-    let previous = hook_iat(api.game_base(), KERNEL32_DLL, name, detour);
-    let Some(previous) = previous else {
-        return Err(format!("{name} import not found in game module"));
-    };
-    slot.store(previous as usize, Ordering::SeqCst);
-    Ok(())
-}
-
-/// 卸载：还原导入（把下一跳写回）
+/// 卸载：还原导入（把下一跳写回）并丢弃未完成的枚举状态
 pub fn shutdown() {
-    handle::close_all();
     if let Ok(mut synthetic) = synthetic().lock() {
         synthetic.clear();
     }
-    unsafe {
-        restore("FindFirstFileW", &NEXT_FIND_FIRST_FILE_W);
-        restore("FindNextFileW", &NEXT_FIND_NEXT_FILE_W);
-        restore("FindClose", &NEXT_FIND_CLOSE);
-        restore("CreateFileW", &NEXT_CREATE_FILE_W);
-        restore("ReadFile", &NEXT_READ_FILE);
-        restore("GetFileSize", &NEXT_GET_FILE_SIZE);
-        restore("GetFileSizeEx", &NEXT_GET_FILE_SIZE_EX);
-        restore("SetFilePointer", &NEXT_SET_FILE_POINTER);
-        restore("SetFilePointerEx", &NEXT_SET_FILE_POINTER_EX);
-        restore("CloseHandle", &NEXT_CLOSE_HANDLE);
+    for (name, _, slot) in hooks() {
+        unsafe { restore(name, slot) };
     }
 }
 
@@ -192,288 +167,317 @@ unsafe fn restore(name: &str, slot: &AtomicUsize) {
     }
 }
 
-/// 命中 option 根通配时返回包内根目录名
+/// 枚举通配路径是否正对 option 根（`c:\mount\option\*`）
 ///
-/// 游戏请求的是重定向前的源路径 `c:\mount\option\*`，因此用源前缀比对。
-fn option_root_glob(path: &str) -> Option<String> {
-    let source = vfs::option_source_prefix();
+/// 游戏请求的是重定向前的源路径。通配符必须落在最后一段，且目录必须**正好**
+/// 是 option 根——更深一层已由 `platform/vfs` 重定向到真实目录，游戏自己能枚举。
+fn is_option_root_glob(path: &str) -> bool {
     let normalized = winapi::normalize_path(path);
-    let directory = normalized.trim_end_matches('\\').trim_end_matches("*");
-    if directory.trim_end_matches('\\') != source.trim_end_matches('\\') {
-        return None;
+    let Some(star) = normalized.rfind('*') else {
+        return false;
+    };
+    if normalized[star..].contains('\\') {
+        return false;
     }
-    crate::server_resources::package().map(|package| package.root().to_owned())
+    normalized[..star].trim_end_matches('\\') == option_source()
 }
 
-/// 路径是否指向虚拟包内文件，返回包内 key
-fn package_key(path: &str) -> Option<String> {
-    let package = crate::server_resources::package()?;
-    let source = vfs::option_source_prefix();
-    let normalized = winapi::normalize_path(path);
-    let prefix = format!("{}\\", source.trim_end_matches('\\'));
-    let relative = normalized.strip_prefix(&prefix)?;
-    let key = relative.replace('\\', "/");
-    package.contains(&key).then_some(key)
+fn option_source() -> String {
+    vfs::option_source_prefix()
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
 }
 
-/// 把名称写入 `WIN32_FIND_DATAW`
-unsafe fn fill_entry(name: &str, directory: bool, data: *mut WIN32_FIND_DATAW) {
+// ---------------------------------------------------------------------------
+// `WIN32_FIND_DATA` 读写（A 与 W 共用偏移）
+// ---------------------------------------------------------------------------
+
+unsafe fn fill_find_data(name: &str, data: *mut c_void, wide: bool) {
     if data.is_null() {
         return;
     }
-    std::ptr::write_bytes(data, 0, 1);
-    (*data).dwFileAttributes = if directory {
-        FILE_ATTRIBUTE_DIRECTORY
+    let size = if wide {
+        FIND_DATA_SIZE_W
     } else {
-        FILE_ATTRIBUTE_NORMAL
+        FIND_DATA_SIZE_A
     };
-    let wide = winapi::string_to_wide(name);
-    let units = wide.len().min(259);
-    std::ptr::copy_nonoverlapping(wide.as_ptr(), (*data).cFileName.as_mut_ptr(), units);
+    std::ptr::write_bytes(data as *mut u8, 0, size);
+    // 注入的都是 option 根目录
+    std::ptr::write_unaligned(data as *mut u32, FILE_ATTRIBUTE_DIRECTORY);
+
+    let target = (data as *mut u8).add(FIND_DATA_NAME_OFFSET);
+    if wide {
+        let units = target.cast::<u16>();
+        for (index, unit) in name.encode_utf16().take(FIND_DATA_NAME_MAX - 1).enumerate() {
+            std::ptr::write_unaligned(units.add(index), unit);
+        }
+    } else {
+        for (index, byte) in name.bytes().take(FIND_DATA_NAME_MAX - 1).enumerate() {
+            *target.add(index) = byte;
+        }
+    }
 }
+
+unsafe fn name_from(data: *const c_void, wide: bool) -> String {
+    if data.is_null() {
+        return String::new();
+    }
+    let name = (data as *const u8).add(FIND_DATA_NAME_OFFSET);
+    let mut length = 0usize;
+    if wide {
+        let units = name.cast::<u16>();
+        while length < FIND_DATA_NAME_MAX && *units.add(length) != 0 {
+            length += 1;
+        }
+        String::from_utf16_lossy(std::slice::from_raw_parts(units, length))
+    } else {
+        while length < FIND_DATA_NAME_MAX && *name.add(length) != 0 {
+            length += 1;
+        }
+        String::from_utf8_lossy(std::slice::from_raw_parts(name, length)).into_owned()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 枚举注入
+// ---------------------------------------------------------------------------
 
 fn next_synthetic_handle() -> usize {
     let token = NEXT_SYNTHETIC.fetch_add(1, Ordering::Relaxed);
     token | SYNTHETIC_FLAG
 }
 
-unsafe extern "system" fn hooked_find_first_file_w(
-    path: *const u16,
-    data: *mut WIN32_FIND_DATAW,
-) -> HANDLE {
-    let next = NEXT_FIND_FIRST_FILE_W.load(Ordering::SeqCst);
-    if next == 0 {
-        return INVALID_HANDLE_VALUE;
+/// 把已挂载的自定义 option 根接到 `real` 枚举结果之后
+///
+/// `real` 是调用方已经取到的真实枚举结果（也可能失败）。真实根目录存在时真实
+/// 条目先行、虚拟条目排在其后；不存在时用合成句柄直接交付虚拟条目。
+unsafe fn inject_option_roots(real: HANDLE, data: *mut c_void, wide: bool) -> HANDLE {
+    let roots = crate::server_resources::mounted_roots();
+    if roots.is_empty() {
+        return real;
     }
-    let next: FindFirstFileWFn = std::mem::transmute(next);
 
-    if let Some(path_text) = winapi::wide_to_string(path) {
-        if let Some(root) = option_root_glob(&path_text) {
-            // 先让真实枚举跑一遍：目录存在时交给它（本功能只做增量挂载）
-            let real = next(path, data);
-            if real != INVALID_HANDLE_VALUE {
-                return real;
-            }
-            // 目录不存在：用合成句柄承载注入条目
-            let handle_value = next_synthetic_handle();
-            if let Ok(mut synthetic) = synthetic().lock() {
-                synthetic.insert(handle_value, Vec::new());
-            }
-            fill_entry(&root, true, data);
-            return handle_value as HANDLE;
-        }
+    if real == INVALID_HANDLE_VALUE {
+        // 真实 option 目录不存在：合成句柄，首个条目随 FindFirstFile 一起交付
+        let mut injected: Vec<String> = roots.into_iter().rev().collect();
+        let Some(first) = injected.pop() else {
+            return real;
+        };
+        let Some(handle_value) = reserve_synthetic(SyntheticState {
+            injected,
+            real: 0,
+            real_done: true,
+            wide,
+        }) else {
+            return real;
+        };
+        fill_find_data(&first, data, wide);
+        return handle_value as HANDLE;
     }
-    next(path, data)
+
+    // 真实根目录存在：真实条目先行，虚拟根排在最后；同名则不再重复
+    let first = name_from(data, wide);
+    let injected: Vec<String> = roots
+        .into_iter()
+        .filter(|root| !root.eq_ignore_ascii_case(&first))
+        .rev()
+        .collect();
+    if injected.is_empty() {
+        return real;
+    }
+    let Some(handle_value) = reserve_synthetic(SyntheticState {
+        injected,
+        real: real as usize,
+        real_done: false,
+        wide,
+    }) else {
+        return real;
+    };
+    handle_value as HANDLE
 }
 
-unsafe extern "system" fn hooked_find_next_file_w(
-    handle: HANDLE,
-    data: *mut WIN32_FIND_DATAW,
-) -> i32 {
-    if (handle as usize) & SYNTHETIC_FLAG != 0 {
-        let Ok(mut synthetic) = synthetic().lock() else {
-            return 0;
-        };
-        if let Some(entries) = synthetic.get_mut(&(handle as usize)) {
-            if let Some(entry) = entries.pop() {
-                fill_entry(&entry.name, entry.directory, data);
-                return 1;
+/// 登记一个合成枚举状态；超出上限时返回 `None`（调用方回退真实结果）
+fn reserve_synthetic(state: SyntheticState) -> Option<usize> {
+    let mut synthetic = synthetic().lock().ok()?;
+    if synthetic.len() >= MAX_SYNTHETIC {
+        log_warn("ServerResources: too many open enumerations, skipping injection");
+        return None;
+    }
+    let handle_value = next_synthetic_handle();
+    synthetic.insert(handle_value, state);
+    Some(handle_value)
+}
+
+/// 合成句柄的下一项；不是合成句柄时返回 `None`（调用方转交真实 API）
+unsafe fn synthetic_next(handle: HANDLE, data: *mut c_void) -> Option<i32> {
+    if (handle as usize) & SYNTHETIC_FLAG == 0 {
+        return None;
+    }
+    let Ok(mut synthetic) = synthetic().lock() else {
+        return Some(0);
+    };
+    let Some(state) = synthetic.get_mut(&(handle as usize)) else {
+        return Some(0);
+    };
+
+    // 先走真实枚举；结束后再追加虚拟条目，保证原有顺序不变
+    if !state.real_done {
+        if state.real != 0 {
+            let slot = if state.wide {
+                &NEXT_FIND_NEXT_FILE_W
+            } else {
+                &NEXT_FIND_NEXT_FILE_A
+            };
+            if let Some(next) = next_fn::<FindNextFileFn>(slot) {
+                if next(state.real as HANDLE, data) != 0 {
+                    // 真实目录已有同名项则不再追加虚拟根，避免重复
+                    let name = name_from(data, state.wide);
+                    state
+                        .injected
+                        .retain(|root| !root.eq_ignore_ascii_case(&name));
+                    return Some(1);
+                }
             }
         }
-        return 0;
+        state.real_done = true;
     }
-    let next = NEXT_FIND_NEXT_FILE_W.load(Ordering::SeqCst);
-    if next == 0 {
-        return 0;
+
+    match state.injected.pop() {
+        Some(root) => {
+            fill_find_data(&root, data, state.wide);
+            Some(1)
+        }
+        None => Some(0),
     }
-    let next: FindNextFileWFn = std::mem::transmute(next);
-    next(handle, data)
+}
+
+/// 关闭合成句柄，回收其真实句柄
+unsafe fn synthetic_close(handle: HANDLE) -> Option<i32> {
+    if (handle as usize) & SYNTHETIC_FLAG == 0 {
+        return None;
+    }
+    let real = synthetic()
+        .lock()
+        .ok()
+        .and_then(|mut synthetic| synthetic.remove(&(handle as usize)).map(|state| state.real))
+        .unwrap_or(0);
+    if real != 0 {
+        if let Some(next) = next_fn::<FindCloseFn>(&NEXT_FIND_CLOSE) {
+            next(real as HANDLE);
+        }
+    }
+    Some(1)
+}
+
+unsafe fn inject_from_path(
+    path: Option<String>,
+    real: HANDLE,
+    data: *mut c_void,
+    wide: bool,
+) -> HANDLE {
+    match path {
+        Some(path) if is_option_root_glob(&path) => inject_option_roots(real, data, wide),
+        _ => real,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 枚举钩子
+// ---------------------------------------------------------------------------
+
+unsafe extern "system" fn hooked_find_first_file_a(path: *const i8, data: *mut c_void) -> HANDLE {
+    let Some(next) = next_fn::<FindFirstFileAFn>(&NEXT_FIND_FIRST_FILE_A) else {
+        return INVALID_HANDLE_VALUE;
+    };
+    let real = next(path, data);
+    let text = winapi::cstr_to_string(path);
+    inject_from_path(text, real, data, false)
+}
+
+unsafe extern "system" fn hooked_find_first_file_w(path: *const u16, data: *mut c_void) -> HANDLE {
+    let Some(next) = next_fn::<FindFirstFileWFn>(&NEXT_FIND_FIRST_FILE_W) else {
+        return INVALID_HANDLE_VALUE;
+    };
+    let real = next(path, data);
+    let text = winapi::wide_to_string(path);
+    inject_from_path(text, real, data, true)
+}
+
+unsafe extern "system" fn hooked_find_first_file_ex_a(
+    path: *const i8,
+    info_level: u32,
+    data: *mut c_void,
+    search_op: u32,
+    filter: *mut c_void,
+    flags: u32,
+) -> HANDLE {
+    let Some(next) = next_fn::<FindFirstFileExAFn>(&NEXT_FIND_FIRST_FILE_EX_A) else {
+        return INVALID_HANDLE_VALUE;
+    };
+    let real = next(path, info_level, data, search_op, filter, flags);
+    let text = winapi::cstr_to_string(path);
+    inject_from_path(text, real, data, false)
+}
+
+unsafe extern "system" fn hooked_find_first_file_ex_w(
+    path: *const u16,
+    info_level: u32,
+    data: *mut c_void,
+    search_op: u32,
+    filter: *mut c_void,
+    flags: u32,
+) -> HANDLE {
+    let Some(next) = next_fn::<FindFirstFileExWFn>(&NEXT_FIND_FIRST_FILE_EX_W) else {
+        return INVALID_HANDLE_VALUE;
+    };
+    let real = next(path, info_level, data, search_op, filter, flags);
+    let text = winapi::wide_to_string(path);
+    inject_from_path(text, real, data, true)
+}
+
+unsafe extern "system" fn hooked_find_next_file_a(handle: HANDLE, data: *mut c_void) -> i32 {
+    if let Some(result) = synthetic_next(handle, data) {
+        return result;
+    }
+    match next_fn::<FindNextFileFn>(&NEXT_FIND_NEXT_FILE_A) {
+        Some(next) => next(handle, data),
+        None => 0,
+    }
+}
+
+unsafe extern "system" fn hooked_find_next_file_w(handle: HANDLE, data: *mut c_void) -> i32 {
+    if let Some(result) = synthetic_next(handle, data) {
+        return result;
+    }
+    match next_fn::<FindNextFileFn>(&NEXT_FIND_NEXT_FILE_W) {
+        Some(next) => next(handle, data),
+        None => 0,
+    }
 }
 
 unsafe extern "system" fn hooked_find_close(handle: HANDLE) -> i32 {
-    if (handle as usize) & SYNTHETIC_FLAG != 0 {
-        if let Ok(mut synthetic) = synthetic().lock() {
-            synthetic.remove(&(handle as usize));
-        }
-        return 1;
+    if let Some(result) = synthetic_close(handle) {
+        return result;
     }
-    let next = NEXT_FIND_CLOSE.load(Ordering::SeqCst);
-    if next == 0 {
-        return 0;
+    match next_fn::<FindCloseFn>(&NEXT_FIND_CLOSE) {
+        Some(next) => next(handle),
+        None => 0,
     }
-    let next: FindCloseFn = std::mem::transmute(next);
-    next(handle)
 }
 
-unsafe extern "system" fn hooked_create_file_w(
-    path: *const u16,
-    access: u32,
-    share: u32,
-    security: *const c_void,
-    creation: u32,
-    flags: u32,
-    template: HANDLE,
-) -> HANDLE {
-    let next = NEXT_CREATE_FILE_W.load(Ordering::SeqCst);
-    if next == 0 {
-        return INVALID_HANDLE_VALUE;
+/// 取出下一跳函数指针；未挂接时为 `None`
+unsafe fn next_fn<T>(slot: &AtomicUsize) -> Option<T> {
+    let value = slot.load(Ordering::SeqCst);
+    if value == 0 {
+        return None;
     }
-    let next: CreateFileWFn = std::mem::transmute(next);
-
-    if let Some(path_text) = winapi::wide_to_string(path) {
-        if let Some(key) = package_key(&path_text) {
-            let length = crate::server_resources::package()
-                .and_then(|package| package.read_file(&key).map(<[u8]>::len))
-                .unwrap_or(0);
-            // \\.\NUL 必然可打开，且 CloseHandle 语义正常
-            let nul = winapi::string_to_wide("\\\\.\\NUL");
-            let real = next(
-                nul.as_ptr(),
-                access,
-                share,
-                security,
-                creation,
-                flags,
-                template,
-            );
-            if real != INVALID_HANDLE_VALUE && handle::register(real as usize, &key, length) {
-                return real;
-            }
-        }
-    }
-    next(path, access, share, security, creation, flags, template)
+    Some(std::mem::transmute_copy::<usize, T>(&value))
 }
 
-unsafe extern "system" fn hooked_read_file(
-    file: HANDLE,
-    buffer: *mut c_void,
-    to_read: u32,
-    read: *mut u32,
-    overlapped: *mut c_void,
-) -> i32 {
-    if let Some((key, offset, count)) = handle::read(file as usize, to_read as usize) {
-        let mut transferred = 0u32;
-        if let Some(package) = crate::server_resources::package() {
-            if let Some(data) = package.read_file(&key) {
-                let start = offset.min(data.len());
-                let available = (data.len() - start).min(count);
-                if available > 0 && !buffer.is_null() {
-                    std::ptr::copy_nonoverlapping(
-                        data[start..].as_ptr(),
-                        buffer as *mut u8,
-                        available,
-                    );
-                }
-                transferred = available as u32;
-            }
-        }
-        if !read.is_null() {
-            *read = transferred;
-        }
-        return 1;
+fn log_warn(message: &str) {
+    if let Some(api) = crate::util::api::API.get() {
+        api.log_warn(message);
     }
-    let next = NEXT_READ_FILE.load(Ordering::SeqCst);
-    if next == 0 {
-        return 0;
-    }
-    let next: ReadFileFn = std::mem::transmute(next);
-    next(file, buffer, to_read, read, overlapped)
-}
-
-unsafe extern "system" fn hooked_get_file_size(file: HANDLE, high: *mut u32) -> u32 {
-    if let Some((length, _)) = handle::size_and_position(file as usize) {
-        if !high.is_null() {
-            *high = ((length as u64) >> 32) as u32;
-        }
-        return (length as u64 & 0xFFFF_FFFF) as u32;
-    }
-    let next = NEXT_GET_FILE_SIZE.load(Ordering::SeqCst);
-    if next == 0 {
-        return INVALID_FILE_SIZE;
-    }
-    let next: GetFileSizeFn = std::mem::transmute(next);
-    next(file, high)
-}
-
-unsafe extern "system" fn hooked_get_file_size_ex(file: HANDLE, size: *mut i64) -> i32 {
-    if let Some((length, _)) = handle::size_and_position(file as usize) {
-        if !size.is_null() {
-            *size = length as i64;
-        }
-        return 1;
-    }
-    let next = NEXT_GET_FILE_SIZE_EX.load(Ordering::SeqCst);
-    if next == 0 {
-        return 0;
-    }
-    let next: GetFileSizeExFn = std::mem::transmute(next);
-    next(file, size)
-}
-
-unsafe extern "system" fn hooked_set_file_pointer(
-    file: HANDLE,
-    distance: i32,
-    high: *mut i32,
-    method: u32,
-) -> u32 {
-    if let Some((_, position)) = handle::size_and_position(file as usize) {
-        let base = if method == FILE_BEGIN {
-            0isize
-        } else {
-            position as isize
-        };
-        let target = base.saturating_add(distance as isize).max(0) as usize;
-        if handle::seek(file as usize, target).is_some() {
-            if !high.is_null() {
-                *high = ((target as u64) >> 32) as i32;
-            }
-            return (target as u64 & 0xFFFF_FFFF) as u32;
-        }
-    }
-    let next = NEXT_SET_FILE_POINTER.load(Ordering::SeqCst);
-    if next == 0 {
-        return INVALID_FILE_SIZE;
-    }
-    let next: SetFilePointerFn = std::mem::transmute(next);
-    next(file, distance, high, method)
-}
-
-unsafe extern "system" fn hooked_set_file_pointer_ex(
-    file: HANDLE,
-    distance: i64,
-    new_position: *mut i64,
-    method: u32,
-) -> i32 {
-    if let Some((_, position)) = handle::size_and_position(file as usize) {
-        let base = if method == FILE_BEGIN {
-            0
-        } else {
-            position as i64
-        };
-        let target = base.saturating_add(distance).max(0) as usize;
-        if handle::seek(file as usize, target).is_some() {
-            if !new_position.is_null() {
-                *new_position = target as i64;
-            }
-            return 1;
-        }
-    }
-    let next = NEXT_SET_FILE_POINTER_EX.load(Ordering::SeqCst);
-    if next == 0 {
-        return 0;
-    }
-    let next: SetFilePointerExFn = std::mem::transmute(next);
-    next(file, distance, new_position, method)
-}
-
-unsafe extern "system" fn hooked_close_handle(object: HANDLE) -> i32 {
-    handle::unregister(object as usize);
-    let next = NEXT_CLOSE_HANDLE.load(Ordering::SeqCst);
-    if next == 0 {
-        return 0;
-    }
-    let next: CloseHandleFn = std::mem::transmute(next);
-    next(object)
 }
 
 #[cfg(test)]
@@ -493,10 +497,97 @@ mod tests {
     }
 
     #[test]
-    fn no_option_root_means_no_injection() {
-        // Given: VFS 尚未初始化。
-        // Then: 所有查询都不命中，调用方完全回落真实 API。
-        assert!(option_root_glob("C:\\x\\*").is_none());
-        assert!(package_key("C:\\x\\A200\\data.conf").is_none());
+    fn only_the_option_root_glob_is_claimed() {
+        // Given: option 根的各种通配写法。
+        // Then: 只有根那一级被认领；更深一层由重定向交给游戏自己枚举。
+        assert!(is_option_root_glob("c:\\mount\\option\\*"));
+        assert!(is_option_root_glob("C:\\mount\\option\\*.*"));
+        assert!(!is_option_root_glob("c:\\mount\\option\\A123\\*"));
+        assert!(!is_option_root_glob("c:\\mount\\option2\\*"));
+        assert!(!is_option_root_glob("c:\\mount\\option\\*\\data.conf"));
+        assert!(!is_option_root_glob("c:\\mount\\option\\A123\\data.conf"));
+    }
+
+    #[test]
+    fn find_data_name_round_trips_in_both_variants() {
+        // Given: 分别按 ANSI / 宽字符填充的 FIND_DATA 缓冲区。
+        let mut ansi = vec![0u8; FIND_DATA_SIZE_A];
+        let mut wide = vec![0u8; FIND_DATA_SIZE_W];
+
+        unsafe {
+            // When: 写入 option 根目录条目。
+            fill_find_data("A123", ansi.as_mut_ptr().cast(), false);
+            fill_find_data("A124", wide.as_mut_ptr().cast(), true);
+
+            // Then: 名称与目录属性都能读回。
+            assert_eq!(name_from(ansi.as_ptr().cast(), false), "A123");
+            assert_eq!(name_from(wide.as_ptr().cast(), true), "A124");
+            assert_eq!(
+                u32::from_le_bytes(ansi[0..4].try_into().unwrap()),
+                FILE_ATTRIBUTE_DIRECTORY
+            );
+            assert_eq!(
+                u32::from_le_bytes(wide[0..4].try_into().unwrap()),
+                FILE_ATTRIBUTE_DIRECTORY
+            );
+        }
+    }
+
+    #[test]
+    fn state_keeps_real_handle_after_injection() {
+        // Given: 一次带真实句柄的枚举。
+        let handle_value = next_synthetic_handle();
+        synthetic().lock().unwrap().insert(
+            handle_value,
+            SyntheticState {
+                injected: Vec::new(),
+                real: 0x1234,
+                real_done: false,
+                wide: false,
+            },
+        );
+
+        // Then: 关闭时取出真实句柄（调用方据此转交 FindClose），状态被清除。
+        unsafe {
+            assert_eq!(synthetic_close(handle_value as HANDLE), Some(1));
+        }
+        assert!(!synthetic().lock().unwrap().contains_key(&handle_value));
+    }
+
+    #[test]
+    fn virtual_roots_are_deferred_until_real_enumeration_ends() {
+        // Given: 一个真实枚举已结束的合成句柄，带两个虚拟根（倒序存放）。
+        let handle_value = next_synthetic_handle();
+        synthetic().lock().unwrap().insert(
+            handle_value,
+            SyntheticState {
+                injected: vec!["A124".to_owned(), "A123".to_owned()],
+                real: 0,
+                real_done: false,
+                wide: false,
+            },
+        );
+
+        // When: 真实句柄为 0（根目录不存在），逐个取虚拟条目。
+        let mut buffer = vec![0u8; FIND_DATA_SIZE_A];
+        let mut names = Vec::new();
+        unsafe {
+            while synthetic_next(handle_value as HANDLE, buffer.as_mut_ptr().cast()) == Some(1) {
+                names.push(name_from(buffer.as_ptr().cast(), false));
+            }
+        }
+
+        // Then: 按挂载顺序交出，取完后返回 0。
+        assert_eq!(names, vec!["A123".to_owned(), "A124".to_owned()]);
+    }
+
+    #[test]
+    fn unknown_handles_are_left_to_real_api() {
+        // Given: 不带合成标记的内核句柄。
+        // Then: 枚举与关闭都不认领。
+        unsafe {
+            assert_eq!(synthetic_next(0x1234 as HANDLE, std::ptr::null_mut()), None);
+            assert_eq!(synthetic_close(0x1234 as HANDLE), None);
+        }
     }
 }

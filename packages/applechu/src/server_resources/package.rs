@@ -1,14 +1,14 @@
-//! Option 资源包（zip 容器）解析与虚拟目录树
+//! Option 资源包（zip 容器）解析与解压
 //!
 //! 服务器下发的资源包是一个 zip，内容为单个 `AXXX` 目录树（与磁盘 option
-//! 同构，含 `data.conf`）。本模块把它解析为内存中的文件表，并提供目录枚举
-//! 与文件读取，供 VFS 层呈现给游戏。
+//! 同构，`data.conf` 可有可无）。本模块把它解析为文件表，再**解压到缓存目录**：
+//! 挂载与读取都交给 `platform/vfs` 与游戏本身，内存里不长期保留内容。
 //!
-//! 支持 zip 的 `store`（method 0）与 `deflate`（method 8）。deflate 需要
-//! 游戏自带的 `projClient::Deflate`（RTTI 0x1C5CC34），未接线前对 deflate
-//! 条目返回明确错误。
+//! 支持 zip 的 `store`（method 0）与 `deflate`（method 8）。deflate 复用游戏
+//! 自带的 zlib（`projClient::Deflate`，RTTI 0x1C5CC34）。
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 const EOCD_SIGNATURE: u32 = 0x0605_4b50;
 const CENTRAL_SIGNATURE: u32 = 0x0201_4b50;
@@ -19,17 +19,25 @@ const EOCD_SEARCH_LIMIT: usize = 22 + 0xffff;
 
 /// 内存中的 Option 资源包
 pub struct OptionPackage {
-    /// 以 `/` 分隔的相对路径 → 文件内容
-    files: BTreeMap<String, Vec<u8>>,
-    /// 根目录名（`AXXX`）
+    /// **小写**路径（`/` 分隔）→ 条目；Windows 路径不区分大小写，
+    /// 包内 `a189/data.conf` 与 `A189/data.conf` 必须视为同一条
+    files: BTreeMap<String, Entry>,
+    /// 根目录名（`AXXX`，保留原始大小写）
     root: String,
+}
+
+/// 单个文件条目
+struct Entry {
+    /// 原始大小写路径（`/` 分隔）
+    name: String,
+    data: Vec<u8>,
 }
 
 impl OptionPackage {
     /// 解析 zip 字节流
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         let central = locate_central_directory(bytes)?;
-        let mut files = BTreeMap::new();
+        let mut files: BTreeMap<String, Entry> = BTreeMap::new();
         let mut root: Option<String> = None;
         let mut cursor = central;
         let mut pending = 0usize;
@@ -67,6 +75,8 @@ impl OptionPackage {
             // 目录条目以 `/` 结尾，不需要建立文件
             if !name.ends_with('/') && !name.is_empty() {
                 let data = read_entry_data(bytes, local_offset, method, compressed_size)?;
+                // 解压前就挡住路径穿越，避免写出缓存目录之外
+                let key = safe_relative(&name)?;
                 if let Some(segment) = name.split('/').next() {
                     if !segment.is_empty() {
                         match &root {
@@ -79,7 +89,7 @@ impl OptionPackage {
                         }
                     }
                 }
-                files.insert(name, data);
+                files.insert(key, Entry { name, data });
             }
 
             pending += 1;
@@ -106,58 +116,61 @@ impl OptionPackage {
         &self.root
     }
 
-    /// 读取文件；路径以 `/` 分隔
-    pub fn read_file(&self, path: &str) -> Option<&[u8]> {
-        self.files.get(&normalize(path)).map(Vec::as_slice)
-    }
-
-    pub fn contains(&self, path: &str) -> bool {
-        self.files.contains_key(&normalize(path))
-    }
-
-    /// 列出目录下的直接子项（名称, 是否目录），按名称排序
-    pub fn list_dir(&self, path: &str) -> Vec<(String, bool)> {
-        let prefix = {
-            let normalized = normalize(path);
-            if normalized.is_empty() {
-                String::new()
-            } else {
-                format!("{normalized}/")
-            }
-        };
-
-        let mut seen: BTreeMap<String, bool> = BTreeMap::new();
-        for name in self.files.keys() {
-            let Some(rest) = name.strip_prefix(&prefix) else {
-                continue;
-            };
-            if rest.is_empty() {
-                continue;
-            }
-            match rest.split_once('/') {
-                Some((segment, _)) => {
-                    seen.insert(segment.to_owned(), true);
-                }
-                None => {
-                    seen.insert(rest.to_owned(), false);
-                }
-            }
-        }
-        seen.into_iter().collect()
-    }
-
-    /// 全部文件路径，用于日志诊断
-    pub fn paths(&self) -> impl Iterator<Item = &str> {
-        self.files.keys().map(String::as_str)
-    }
-
     pub fn file_count(&self) -> usize {
         self.files.len()
     }
+
+    /// 把包内文件全部解到 `directory` 下，返回写出数量
+    ///
+    /// 调用方负责先清干净目标目录，避免上一次的包留下孤儿文件。
+    pub fn extract_to(&self, directory: &Path) -> Result<usize, String> {
+        let mut written = 0usize;
+        for entry in self.files.values() {
+            let relative = relative_path(&entry.name)?;
+            let target = directory.join(relative);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+            }
+            std::fs::write(&target, &entry.data)
+                .map_err(|error| format!("cannot write {}: {error}", target.display()))?;
+            written += 1;
+        }
+        Ok(written)
+    }
 }
 
-fn normalize(path: &str) -> String {
-    path.trim_matches('/').replace('\\', "/")
+/// 校验并归一化条目路径，返回 zip 内相对路径（`/` 分隔、小写）
+///
+/// 拒绝绝对路径、盘符与 `..`，避免 zip 条目写出解压目录之外。
+fn safe_relative(name: &str) -> Result<String, String> {
+    let mut normalized = String::new();
+    for segment in name.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(format!("option package entry has an unsafe path: {name}"));
+        }
+        if segment.contains(':') || segment.contains('\\') {
+            return Err(format!("option package entry has an unsafe path: {name}"));
+        }
+        if !normalized.is_empty() {
+            normalized.push('/');
+        }
+        normalized.push_str(segment);
+    }
+    if normalized.is_empty() {
+        return Err("option package has an empty entry name".to_owned());
+    }
+    Ok(normalized.to_ascii_lowercase())
+}
+
+/// 条目路径 → 可直接 `join` 到解压目录的相对路径
+fn relative_path(name: &str) -> Result<PathBuf, String> {
+    safe_relative(name)?;
+    let mut path = PathBuf::new();
+    for segment in name.split('/') {
+        path.push(segment);
+    }
+    Ok(path)
 }
 
 /// 定位中央目录起始偏移
@@ -184,7 +197,7 @@ fn locate_central_directory(bytes: &[u8]) -> Result<usize, String> {
     }
 }
 
-/// 读取单个条目的数据（store 直接切片，deflate 暂不支持）
+/// 读取单个条目的数据（store 直接切片，deflate 交给游戏内嵌 zlib）
 fn read_entry_data(
     bytes: &[u8],
     local_offset: usize,
@@ -223,7 +236,7 @@ fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
 }
 
-/// 测试用的最小 zip 构造器（store 模式），与 `crash_zip` 的写出逻辑同源
+/// 测试用的最小 zip 构造器（store 模式）
 #[cfg(test)]
 pub fn build_store_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
     let mut buffer = Vec::new();
@@ -296,34 +309,9 @@ mod tests {
         // Given: 一个单根 Option 包。
         let package = OptionPackage::parse(&sample()).expect("应解析成功");
 
-        // Then: 根目录与文件内容正确。
+        // Then: 根目录与文件数量正确。
         assert_eq!(package.root(), "A200");
         assert_eq!(package.file_count(), 4);
-        assert_eq!(
-            package.read_file("A200/data.conf"),
-            Some(&b"[Version]\nName = CHUNITHM\n"[..])
-        );
-    }
-
-    #[test]
-    fn lists_directories_not_deep_files() {
-        // Given: 已解析的 Option 包。
-        let package = OptionPackage::parse(&sample()).unwrap();
-
-        // When: 枚举包根与 `A200` 目录。
-        let root = package.list_dir("");
-        let inner = package.list_dir("A200");
-
-        // Then: 根下只有 AXXX 目录；其内只返回直接子项，目录被标记。
-        assert_eq!(root, vec![("A200".to_owned(), true)]);
-        assert_eq!(
-            inner,
-            vec![
-                ("data.conf".to_owned(), false),
-                ("music".to_owned(), true),
-                ("releaseTag".to_owned(), true),
-            ]
-        );
     }
 
     #[test]
@@ -344,5 +332,42 @@ mod tests {
         // Then: 解析失败而不是 panic。
         assert!(OptionPackage::parse(truncated).is_err());
         assert!(OptionPackage::parse(b"").is_err());
+    }
+
+    #[test]
+    fn rejects_entries_escaping_the_extraction_root() {
+        // Given: 试图穿越目录的 zip 条目。
+        // Then: 解析即失败，不会写出解压目录之外。
+        assert!(OptionPackage::parse(&build_store_zip(&[("A200/../../evil.txt", b"x")])).is_err());
+        assert!(OptionPackage::parse(&build_store_zip(&[("C:/evil.txt", b"x")])).is_err());
+        assert!(OptionPackage::parse(&build_store_zip(&[("/abs.txt", b"x")])).is_err());
+    }
+
+    #[test]
+    fn extracts_the_tree_under_the_target_directory() {
+        // Given: 一个含嵌套目录的单根包。
+        let package = OptionPackage::parse(&sample()).unwrap();
+        let directory =
+            std::env::temp_dir().join(format!("applechu-option-extract-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+
+        // When: 解压到目标目录。
+        let written = package.extract_to(&directory).expect("解压应成功");
+
+        // Then: 文件按包内层级落地，内容一致。
+        assert_eq!(written, 4);
+        assert_eq!(
+            std::fs::read(directory.join("A200/music/music9001/9001_03.c2s")).unwrap(),
+            b"\x01\x02\x03"
+        );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn entry_paths_are_lowercased_for_lookup() {
+        // Given: 大小写不一致的条目路径。
+        // Then: 归一化后一致，且共享同一个 map key（后者覆盖前者）。
+        assert_eq!(safe_relative("A200/Data.Conf").unwrap(), "a200/data.conf");
+        assert_eq!(safe_relative("a200/data.conf").unwrap(), "a200/data.conf");
     }
 }
