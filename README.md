@@ -1,6 +1,6 @@
 ﻿# AppleChu
 
-集成 Mod 加载器的 CHUNITHM 启动代理与功能补丁
+集成 Mod 加载器的 CHUNITHM 启动代理与功能补丁。
 
 <p align="center">
   <a href="#许可证"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"></a>
