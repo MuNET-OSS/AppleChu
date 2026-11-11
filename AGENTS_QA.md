@@ -17,4 +17,5 @@
 - `xwin splat` 默认会移动 `unpack` 缓存，不能并行给多个架构复用同一个 cache；应加 `--copy`，并给每个架构使用独立的输出目录。
 - MSVC 目标还需要显式设置 `CARGO_TARGET_<TRIPLE>_LINKER=lld-link`，只配 `RUSTFLAGS` 会报找不到 `link.exe`。
 - build script 需要真实 PE 转发 DLL；构建 i686 时设置 `APPLECHU_WINHTTP_DEV_DLL`，构建 x86_64 时设置 `APPLECHU_WINMM_DEV_DLL`，可分别指向 Wine 对应架构的 DLL。
+- `cargo xwin build` 的 splat（`~/.cache/cargo-xwin/xwin`）只展开 x86_64 库，i686 链接会报 `lld-link: error: could not open 'dbghelp.lib'`；i686 要用已有的 `~/.cache/applechu/winsdk-x86` 手工传 `-Lnative` 并设 `CARGO_TARGET_I686_PC_WINDOWS_MSVC_LINKER=lld-link`。
 - Windows 测试可先 `cargo test --no-run`，再用项目内独立的 `WINEPREFIX` 直接执行 test exe；完整 `applechu` 套件会在 Wine 的 D3D9/内存补丁测试里 abort，配置相关定向测试可以正常执行。

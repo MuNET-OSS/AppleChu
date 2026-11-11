@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use once_cell::sync::OnceCell;
 use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Storage::FileSystem::WriteFile;
 use windows_sys::Win32::System::Console::{
     AllocConsole, FreeConsole, GetConsoleMode, GetStdHandle, SetConsoleMode, SetConsoleOutputCP,
     SetConsoleTitleW, WriteConsoleW, ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
@@ -70,20 +71,18 @@ pub(crate) fn initialize(base_dir: &str) -> bool {
     let _ = std::fs::remove_file(std::path::Path::new(base_dir).join("bootstrap_diag.log"));
     let _ = LOG_PATH.set(log_path);
 
+    let inherited = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+    let inherited = (!inherited.is_null() && inherited != INVALID_HANDLE_VALUE).then_some(inherited);
+
     if std::env::var_os(winhttp::amdaemon::INHERIT_CONSOLE_ENV).is_some() {
-        let handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
-        let ready = set_output(handle, false);
-        print_banner();
-        crate::crash::install();
-        info("AM Daemon proxy started on the game console");
-        return ready;
+        return start_on(inherited, "AM Daemon proxy started on the game console");
     }
 
-    if winhttp::amdaemon::hide_window(base_dir) {
-        print_banner();
-        crate::crash::install();
-        info("AM Daemon proxy started");
-        return true;
+    // 继承来的控制台/管道属于父进程（cmd 窗口、wine 终端），不是自己开的窗口，
+    // 既不需要隐藏也没法隐藏：HideWindow 只该拦住「新建控制台窗口」这一步。
+    // Wine 下 AttachConsole(父进程) 不可用，父进程是 Linux shell，没有 Windows 控制台可挂
+    if inherited.is_some() || winhttp::amdaemon::hide_window(base_dir) {
+        return start_on(inherited, "AM Daemon proxy started");
     }
 
     unsafe {
@@ -101,6 +100,17 @@ pub(crate) fn initialize(base_dir: &str) -> bool {
     crate::crash::install();
     info("AM Daemon proxy started");
     true
+}
+
+fn start_on(handle: Option<HANDLE>, message: &str) -> bool {
+    // None 表示有意不往控制台写（只落文件日志），不算失败
+    let ready = handle
+        .map(|handle| set_output(handle, false))
+        .unwrap_or(true);
+    print_banner();
+    crate::crash::install();
+    info(message);
+    ready
 }
 
 fn set_output(handle: HANDLE, configure: bool) -> bool {
@@ -223,13 +233,24 @@ fn write_with_body(level: LogLevel, message: &str, body: Option<&str>) {
         let console_text = console_text.replace('\n', "\r\n");
         let line = console_text.encode_utf16().collect::<Vec<_>>();
         let mut written = 0;
-        let _ = WriteConsoleW(
+        if WriteConsoleW(
             handle,
             line.as_ptr(),
             line.len() as u32,
             &mut written,
             std::ptr::null(),
-        );
+        ) == 0
+        {
+            // 句柄被重定向到文件或管道时不是控制台，WriteConsoleW 必然失败，按字节写回退
+            let plain = text.replace('\n', "\r\n");
+            let _ = WriteFile(
+                handle,
+                plain.as_ptr(),
+                plain.len() as u32,
+                &mut written,
+                std::ptr::null_mut(),
+            );
+        }
     }
 }
 
