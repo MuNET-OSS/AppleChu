@@ -72,7 +72,8 @@ pub(crate) fn initialize(base_dir: &str) -> bool {
     let _ = LOG_PATH.set(log_path);
 
     let inherited = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
-    let inherited = (!inherited.is_null() && inherited != INVALID_HANDLE_VALUE).then_some(inherited);
+    let inherited =
+        (!inherited.is_null() && inherited != INVALID_HANDLE_VALUE).then_some(inherited);
 
     if std::env::var_os(winhttp::amdaemon::INHERIT_CONSOLE_ENV).is_some() {
         return start_on(inherited, "AM Daemon proxy started on the game console");
