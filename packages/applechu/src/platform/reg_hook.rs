@@ -5,12 +5,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use once_cell::sync::{Lazy, OnceCell};
+use windows_sys::Win32::System::Registry::{RegCloseKey, RegOpenKeyExA, RegOpenKeyExW, HKEY};
 
 use crate::config::Config;
 use crate::iohook::hook_table::{hook_table_apply, null_module, HookSymbol};
 use crate::iohook::proc_addr;
 use crate::platform::winapi::{self, RegQueryValueExAFn, RegQueryValueExWFn};
 use crate::util::api::Api;
+use crate::util::win32::handle_from_value;
 
 const fn predefined_hkey(value: u32) -> usize {
     value as i32 as isize as usize
@@ -38,6 +40,7 @@ const SOFTWARE_KEY: [u16; 9] = [
     0,
 ];
 
+type RegOpenKeyExAFn = unsafe extern "system" fn(usize, *const c_char, u32, u32, *mut usize) -> u32;
 type RegOpenKeyExWFn = unsafe extern "system" fn(usize, *const u16, u32, u32, *mut usize) -> u32;
 type RegCreateKeyExWFn = unsafe extern "system" fn(
     usize,
@@ -91,6 +94,7 @@ static KEYS: Lazy<Mutex<Vec<VirtualKey>>> = Lazy::new(|| Mutex::new(Vec::new()))
 static HANDLES: Lazy<Mutex<HashMap<usize, usize>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static API: OnceCell<Api> = OnceCell::new();
 
+static ORIG_OPEN_KEY_EX_A: AtomicUsize = AtomicUsize::new(0);
 static ORIG_OPEN_KEY_EX_W: AtomicUsize = AtomicUsize::new(0);
 static ORIG_CREATE_KEY_EX_W: AtomicUsize = AtomicUsize::new(0);
 static ORIG_CLOSE_KEY: AtomicUsize = AtomicUsize::new(0);
@@ -101,6 +105,7 @@ static ORIG_GET_VALUE_W: AtomicUsize = AtomicUsize::new(0);
 static ORIG_QUERY_INFO_KEY_W: AtomicUsize = AtomicUsize::new(0);
 static ORIG_ENUM_VALUE_W: AtomicUsize = AtomicUsize::new(0);
 
+static mut ORIG_OPEN_KEY_EX_A_PTR: *const () = ptr::null();
 static mut ORIG_OPEN_KEY_EX_W_PTR: *const () = ptr::null();
 static mut ORIG_CREATE_KEY_EX_W_PTR: *const () = ptr::null();
 static mut ORIG_CLOSE_KEY_PTR: *const () = ptr::null();
@@ -199,6 +204,11 @@ fn install_hooks(api: &Api) {
     unsafe {
         let symbols = [
             HookSymbol {
+                name: "RegOpenKeyExA",
+                patch: hooked_reg_open_key_ex_a as *const (),
+                original: ptr::addr_of_mut!(ORIG_OPEN_KEY_EX_A_PTR),
+            },
+            HookSymbol {
                 name: "RegOpenKeyExW",
                 patch: hooked_reg_open_key_ex_w as *const (),
                 original: ptr::addr_of_mut!(ORIG_OPEN_KEY_EX_W_PTR),
@@ -256,6 +266,7 @@ fn install_hooks(api: &Api) {
 fn sync_originals() {
     // SAFETY: 原函数槽由 hook 安装过程写入，随后通过原子变量发布给并发调用者。
     unsafe {
+        ORIG_OPEN_KEY_EX_A.store(ORIG_OPEN_KEY_EX_A_PTR as usize, Ordering::SeqCst);
         ORIG_OPEN_KEY_EX_W.store(ORIG_OPEN_KEY_EX_W_PTR as usize, Ordering::SeqCst);
         ORIG_CREATE_KEY_EX_W.store(ORIG_CREATE_KEY_EX_W_PTR as usize, Ordering::SeqCst);
         ORIG_CLOSE_KEY.store(ORIG_CLOSE_KEY_PTR as usize, Ordering::SeqCst);
@@ -266,6 +277,37 @@ fn sync_originals() {
         ORIG_QUERY_INFO_KEY_W.store(ORIG_QUERY_INFO_KEY_W_PTR as usize, Ordering::SeqCst);
         ORIG_ENUM_VALUE_W.store(ORIG_ENUM_VALUE_W_PTR as usize, Ordering::SeqCst);
     }
+}
+
+unsafe extern "system" fn hooked_reg_open_key_ex_a(
+    parent: usize,
+    subkey: *const c_char,
+    options: u32,
+    access: u32,
+    out: *mut usize,
+) -> u32 {
+    if out.is_null() {
+        return ERROR_INVALID_PARAMETER;
+    }
+    let name = winapi::cstr_to_string(subkey).unwrap_or_default();
+    if let Some(key_id) = resolve_named_key_id(parent, &name) {
+        return open_virtual_key(key_id, out);
+    }
+    if key_for_handle(parent).is_some() {
+        return winapi::ERROR_FILE_NOT_FOUND;
+    }
+    let original_addr = ORIG_OPEN_KEY_EX_A.load(Ordering::SeqCst);
+    if original_addr == 0 {
+        return RegOpenKeyExA(
+            handle_from_value(parent),
+            subkey.cast(),
+            options,
+            access,
+            out.cast(),
+        );
+    }
+    let original: RegOpenKeyExAFn = std::mem::transmute(original_addr);
+    original(parent, subkey, options, access, out)
 }
 
 unsafe extern "system" fn hooked_reg_open_key_ex_w(
@@ -492,9 +534,10 @@ unsafe extern "system" fn hooked_reg_enum_value_w(
 }
 
 unsafe fn open_virtual_key(key_id: usize, out: *mut usize) -> u32 {
-    let mut token = 0usize;
-    let result = original_open_key_ex_w(
-        HKEY_LOCAL_MACHINE,
+    // Some games import only RegOpenKeyExA. Open the backing handle independently of the W hook.
+    let mut token: HKEY = ptr::null_mut();
+    let result = RegOpenKeyExW(
+        handle_from_value(HKEY_LOCAL_MACHINE),
         SOFTWARE_KEY.as_ptr(),
         0,
         KEY_READ,
@@ -502,9 +545,9 @@ unsafe fn open_virtual_key(key_id: usize, out: *mut usize) -> u32 {
     );
     if result == winapi::ERROR_SUCCESS {
         if let Ok(mut handles) = HANDLES.lock() {
-            handles.insert(token, key_id);
+            handles.insert(token.addr(), key_id);
         }
-        *out = token;
+        *out = token.addr();
     }
     result
 }
@@ -582,7 +625,11 @@ unsafe fn write_raw_value(
 
 unsafe fn resolve_key_id(parent: usize, subkey: *const u16) -> Option<usize> {
     let subkey = winapi::wide_to_string(subkey).unwrap_or_default();
-    let (root, path) = resolve_candidate(parent, &subkey)?;
+    resolve_named_key_id(parent, &subkey)
+}
+
+fn resolve_named_key_id(parent: usize, subkey: &str) -> Option<usize> {
+    let (root, path) = resolve_candidate(parent, subkey)?;
     KEYS.lock()
         .ok()?
         .iter()
@@ -697,7 +744,7 @@ unsafe fn original_create_key_ex_w(
 unsafe fn original_close_key(handle: usize) -> u32 {
     let original_addr = ORIG_CLOSE_KEY.load(Ordering::SeqCst);
     if original_addr == 0 {
-        return winapi::ERROR_SUCCESS;
+        return RegCloseKey(handle_from_value(handle));
     }
     let original: RegCloseKeyFn = std::mem::transmute(original_addr);
     original(handle)
