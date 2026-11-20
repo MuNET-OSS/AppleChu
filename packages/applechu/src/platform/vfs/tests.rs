@@ -1,7 +1,7 @@
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::select_option_path;
+use super::{option_override, option_target, select_option_path, set_option_override, VfsConfig};
 
 #[test]
 fn configured_option_directory_wins_when_non_empty() {
@@ -54,6 +54,71 @@ fn missing_candidates_keep_configured_option_path() {
     assert_eq!(select_option_path(&root, &configured), configured);
 
     remove_test_tree(&root);
+}
+
+#[test]
+fn option_override_redirects_only_the_mounted_subtree() {
+    // Given: 一个注册了重定向的自定义 option 根。
+    let config = test_config("override-only-mounted");
+    set_option_override("a9z1", "D:\\cache\\ServerResources.d\\A9Z1");
+
+    // Then: 该子树的任何路径都指向解压目录——无论游戏走源路径
+    //       (`c:\mount\option\...`) 还是 mount 根 (`<option>\...`) 拼路径。
+    let mounted = |rest: &str| {
+        std::path::PathBuf::from(format!("D:\\cache\\ServerResources.d\\A9Z1\\{rest}"))
+    };
+    assert_eq!(
+        option_target(&config, "a9z1\\music\\*"),
+        mounted("music\\*")
+    );
+    assert_eq!(
+        option_target(&config, "a9z1\\data.conf"),
+        mounted("data.conf")
+    );
+    assert_eq!(
+        option_override(&config, "d:\\game\\option\\a9z1\\music"),
+        Some(mounted("music"))
+    );
+
+    // 其他 option、option 根本身，以及未挂载的选项，行为完全不变。
+    assert_eq!(
+        option_target(&config, "a001\\music"),
+        std::path::PathBuf::from("D:\\game\\option\\a001\\music")
+    );
+    assert_eq!(
+        option_target(&config, ""),
+        std::path::PathBuf::from(&config.option)
+    );
+    assert_eq!(option_override(&config, "d:\\game\\option\\a001"), None);
+    assert_eq!(option_override(&config, "d:\\game\\option"), None);
+
+    set_option_override("a9z1", "");
+}
+
+#[test]
+fn clearing_an_override_restores_the_plain_option_root() {
+    // Given: 先注册再注销同名重定向。
+    let config = test_config("override-clear");
+    set_option_override("a9z2", "D:\\cache\\A9Z2");
+    set_option_override("a9z2", "");
+
+    // Then: 完全回到配置的 option 根，行为与没有覆盖时一致。
+    assert_eq!(
+        option_target(&config, "a9z2\\*"),
+        std::path::PathBuf::from("D:\\game\\option\\a9z2\\*")
+    );
+    assert_eq!(option_override(&config, "d:\\game\\option\\a9z2"), None);
+}
+
+/// 测试用的最小 VFS 配置（`option` 指向游戏目录下的 option）
+fn test_config(_case: &str) -> VfsConfig {
+    VfsConfig {
+        amfs: "D:\\game\\amfs\\".to_owned(),
+        option: "D:\\game\\option\\".to_owned(),
+        appdata: "D:\\game\\appdata\\".to_owned(),
+        nthome: "C:\\Users\\Default\\".to_owned(),
+        allow_amfs_downloads: false,
+    }
 }
 
 fn temporary_directory(case: &str) -> std::path::PathBuf {

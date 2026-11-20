@@ -33,6 +33,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_Graphics_Gdi",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinHttp",
     "Win32_Networking_WinSock",
     "Win32_Security",
     "Win32_Security_Cryptography",

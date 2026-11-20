@@ -33,6 +33,8 @@ pub mod platform;
 #[cfg(target_arch = "x86")]
 mod proxy;
 mod schema_embed;
+#[cfg(target_arch = "x86")]
+mod server_resources;
 mod slider;
 mod system_config;
 mod unlocker;

@@ -262,6 +262,23 @@ impl Api {
             .is_some_and(|func| unsafe { func(target as *mut c_void) == 0 })
     }
 
+    /// 向订阅了 `topic` 的模组广播一段字节
+    ///
+    /// 把游戏侧事件（如网络响应）暴露给 chu-abi 模组；无订阅者时为空操作。
+    pub fn publish(&self, topic: &str, data: &[u8]) -> bool {
+        let Ok(topic) = CString::new(topic) else {
+            return false;
+        };
+        let Ok(size) = u32::try_from(data.len()) else {
+            return false;
+        };
+        self.raw()
+            .and_then(|api| api.publish)
+            .is_some_and(|func| unsafe {
+                func(topic.as_ptr(), data.as_ptr().cast_mut().cast(), size) == 0
+            })
+    }
+
     pub fn register_present_callback(&self, cb: chu_abi::ChuModPresentCallback) -> bool {
         self.raw()
             .and_then(|api| api.register_present_callback)

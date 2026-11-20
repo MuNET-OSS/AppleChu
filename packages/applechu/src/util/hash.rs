@@ -12,7 +12,8 @@ pub fn sha256_file(path: impl AsRef<std::path::Path>) -> Option<String> {
     Some(digest.iter().map(|byte| format!("{byte:02X}")).collect())
 }
 
-fn sha256(data: &[u8]) -> Option<[u8; 32]> {
+/// 计算任意字节序列的 SHA-256（用于资源包验签与完整性比对）
+pub fn sha256(data: &[u8]) -> Option<[u8; 32]> {
     unsafe {
         let mut algorithm: BCRYPT_ALG_HANDLE = std::ptr::null_mut();
         if BCryptOpenAlgorithmProvider(&mut algorithm, BCRYPT_SHA256_ALGORITHM, std::ptr::null(), 0)

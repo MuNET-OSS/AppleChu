@@ -1,4 +1,5 @@
 pub mod api;
+pub mod crypto;
 pub mod hash;
 pub mod iat_hook;
 pub mod logging;
